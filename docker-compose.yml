@@ -1,0 +1,92 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-timeweaver-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-timeweaver}
+      MYSQL_USER: ${MYSQL_USER:-timeweaver}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-timeweaver}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  server:
+    build:
+      context: ./server
+    environment:
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-*}
+      SECRET_KEY: ${SECRET_KEY:-change-me-for-production}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      CONTEXT: ${CONTEXT:-/time_weaver}
+      DB_TYPE: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${MYSQL_USER:-timeweaver}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-timeweaver}
+      DB_DATABASE: ${MYSQL_DATABASE:-timeweaver}
+      DB_SCHEMA: ${MYSQL_DATABASE:-timeweaver}
+      DB_LOG: ${DB_LOG:-true}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+    ports:
+      - "${SERVER_PORT:-8000}:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  ui:
+    build:
+      context: ./client
+      args:
+        API_SERVER_URL: ${API_SERVER_URL:-http://127.0.0.1:8000/time_weaver}
+    ports:
+      - "${UI_PORT:-10808}:80"
+    depends_on:
+      - server
+
+  agent:
+    profiles: ["agent"]
+    build:
+      context: ./agent
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${MYSQL_USER:-timeweaver}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-timeweaver}
+      DB_DATABASE: ${MYSQL_DATABASE:-timeweaver}
+      DB_SCHEMA: ${MYSQL_DATABASE:-timeweaver}
+      DEVICE_NAME: ${DEVICE_NAME:-test}
+      RESCHEDULE_YEAR: ${RESCHEDULE_YEAR:-*}
+      RESCHEDULE_MONTH: ${RESCHEDULE_MONTH:-*}
+      RESCHEDULE_DAY: ${RESCHEDULE_DAY:-*}
+      RESCHEDULE_HOUR: ${RESCHEDULE_HOUR:-*}
+      RESCHEDULE_MINUTE: ${RESCHEDULE_MINUTE:-*/5}
+      RESCHEDULE_SECOND: ${RESCHEDULE_SECOND:-0}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      server:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  mysql-data:

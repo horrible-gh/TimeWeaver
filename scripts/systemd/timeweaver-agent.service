@@ -1,0 +1,16 @@
+[Unit]
+Description=TimeWeaver Scheduler Agent
+After=network-online.target timeweaver-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__TIMEWEAVER_USER__
+WorkingDirectory=__TIMEWEAVER_ROOT__/agent
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__TIMEWEAVER_ROOT__/agent/.venv/bin/python timeweaver.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
