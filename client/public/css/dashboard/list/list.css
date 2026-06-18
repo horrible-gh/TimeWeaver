@@ -1,0 +1,177 @@
+/* 게시판 컨테이너 */
+.board-container {
+
+  width: 100%;
+  margin: auto;
+  /* padding: 20px; */
+  /* background-color: #f9f9f9; */
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.board-container>h2 {
+  font-size: 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+/* 테이블 스타일 */
+.board-table {
+  width: 1100px;
+  border-collapse: collapse;
+  margin-top: 20px;
+  min-height: 400px;
+  /* ✅ 최소 높이 유지 */
+  justify-content: space-between;
+  /* ✅ 테이블과 페이징을 일정한 간격으로 배치 */
+}
+
+@media (max-width: 1200px) {
+  .board-table {
+    width: 100%;
+  }
+}
+
+.board-table thead {
+  background-color: #001b4f;
+  color: white;
+}
+
+.board-table th,
+.board-table td {
+  padding: 12px;
+  border: 1px solid #ddd;
+  text-align: left;
+}
+
+.board-table th {
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.board-table th:hover {
+  background-color: #0056b3;
+  color: white;
+}
+
+.board-table tbody tr:nth-child(even) {
+  background-color: #050505;
+}
+
+.board-table tbody tr:hover {
+  background-color: #353535;
+}
+
+/* 링크 스타일 */
+.board-table a {
+  color: #407bff;
+  text-decoration: none;
+}
+
+.board-table a:hover {
+  text-decoration: underline;
+}
+
+/* 테이블 안에서 메시지 축약 */
+.message-short {
+  cursor: pointer;
+  color: blue;
+  text-decoration: underline;
+}
+
+/* ✅ 필터 폼 스타일 (가로 길이 고정 & 자동 줄바꿈) */
+.filters {
+  width: 1100px;
+  display: flex;
+  flex-wrap: wrap;
+  /* ✅ 길면 자동 줄바꿈 */
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 1200px) {
+  .filters {
+    width: 100%;
+  }
+}
+
+/* ✅ 각 필터 요소의 기본 크기 설정 */
+.filters label {
+  font-weight: bold;
+}
+
+.filters select,
+.filters input {
+  padding: 5px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  min-width: 150px;
+  /* ✅ 최소 너비 설정하여 UI 정리 */
+}
+
+/* ✅ 검색 초기화 버튼 스타일 */
+.reset-button {
+  background-color: #dc3545;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  white-space: nowrap;
+  /* ✅ 버튼이 잘리지 않도록 설정 */
+}
+
+.reset-button:hover {
+  background-color: #c82333;
+}
+
+
+/* ✅ 버튼 기본 스타일 */
+button {
+  font-size: 14px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: 0.2s ease-in-out;
+}
+
+/* ✅ 추가 버튼 (파란색) */
+.add-button {
+  background-color: #006baf;
+  color: white;
+  font-weight: bold;
+}
+
+.add-button:hover {
+  background-color: #0056b3;
+}
+
+/* ✅ 수정 버튼 (노란색) */
+.edit-button {
+  background-color: #ffc107;
+  color: black;
+}
+
+.edit-button:hover {
+  background-color: #e0a800;
+}
+
+/* ✅ 삭제 버튼 (빨간색) */
+.delete-button {
+  background-color: #dc3545;
+  color: white;
+}
+
+.delete-button:hover {
+  background-color: #c82333;
+}
+
+/* ✅ 버튼 컨테이너 (수직 정렬) */
+.button-group {
+  display: flex;
+  flex-direction: column; /* ✅ 버튼을 세로로 정렬 */
+  gap: 5px; /* 버튼 사이 간격 */
+  align-items: flex-start; /* 왼쪽 정렬 */
+}
