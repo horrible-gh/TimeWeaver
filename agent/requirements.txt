@@ -1,0 +1,5 @@
+LogAssist==1.1.1
+pymysql==1.1.1
+pycryptodome==3.21.0
+apscheduler==3.11.0
+sqloader==0.1.0

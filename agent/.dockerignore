@@ -1,0 +1,7 @@
+.git
+.venv
+__pycache__
+*.pyc
+conf/server.json
+conf/time_weaver.json
+log

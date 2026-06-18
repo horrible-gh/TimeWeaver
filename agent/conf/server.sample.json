@@ -1,0 +1,45 @@
+{
+    "log": {
+        "base": {
+            "name": "MyLogger",
+            "level": "debug"
+        },
+        "console": {
+            "level": "debug",
+            "format": "%(asctime)s[%(levelname)s]%(message)s"
+        },
+        "file_timed": {
+            "level": "debug",
+            "format": "%(asctime)s[%(levelname)s]%(message)s",
+            "file_name": "log/server.log",
+            "when": "midnight",
+            "interval": 1,
+            "backup_count": 30
+        }
+    },
+    "databases": {
+        "time_weaver": {
+            "database": {
+                "type": "mysql",
+                "mysql": {
+                    "host": "127.0.0.1",
+                    "port": 3306,
+                    "user": "<DB_USER>",
+                    "password": "<DB_PASSWORD>",
+                    "database": "<DB_NAME>",
+                    "schema": "<DB_SCHEMA>",
+                    "log": true,
+                    "sqloder": "res/time_weaver/sql/sqloader"
+                },
+                "migration": {
+                    "auto_migration": true,
+                    "migration_path": "res/time_weaver/sql/migration"
+                },
+                "service": {
+                    "log": true,
+                    "sqloder": "res/time_weaver/sql/sqloader"
+                }
+            }
+        }
+    }
+}

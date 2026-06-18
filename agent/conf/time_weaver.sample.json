@@ -1,0 +1,11 @@
+{
+    "device": "test",
+    "reschedule": {
+        "year": "*",
+        "month": "*",
+        "day": "*",
+        "hour": "*",
+        "minute": "*/5",
+        "second": "0"
+    }
+}
