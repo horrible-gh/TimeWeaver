@@ -21,7 +21,13 @@ DB_PATH="${DB_PATH:-}"
 SECRET_KEY="${SECRET_KEY:-}"
 ALLOWED_ORIGIN="${ALLOWED_ORIGIN:-}"
 CONTEXT="${CONTEXT:-}"
+ACCESS_TOKEN_EXPIRE_MINUTES="${ACCESS_TOKEN_EXPIRE_MINUTES:-}"
+REDIS_HOST="${REDIS_HOST:-}"
+REDIS_PORT="${REDIS_PORT:-}"
+REDIS_DB="${REDIS_DB:-}"
 DEVICE_NAME="${DEVICE_NAME:-}"
+RESCHEDULE_MINUTE="${RESCHEDULE_MINUTE:-}"
+LOG_LEVEL="${LOG_LEVEL:-}"
 API_URL="${API_URL:-}"
 
 usage() {
@@ -38,7 +44,11 @@ Config (optional; installer prompts interactively otherwise, sensible defaults a
   --secret-key KEY                      Server SECRET_KEY (auto-generated if omitted)
   --allowed-origin ORIGIN               Server CORS origin (default *)
   --context PATH                        Server API context (default /time_weaver)
+  --access-token-expire-minutes N       JWT lifetime in minutes (default 30)
+  --redis-host / --redis-port / --redis-db   Optional Redis blacklist store (defaults localhost:6379/0)
   --device-name NAME                    Agent device name (default: hostname)
+  --reschedule-minute CRON              Agent poll cron minute field (default */5)
+  --log-level LEVEL                     Agent log level (default debug)
   --api-url URL                         Client API server URL
 
 Behaviour:
@@ -65,7 +75,13 @@ while [[ $# -gt 0 ]]; do
     --secret-key) SECRET_KEY="${2:?}"; shift 2 ;;
     --allowed-origin) ALLOWED_ORIGIN="${2:?}"; shift 2 ;;
     --context) CONTEXT="${2:?}"; shift 2 ;;
+    --access-token-expire-minutes) ACCESS_TOKEN_EXPIRE_MINUTES="${2:?}"; shift 2 ;;
+    --redis-host) REDIS_HOST="${2:?}"; shift 2 ;;
+    --redis-port) REDIS_PORT="${2:?}"; shift 2 ;;
+    --redis-db) REDIS_DB="${2:?}"; shift 2 ;;
     --device-name) DEVICE_NAME="${2:?}"; shift 2 ;;
+    --reschedule-minute) RESCHEDULE_MINUTE="${2:?}"; shift 2 ;;
+    --log-level) LOG_LEVEL="${2:?}"; shift 2 ;;
     --api-url) API_URL="${2:?}"; shift 2 ;;
     --reconfigure) RECONFIGURE=1; shift ;;
     --non-interactive) NONINTERACTIVE=1; shift ;;
@@ -138,6 +154,12 @@ write_server_env() {
   [[ -z "$secret" ]] && secret="$(gen_secret)"
   local origin="${ALLOWED_ORIGIN:-*}"
   local ctx="${CONTEXT:-/time_weaver}"
+  local expire="${ACCESS_TOKEN_EXPIRE_MINUTES:-30}"
+  # Redis is optional at runtime (server falls back to an in-process token
+  # blacklist). These values are only used when a Redis server is present.
+  local rhost="${REDIS_HOST:-localhost}"
+  local rport="${REDIS_PORT:-6379}"
+  local rdb="${REDIS_DB:-0}"
 
   local h p u pw db sc dbpath
   if [[ "$db_type" == "mysql" ]]; then
@@ -156,7 +178,7 @@ write_server_env() {
   cat > "$target" <<EOF
 ALLOWED_ORIGIN=$origin
 SECRET_KEY=$secret
-ACCESS_TOKEN_EXPIRE_MINUTES=30
+ACCESS_TOKEN_EXPIRE_MINUTES=$expire
 CONTEXT=$ctx
 DB_TYPE=$db_type
 DB_HOST=$h
@@ -166,11 +188,11 @@ DB_PASSWORD=$pw
 DB_DATABASE=$db
 DB_SCHEMA=$sc
 DB_PATH=$dbpath
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_DB=0
+REDIS_HOST=$rhost
+REDIS_PORT=$rport
+REDIS_DB=$rdb
 EOF
-  echo "Wrote server/.env (DB_TYPE=$db_type, generated SECRET_KEY)."
+  echo "Wrote server/.env (DB_TYPE=$db_type, generated SECRET_KEY, all keys populated)."
 }
 
 write_agent_config() {
@@ -189,8 +211,10 @@ write_agent_config() {
   db="${DB_NAME:-$(ask "Agent DB name" "timeweaver")}"
   sc="${DB_SCHEMA:-$(ask "Agent DB schema (blank if none)" "")}"
   dev="${DEVICE_NAME:-$(ask "Agent device name" "$(hostname)")}"
+  local level="${LOG_LEVEL:-debug}"
+  local rmin="${RESCHEDULE_MINUTE:-*/5}"
 
-  DB_HOST="$h" DB_PORT="$p" DB_USER="$u" DB_PASSWORD="$pw" DB_NAME="$db" DB_SCHEMA="$sc" \
+  DB_HOST="$h" DB_PORT="$p" DB_USER="$u" DB_PASSWORD="$pw" DB_NAME="$db" DB_SCHEMA="$sc" LOG_LEVEL="$level" \
   "$PYTHON_BIN" - "$ROOT_DIR/agent/conf/server.sample.json" "$server_target" <<'PY'
 import json, os, sys
 src, dst = sys.argv[1], sys.argv[2]
@@ -204,18 +228,23 @@ my.update({
     "database": os.environ["DB_NAME"],
     "schema": os.environ["DB_SCHEMA"],
 })
+level = os.environ["LOG_LEVEL"]
+for key in ("base", "console", "file_timed"):
+    cfg["log"][key]["level"] = level
 json.dump(cfg, open(dst, "w"), indent=4)
 PY
-  echo "Wrote agent/conf/server.json (host=$h db=$db)."
+  echo "Wrote agent/conf/server.json (host=$h db=$db, log level=$level)."
 
-  DEVICE_NAME="$dev" "$PYTHON_BIN" - "$ROOT_DIR/agent/conf/time_weaver.sample.json" "$tw_target" <<'PY'
+  DEVICE_NAME="$dev" RESCHEDULE_MINUTE="$rmin" "$PYTHON_BIN" - "$ROOT_DIR/agent/conf/time_weaver.sample.json" "$tw_target" <<'PY'
 import json, os, sys
 src, dst = sys.argv[1], sys.argv[2]
 cfg = json.load(open(src))
 cfg["device"] = os.environ["DEVICE_NAME"]
+cfg["reschedule"]["minute"] = os.environ["RESCHEDULE_MINUTE"]
 json.dump(cfg, open(dst, "w"), indent=4)
 PY
-  echo "Wrote agent/conf/time_weaver.json (device=$dev)."
+  echo "Wrote agent/conf/time_weaver.json (device=$dev, reschedule minute=$rmin)."
+  echo "  The agent registers this device automatically on first run (no manual DB seeding)."
 }
 
 write_client_config() {

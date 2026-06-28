@@ -15,8 +15,14 @@ param(
     [string]$SecretKey = "",
     [string]$AllowedOrigin = "",
     [string]$Context = "",
+    [string]$AccessTokenExpireMinutes = "",
+    [string]$RedisHost = "",
+    [string]$RedisPort = "",
+    [string]$RedisDb = "",
     # Agent config
     [string]$DeviceName = "",
+    [string]$RescheduleMinute = "",
+    [string]$LogLevel = "",
     # Client config
     [string]$ApiUrl = "",
     # Behaviour
@@ -96,6 +102,12 @@ function Write-ServerEnv {
     if ($secret -eq "") { $secret = New-SecretKey }   # auto-generated, never "change-me"
     $origin = if ($AllowedOrigin -ne "") { $AllowedOrigin } else { "*" }
     $ctx    = if ($Context -ne "") { $Context } else { "/time_weaver" }
+    $expire = if ($AccessTokenExpireMinutes -ne "") { $AccessTokenExpireMinutes } else { "30" }
+    # Redis is optional at runtime (server falls back to an in-process token
+    # blacklist). These values are only used when a Redis server is present.
+    $rHost  = if ($RedisHost -ne "") { $RedisHost } else { "localhost" }
+    $rPort  = if ($RedisPort -ne "") { $RedisPort } else { "6379" }
+    $rDb    = if ($RedisDb   -ne "") { $RedisDb }   else { "0" }
 
     if ($dbType -eq "mysql") {
         $h  = if ($DbHost -ne "") { $DbHost } else { Ask "DB host" "127.0.0.1" }
@@ -113,7 +125,7 @@ function Write-ServerEnv {
     $content = @"
 ALLOWED_ORIGIN=$origin
 SECRET_KEY=$secret
-ACCESS_TOKEN_EXPIRE_MINUTES=30
+ACCESS_TOKEN_EXPIRE_MINUTES=$expire
 CONTEXT=$ctx
 DB_TYPE=$dbType
 DB_HOST=$h
@@ -123,12 +135,12 @@ DB_PASSWORD=$pw
 DB_DATABASE=$db
 DB_SCHEMA=$sc
 DB_PATH=$dbPath
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_DB=0
+REDIS_HOST=$rHost
+REDIS_PORT=$rPort
+REDIS_DB=$rDb
 "@
     Set-Content -LiteralPath $target -Value $content -Encoding ASCII
-    Write-Host "Wrote server\.env (DB_TYPE=$dbType, generated SECRET_KEY)."
+    Write-Host "Wrote server\.env (DB_TYPE=$dbType, generated SECRET_KEY, all keys populated)."
 }
 
 function Write-AgentConfig {
@@ -149,16 +161,22 @@ function Write-AgentConfig {
     $sc = if ($DbSchema -ne "") { $DbSchema } else { Ask "Agent DB schema (blank if none)" "" }
     $dev = if ($DeviceName -ne "") { $DeviceName } else { Ask "Agent device name" $env:COMPUTERNAME }
 
+    $level = if ($LogLevel -ne "") { $LogLevel } else { "debug" }
+    $rmin  = if ($RescheduleMinute -ne "") { $RescheduleMinute } else { "*/5" }
+
     $cfg = Get-Content -LiteralPath (Join-Path $RootDir "agent\conf\server.sample.json") -Raw | ConvertFrom-Json
     $my = $cfg.databases.time_weaver.database.mysql
     $my.host = $h; $my.port = $p; $my.user = $u; $my.password = $pw; $my.database = $db; $my.schema = $sc
+    $cfg.log.base.level = $level; $cfg.log.console.level = $level; $cfg.log.file_timed.level = $level
     ($cfg | ConvertTo-Json -Depth 30) | Set-Content -LiteralPath $serverTarget -Encoding ASCII
-    Write-Host "Wrote agent\conf\server.json (host=$h db=$db)."
+    Write-Host "Wrote agent\conf\server.json (host=$h db=$db, log level=$level)."
 
     $tw = Get-Content -LiteralPath (Join-Path $RootDir "agent\conf\time_weaver.sample.json") -Raw | ConvertFrom-Json
     $tw.device = $dev
+    $tw.reschedule.minute = $rmin
     ($tw | ConvertTo-Json -Depth 30) | Set-Content -LiteralPath $twTarget -Encoding ASCII
-    Write-Host "Wrote agent\conf\time_weaver.json (device=$dev)."
+    Write-Host "Wrote agent\conf\time_weaver.json (device=$dev, reschedule minute=$rmin)."
+    Write-Host "  The agent registers this device automatically on first run (no manual DB seeding)."
 }
 
 function Write-ClientConfig {

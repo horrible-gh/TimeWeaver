@@ -43,13 +43,23 @@ def set_instances(_db_instance: DatabasePrototype, _sqloader: SQLoader):
     sqloader = _sqloader
     device_name = twconfig['device']
     device = db_instance.fetch_one(sqloader.load_sql(service_name, "get_device"), [device_name])
+
+    if device is None:
+        # Zero-touch onboarding: register this device automatically on first run.
+        # The devices schema defaults new rows to 'active', so a fresh install
+        # runs without any manual DB seeding. A device that an operator has
+        # explicitly set to 'inactive' is left untouched (handled below).
+        Logger.info(f"Device {device_name} not found; registering it automatically.")
+        db_instance.execute_query(sqloader.load_sql(service_name, "insert_device"), [device_name])
+        device = db_instance.fetch_one(sqloader.load_sql(service_name, "get_device"), [device_name])
+
     Logger.debug(f"device={device}")
 
     device_error = False
     msg = ""
 
-    if device == None:
-        msg = f"Device {device_name} not found."
+    if device is None:
+        msg = f"Device {device_name} could not be registered."
         device_error = True
     elif device['status'] != 'active':
         msg = f"Device {device_name} is inactive"

@@ -82,8 +82,13 @@ sudo ./install.sh --install-services --service-user "$USER"
 sudo systemctl start timeweaver-server timeweaver-agent
 ```
 
-> Prerequisite: before the agent runs, a matching device row must exist in the
-> TimeWeaver database with `active` status.
+> The agent **registers its own device row automatically** on first run (created
+> as `active`, matching the schema default), so no manual database seeding is
+> needed. A device an operator has explicitly set to `inactive` is left as-is.
+>
+> The agent connects to the shared TimeWeaver database by design (it runs on
+> remote target devices). The installer collects the connection details as
+> prompts/flags — there are still no files to hand-edit.
 
 ## Repository Layout
 
@@ -156,21 +161,50 @@ On Linux, install the agent as a `systemd` service with
 
 ## Configuration
 
-Frontend configuration:
+**Every configuration value below is written by the installer** — from a flag,
+an interactive prompt, or a working default. After a successful install there is
+nothing left to edit before the component runs. The tables list each value, its
+default, and the flag that overrides it (Windows `-Flag` / Linux `--flag`).
 
-- `client/config.js`: API server URL used by Axios.
+### server — `server/.env`
 
-Agent configuration:
+| Key | Default | Override flag |
+|---|---|---|
+| `ALLOWED_ORIGIN` (CORS) | `*` | `-AllowedOrigin` / `--allowed-origin` |
+| `SECRET_KEY` (JWT) | cryptographically random (never `change-me`) | `-SecretKey` / `--secret-key` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | `-AccessTokenExpireMinutes` / `--access-token-expire-minutes` |
+| `CONTEXT` (API base path) | `/time_weaver` | `-Context` / `--context` |
+| `DB_TYPE` | `sqlite3` | `-DbType` / `--db-type` |
+| `DB_HOST/PORT/USER/PASSWORD/DATABASE/SCHEMA` | sqlite: empty; mysql: prompted | `-Db*` / `--db-*` |
+| `DB_PATH` (sqlite file) | `./timeweaver.sqlite3` | `-DbPath` / `--db-path` |
+| `REDIS_HOST/PORT/DB` | `localhost` / `6379` / `0` | `-RedisHost/-RedisPort/-RedisDb` / `--redis-host/--redis-port/--redis-db` |
 
-- `agent/conf/server.json`: logging and database connection settings.
-- `agent/conf/time_weaver.json`: device name and schedule reload cron expression.
-- `agent/conf/version.json`: agent version reported to the database.
+> **Redis is optional.** It is only a shared logout-blacklist store for
+> multi-worker / multi-host deployments. If no Redis is running, the server falls
+> back to an in-process blacklist and logout still works — so the default install
+> needs no Redis installed or started.
 
-Server configuration:
+### agent — `conf/server.json` + `conf/time_weaver.json`
 
-- `server/.env`: CORS origin, JWT secret, context path, and database settings loaded by Pydantic.
-- `server/res/sql/migration/`: migration scripts for MySQL and SQLite.
-- `server/res/sql/sqloader/`: SQL files loaded by sqloader for dashboard, schedule, task, and chart APIs.
+| Value | Default | Override flag |
+|---|---|---|
+| DB connection (`host/port/user/password/database/schema`) | prompted (MySQL) | `-Db*` / `--db-*` |
+| log level (`base`/`console`/`file_timed`) | `debug` | `-LogLevel` / `--log-level` |
+| `device` name | machine hostname | `-DeviceName` / `--device-name` |
+| `reschedule.minute` (poll cron) | `*/5` | `-RescheduleMinute` / `--reschedule-minute` |
+| `version` | shipped `conf/version.json` | — |
+
+The remaining `server.json` fields (logging format/rotation, sqloader and
+migration paths, `auto_migration`) ship with working defaults and need no input.
+
+### client — `client/config.js`
+
+| Value | Default | Override flag |
+|---|---|---|
+| `API_SERVER_URL` | `http://127.0.0.1:8000/time_weaver` | `-ApiUrl` / `--api-url` |
+
+`server/res/sql/migration/` and `server/res/sql/sqloader/` hold the migration and
+SQL resources; database migrations run automatically on first start.
 
 Do not commit local credentials or environment-specific configuration files.
 
@@ -187,7 +221,7 @@ Task paths and commands can use `{date}` placeholders. Date formatting is contro
 
 ## Operational Notes
 
-- The configured device must exist in the database and have `active` status.
+- The agent auto-registers its configured device (as `active`) on first run; an operator can later set a device to `inactive` from the dashboard to pause it.
 - The agent records execution results in `execution_log`.
 - Schedule definitions are periodically reloaded according to `conf/time_weaver.json`.
 - Logs are written according to `conf/server.json`; the sample configuration writes to `log/server.log`.
