@@ -8,6 +8,54 @@ TimeWeaver is split into three working projects:
 
 The UI is used to manage devices, schedule groups, schedule details, manual executions, and execution history. The server exposes the authenticated API, initializes database access and migrations, and loads SQL resources for MySQL or SQLite. The agent runs on a target device, periodically reloads schedule definitions from the database, and executes command, copy, archive, and housekeeping tasks.
 
+## Quick Start (One-Step Setup)
+
+Install everything from the repository root.
+
+Windows PowerShell:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
+```
+
+Linux:
+
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+These root installers wrap the platform setup scripts in `scripts/`. They create
+Python virtual environments, install dependencies, copy local config files from
+samples only when missing, build the Vue UI, and (on Windows) create
+`run-server.cmd` and `run-agent.cmd` in the project root.
+
+### Installing a single component
+
+Server, agent, and client can be installed separately. This is useful when a
+target device only needs the scheduler agent (no Node.js / UI build required):
+
+```powershell
+# Windows
+.\install.ps1 -Component agent      # agent | server | client | all (default)
+```
+
+```bash
+# Linux
+./install.sh --component agent      # agent | server | client | all (default)
+```
+
+To also install systemd services on Linux:
+
+```bash
+sudo ./install.sh --install-services --service-user "$USER"
+sudo systemctl start timeweaver-server timeweaver-agent
+```
+
+> Prerequisite: before the agent runs, a matching device row must exist in the
+> TimeWeaver database with `active` status.
+
 ## Repository Layout
 
 ```text
@@ -110,13 +158,16 @@ Task paths and commands can use `{date}` placeholders. Date formatting is contro
 - Schedule definitions are periodically reloaded according to `conf/time_weaver.json`.
 - Logs are written according to `conf/server.json`; the sample configuration writes to `log/server.log`.
 
-## One-Step Setup Scripts
+## Setup Scripts (Details)
+
+The root `install.ps1` / `install.sh` wrappers (see [Quick Start](#quick-start-one-step-setup)) call the platform setup scripts under `scripts/`. You can also invoke them directly:
 
 Linux:
 
 ```bash
 chmod +x scripts/setup-linux.sh
-./scripts/setup-linux.sh
+./scripts/setup-linux.sh                      # all components
+./scripts/setup-linux.sh --component agent    # agent only
 ```
 
 To also install systemd services for the FastAPI server and scheduler agent:
@@ -130,10 +181,11 @@ Windows PowerShell:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\setup-windows.ps1
+.\scripts\setup-windows.ps1                   # all components
+.\scripts\setup-windows.ps1 -Component agent  # agent only
 ```
 
-The Windows setup creates `run-server.cmd` and `run-agent.cmd` in the project root. Both setup scripts create local config files from samples only when those files are missing.
+Both setup scripts accept a component selector (`all`, `server`, `agent`, `client`; default `all`). When only the agent or server is selected, Node.js/npm and the UI build are skipped. The Windows setup creates `run-server.cmd` and `run-agent.cmd` in the project root. Both setup scripts create local config files from samples only when those files are missing.
 
 ## Docker
 
