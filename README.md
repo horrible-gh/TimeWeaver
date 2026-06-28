@@ -26,15 +26,20 @@ chmod +x install.sh
 ./install.sh
 ```
 
-These root installers wrap the platform setup scripts in `scripts/`. They create
-Python virtual environments, install dependencies, copy local config files from
-samples only when missing, build the Vue UI, and (on Windows) create
-`run-server.cmd` and `run-agent.cmd` in the project root.
+Run with no arguments for an **interactive install**: the installer asks which
+component to install and prompts for the few config values it needs (press Enter
+to accept the shown default). It then writes **ready-to-run config files for you
+— there is nothing to copy or hand-edit.** With all defaults the server uses a
+local SQLite database and an auto-generated `SECRET_KEY`, so it starts
+immediately. The installer also creates Python virtual environments, installs
+dependencies, builds the Vue UI (client only), and (on Windows) creates
+`run-server.cmd` / `run-agent.cmd` in the project root.
 
 ### Installing a single component
 
 Server, agent, and client can be installed separately. This is useful when a
-target device only needs the scheduler agent (no Node.js / UI build required):
+target device only needs the scheduler agent (no Node.js / UI build required).
+Pick the component interactively, or pass it directly:
 
 ```powershell
 # Windows
@@ -45,6 +50,30 @@ target device only needs the scheduler agent (no Node.js / UI build required):
 # Linux
 ./install.sh --component agent      # agent | server | client | all (default)
 ```
+
+### Unattended (non-interactive) install
+
+For CI or scripted provisioning, supply config as flags/env and skip all prompts
+(a no-TTY / `CI` session is also auto-detected). Existing config is kept unless
+you pass `--reconfigure` / `-Reconfigure`.
+
+```powershell
+# Windows: server with defaults (sqlite3, generated SECRET_KEY)
+.\install.ps1 -Component server -NonInteractive
+
+# Windows: agent pointed at a MySQL database
+.\install.ps1 -Component agent -NonInteractive `
+    -DbHost db.example.com -DbUser tw -DbPassword secret -DbName tw -DeviceName floor-1-pc
+```
+
+```bash
+# Linux: agent pointed at a MySQL database
+./install.sh --component agent --non-interactive \
+    --db-host db.example.com --db-user tw --db-password secret --db-name tw --device-name floor-1-pc
+```
+
+Run `./install.sh --help` (Linux) or `Get-Help .\install.ps1` (Windows) for the
+full list of config flags.
 
 To also install systemd services on Linux:
 
@@ -70,14 +99,13 @@ TimeWeaver/
 
 ### client
 
-The frontend is a Vue CLI application with separate login and dashboard pages. It reads the backend API base URL from `config.js`, which should be created from `config.sample.js`.
+The frontend is a Vue CLI application with separate login and dashboard pages. It reads the backend API base URL from `config.js`. The installer generates `config.js` for you (prompting for the API URL); the commands below are only for manual/advanced workflows.
 
 Useful commands:
 
 ```powershell
 cd client
-npm install
-Copy-Item config.sample.js config.js
+npm ci
 npm run serve
 npm run build
 npm run lint
@@ -91,12 +119,15 @@ The server is a FastAPI application. `app.py` exposes the application from `rout
 
 Useful commands:
 
+The installer generates `server/.env` for you (sqlite3 + generated `SECRET_KEY`
+by default, or MySQL when selected). The commands below are only for
+manual/advanced workflows:
+
 ```powershell
 cd server
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-Copy-Item .env.sample .env
 uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1 --reload
 ```
 
@@ -108,17 +139,20 @@ The agent is a long-running Python process. On startup it initializes the databa
 
 Useful commands:
 
+The installer generates `conf/server.json` and `conf/time_weaver.json` for you
+(prompting for the database connection and device name). The commands below are
+only for manual/advanced workflows:
+
 ```powershell
 cd agent
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-Copy-Item conf\server.sample.json conf\server.json
-Copy-Item conf\time_weaver.sample.json conf\time_weaver.json
 python timeweaver.py
 ```
 
-On Linux, `install-service.sh` can install the agent as a `systemd` service after configuration files and dependencies are in place.
+On Linux, install the agent as a `systemd` service with
+`sudo ./install.sh --component agent --install-services --service-user "$USER"`.
 
 ## Configuration
 
@@ -185,7 +219,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\setup-windows.ps1 -Component agent  # agent only
 ```
 
-Both setup scripts accept a component selector (`all`, `server`, `agent`, `client`; default `all`). When only the agent or server is selected, Node.js/npm and the UI build are skipped. The Windows setup creates `run-server.cmd` and `run-agent.cmd` in the project root. Both setup scripts create local config files from samples only when those files are missing.
+Both setup scripts accept a component selector (`all`, `server`, `agent`, `client`; default `all`; prompted if omitted). When only the agent or server is selected, Node.js/npm and the UI build are skipped. The Windows setup creates `run-server.cmd` and `run-agent.cmd` in the project root. Both setup scripts **generate ready-to-run config** (`server/.env`, `agent/conf/*.json`, `client/config.js`) from prompts/flags rather than asking you to copy and edit sample files; existing config is preserved unless `--reconfigure` / `-Reconfigure` is passed. The `*.sample.*` files remain in the tree only as references.
 
 ## Docker
 
