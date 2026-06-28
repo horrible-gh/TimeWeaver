@@ -10,17 +10,17 @@ import LogAssist.log as logger
 db_instance = db.db_instance
 sqloader = db.sqloader
 
-# JWT Secret Key (실제 서비스에서는 환경변수 사용 권장)
+# JWT Secret Key (Use environment variables in production)
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 
-# 비밀번호 해싱 설정
+# Password hashing settings
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 router = APIRouter()
 
-# OAuth2 방식으로 토큰 받기
+# Receive token through OAuth2
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
 
 def verify_password(plain_password, hashed_password):

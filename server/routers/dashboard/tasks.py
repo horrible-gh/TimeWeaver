@@ -51,7 +51,7 @@ async def insert_task(task: TaskInsertRequest):
     db_instance.execute_query(query, schedule_detail_data)
 
     task_data = (
-        str(detail_id),  # detail_id - UUID를 문자열로 변환
+        str(detail_id),  # detail_id - Convert UUID to string
         row.get("command"),  # command
         row.get("task_type"),  # task_type
         row.get("archive_type"),  # archive_type
@@ -88,7 +88,7 @@ async def update_tasks(task: TaskUpdateRequest):
         "modifier": row.get("modifier"),
         "detail_id": row.get("detail_id"),
     }
-    # 딕셔너리 값을 튜플로 변환 (SQL의 %s 순서대로)
+    # Convert dictionary values to tuples in SQL %s order
     schedule_detail_tuple = (
         schedule_detail_data["schedule_name"],
         schedule_detail_data["schedule_id"],
@@ -122,7 +122,7 @@ async def update_tasks(task: TaskUpdateRequest):
         "modifier": row.get("modifier"),
         "detail_id": row.get("detail_id"),
     }
-    # 딕셔너리 값을 튜플로 변환 (SQL의 %s 순서대로)
+    # Convert dictionary values to tuples in SQL %s order
     task_tuple = (
         task_data["command"],
         task_data["task_type"],
@@ -154,15 +154,15 @@ async def insert_manual_task(schedule: TaskInsertRequest):
     query = sqloader.load_sql("time_weaver.json", "manual_execution.insert_manual_execution")
     schedule_data = schedule.model_dump()
     data = (
-        schedule_data["is_immediate"],      # 1. INSERT용
-        schedule_data["is_immediate"],      # 2. CASE 조건용
+        schedule_data["is_immediate"],      # 1. for INSERT
+        schedule_data["is_immediate"],      # 2. for CASE condition
         schedule_data["schedule_datetime"], # 3. CASE THEN
         schedule_data.get("status"),        # 4. status
         schedule_data["creator"],           # 5. creator
-        None,                               # 6. WHERE 두번째 조건
-        None,                               # 7. WHERE 비교
-        schedule_data["detail_id"],         # 8. WHERE 첫번째 조건
-        schedule_data["detail_id"],         # 9. WHERE 비교
+        None,                               # 6. second WHERE condition
+        None,                               # 7. WHERE comparison
+        schedule_data["detail_id"],         # 8. first WHERE condition
+        schedule_data["detail_id"],         # 9. WHERE comparison
     )
 
     return db_instance.execute_query(query, data)

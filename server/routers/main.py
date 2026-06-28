@@ -35,7 +35,7 @@ app.include_router(manual_execution.router, prefix=f"{CONTEXT}/dashboard/manual_
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGIN,  # 모든 도메인 허용 (보안 강화 필요)
+    allow_origins=ALLOWED_ORIGIN,  # Allow all domains; tighten this for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -52,13 +52,13 @@ async def read_item(item_id: int, q: str = None):
 
 @app.get(CONTEXT + "/debug-headers")
 async def debug_headers(request: Request):
-    Logger.debug(f"🔍 Request Headers: {request.headers}")  # ✅ 모든 헤더 출력
+    Logger.debug(f"🔍 Request Headers: {request.headers}")  # ✅ Log all headers
     return {"headers": dict(request.headers)}
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    Logger.debug("💥 Validation error 발생")
-    Logger.debug("⛳ 경로:", request.url)
-    Logger.debug("📦 내용:\n", exc.errors())
-    Logger.debug("📨 원본 body:\n", await request.body())
+    Logger.debug("💥 Validation error occurred")
+    Logger.debug("⛳ Path:", request.url)
+    Logger.debug("📦 Details:\n", exc.errors())
+    Logger.debug("📨 Raw body:\n", await request.body())

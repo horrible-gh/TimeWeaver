@@ -57,10 +57,10 @@ task_counts AS (
 )
 SELECT
   sg.schedule_id,
-  -- 커스텀 상태:
-  -- 1) 스케줄 그룹의 상태가 'error'이거나 마지막 인스턴스에서 실행된 태스크 수가 전체 태스크 수보다 작으면 'error'
-  -- 2) 스케줄 그룹 상태가 active이면서 모든 태스크 실행됐으나 에러 메시지가 존재하면 'warning'
-  -- 3) 그 외에는 'completed'
+  -- Custom status:
+  -- 1) Use 'error' when the schedule group status is 'error' or the last instance ran fewer tasks than expected
+  -- 2) Use 'warning'
+  -- 3) Otherwise use 'completed'
   CASE
     WHEN sg.status = 'error' OR etl.executed_tasks < tc.total_tasks THEN 'error'
     WHEN sg.status = 'active' AND etl.executed_tasks = tc.total_tasks AND fep.raw_error IS NOT NULL THEN 'warning'
@@ -68,7 +68,7 @@ SELECT
   END AS custom_status,
   d.device_name,
   sg.name AS sg_name,
-  -- 그룹 상태: devices.last_login_at 기준 하루 이내 로그인 기록이 없으면 'disconnected'
+  -- Group status: use 'disconnected'
   CASE
     WHEN d.last_login_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY) THEN 'disconnected'
     WHEN sg.status = 'error' OR etl.executed_tasks < tc.total_tasks THEN 'error'
@@ -77,7 +77,7 @@ SELECT
   tc.total_tasks AS task_count,
   li.group_start_time,
   li.group_end_time,
-  -- 에러 메시지 요약: 최초 에러 메시지를 최대 25글자 내로 표시 (25자 초과 시 22글자 + '...')
+  -- Error message summary: show the first error message within 25 characters, or 22 characters plus '...')
   CASE
     WHEN fep.raw_error IS NOT NULL THEN
       CASE

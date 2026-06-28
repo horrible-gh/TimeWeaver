@@ -7,10 +7,10 @@ WITH task_status AS (
         el.start_time,
         el.end_time,
         CASE
-            WHEN el.result_code = 0 THEN 'completed'  -- 완료
-            WHEN el.result_code IS NULL THEN 'pending'  -- 대기
-            WHEN el.start_time IS NOT NULL AND el.end_time IS NULL THEN 'in_progress'  -- 진행 중
-            ELSE 'error'  -- 에러
+            WHEN el.result_code = 0 THEN 'completed'  -- completed
+            WHEN el.result_code IS NULL THEN 'pending'  -- pending
+            WHEN el.start_time IS NOT NULL AND el.end_time IS NULL THEN 'in_progress'  -- in progress
+            ELSE 'error'  -- error
         END AS task_state
     FROM schedule_detail sd
     JOIN schedule_group sg ON sg.schedule_id = sd.schedule_id
@@ -24,7 +24,7 @@ WITH task_status AS (
       AND d.status NOT IN ('inactive', 'manual')
 ),
 all_states AS (
-    -- 모든 상태를 명시적으로 포함 (0 카운트 방지)
+    -- Explicitly include every status to prevent zero counts
     SELECT 'pending' AS task_state
     UNION ALL
     SELECT 'in_progress'

@@ -16,7 +16,7 @@ async def execution_history(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None
 ):
-    # 기본값: 최근 1개월
+    # Default: last month
     if not end_date:
         end_date_dt = datetime.now()
     else:
@@ -27,7 +27,7 @@ async def execution_history(
     else:
         start_date_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
 
-    # SQL 로드와 파라미터 바인딩 분리
+    # Separate SQL loading and parameter binding
     sql = sqloader.load_sql("time_weaver.json", "get_execution_logs")
     return db_instance.fetch_all(sql, [start_date_dt, end_date_dt])
 
@@ -100,15 +100,15 @@ async def insert_manual_schedule(schedule: ScheduleInsertRequest):
     query = sqloader.load_sql("time_weaver.json", "manual_execution.insert_manual_execution")
     schedule_data = schedule.model_dump()
     data = (
-        schedule_data["is_immediate"],      # 1. INSERT용
-        schedule_data["is_immediate"],      # 2. CASE 조건용
+        schedule_data["is_immediate"],      # 1. for INSERT
+        schedule_data["is_immediate"],      # 2. for CASE condition
         schedule_data["schedule_datetime"], # 3. CASE THEN
         schedule_data.get("status"),        # 4. status
         schedule_data["creator"],           # 5. creator
-        schedule_data["schedule_id"],       # 6. WHERE 첫번째 조건
-        schedule_data["schedule_id"],       # 7. WHERE 비교
-        None,                               # 8. WHERE 두번째 조건
-        None                                # 9. WHERE 비교
+        schedule_data["schedule_id"],       # 6. first WHERE condition
+        schedule_data["schedule_id"],       # 7. WHERE comparison
+        None,                               # 8. second WHERE condition
+        None                                # 9. WHERE comparison
     )
 
     return db_instance.execute_query(query, data)

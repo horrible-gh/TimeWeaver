@@ -6,7 +6,7 @@ WITH schedule_group_status AS (
     FROM schedule_group sg
 ),
 execution_logs AS (
-    -- 최근 24시간 내 실행 로그 수집
+    -- Collect execution logs from the last 24 hours
     SELECT el.schedule_id,
            MAX(CASE WHEN el.result_code != 0 THEN 1 ELSE 0 END) AS has_error,
            MIN(CASE WHEN el.result_code = 0 THEN 1 ELSE 0 END) AS all_success
@@ -21,10 +21,10 @@ schedule_final_status AS (
             WHEN d.last_login_at <= DATE_SUB(NOW(), INTERVAL 1 DAY)
                 OR sg.group_status = 'inactive'
                 THEN 'inactive'
-            WHEN el.has_error = 1 THEN 'error'  -- 실행 로그 중 하나라도 에러가 있으면 error
-            WHEN el.schedule_id IS NULL THEN 'active' -- 실행 로그가 없으면 active
-            WHEN el.all_success = 1 THEN 'active' -- 모든 실행 로그가 성공이면 active
-            ELSE 'error' -- 실행 로그가 있지만 실패한 경우 error
+            WHEN el.has_error = 1 THEN 'error'  -- error when any execution log has an error
+            WHEN el.schedule_id IS NULL THEN 'active' -- active when there is no execution log
+            WHEN el.all_success = 1 THEN 'active' -- active when all execution logs succeeded
+            ELSE 'error' -- error when execution logs exist but failed
         END AS final_status
     FROM schedule_group_status sg
     JOIN devices d ON sg.target_device = d.device_id

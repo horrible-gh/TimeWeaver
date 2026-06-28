@@ -2,20 +2,20 @@ from pydantic_settings import BaseSettings
 from enum import Enum
 from sqloader.init import database_init
 
-# 🔹 Enum을 사용하여 DB_TYPE을 명확하게 정의
+# 🔹 Define DB_TYPE explicitly with an enum
 class DBType(str, Enum):
     MYSQL = "mysql"
     SQLITE = "sqlite"
     SQLITE3 = "sqlite3"
     LOCAL = "local"
 
-# 🔹 설정 클래스 (Pydantic 활용)
+# 🔹 Settings class using Pydantic
 class Settings(BaseSettings):
     ALLOWED_ORIGIN: str
     SECRET_KEY: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     CONTEXT: str
-    DB_TYPE: DBType  # Enum 적용
+    DB_TYPE: DBType  # Use enum
     DB_HOST: str = ""
     DB_PORT: int = 0
     DB_USER: str = ""
@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# 🔹 DB 설정 클래스 (싱글톤 패턴 적용)
+# 🔹 Database settings class using the singleton pattern
 class DatabaseSetting:
     _instance = None
 
@@ -44,7 +44,7 @@ class DatabaseSetting:
         return cls._instance
 
     def _init_db(self):
-        """DB 초기화"""
+        """Initialize database"""
         self.db_instance = None
         self.sqloader = None
         self.migrator = None
@@ -91,7 +91,7 @@ class DatabaseSetting:
 
 
     def instance_init(self):
-        """DB 인스턴스 초기화"""
+        """Initialize database instance"""
         self.db_instance, self.sqloader, self.migrator = database_init(self.config)
 
     def get_db_instance(self):
@@ -100,10 +100,10 @@ class DatabaseSetting:
     def get_sqloader_instance(self):
         return self.sqloader
 
-# 🔹 싱글톤 객체 생성
+# 🔹 Create singleton object
 db = DatabaseSetting()
 
-# 🔹 FastAPI에서 의존성 주입으로 사용할 함수
+# 🔹 Function used for FastAPI dependency injection
 def get_db_instance():
     return db.get_db_instance()
 
