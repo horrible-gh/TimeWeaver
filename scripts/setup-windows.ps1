@@ -1,28 +1,70 @@
 param(
     [string]$Python = "python",
+    [ValidateSet("", "all", "server", "agent", "client")]
+    [string]$Component = "",
+    # Server config
+    [ValidateSet("", "sqlite3", "mysql")]
+    [string]$DbType = "",
+    [string]$DbHost = "",
+    [string]$DbPort = "",
+    [string]$DbUser = "",
+    [string]$DbPassword = "",
+    [string]$DbName = "",
+    [string]$DbSchema = "",
+    [string]$DbPath = "",
+    [string]$SecretKey = "",
+    [string]$AllowedOrigin = "",
+    [string]$Context = "",
+    # Agent config
+    [string]$DeviceName = "",
+    # Client config
+    [string]$ApiUrl = "",
+    # Behaviour
+    [switch]$NonInteractive,
+    [switch]$Reconfigure,
     [switch]$SkipUiBuild
 )
 
 $ErrorActionPreference = "Stop"
 $RootDir = Split-Path -Parent $PSScriptRoot
 
-function Copy-IfMissing {
-    param(
-        [Parameter(Mandatory = $true)][string]$Source,
-        [Parameter(Mandatory = $true)][string]$Target
-    )
-
-    if (-not (Test-Path -LiteralPath $Target)) {
-        Copy-Item -LiteralPath $Source -Destination $Target
-        Write-Host "Created $Target"
-    } else {
-        Write-Host "Kept existing $Target"
-    }
+# Auto-detect a non-interactive session so prompts never hang in CI / pipelines.
+if (-not $NonInteractive) {
+    if ($env:CI -or [Console]::IsInputRedirected) { $NonInteractive = $true }
 }
+
+function Ask {
+    param([string]$Prompt, [string]$Default = "")
+    if ($NonInteractive) { return $Default }
+    if ($Default -ne "") {
+        $ans = Read-Host "$Prompt [$Default]"
+    } else {
+        $ans = Read-Host "$Prompt"
+    }
+    if ([string]::IsNullOrWhiteSpace($ans)) { return $Default }
+    return $ans.Trim()
+}
+
+function New-SecretKey {
+    $bytes = New-Object byte[] 32
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    return -join ($bytes | ForEach-Object { $_.ToString('x2') })
+}
+
+# --- Component selection ------------------------------------------------------
+if ($Component -eq "") {
+    $Component = Ask "Install which component? (all/server/agent/client)" "all"
+}
+if ($Component -notin @("all", "server", "agent", "client")) {
+    Write-Error "Invalid component: $Component (expected all|server|agent|client)"
+    exit 2
+}
+$DoServer = $Component -in @("all", "server")
+$DoAgent  = $Component -in @("all", "agent")
+$DoClient = $Component -in @("all", "client")
 
 function Setup-PythonProject {
     param([Parameter(Mandatory = $true)][string]$ProjectDir)
-
     Push-Location $ProjectDir
     try {
         & $Python -m venv .venv
@@ -34,60 +76,154 @@ function Setup-PythonProject {
 }
 
 function Write-CommandFile {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$Content
-    )
-
+    param([string]$Path, [string]$Content)
     Set-Content -LiteralPath $Path -Value $Content -Encoding ASCII
     Write-Host "Created $Path"
 }
 
-New-Item -ItemType Directory -Force -Path `
-    (Join-Path $RootDir "server\log"), `
-    (Join-Path $RootDir "agent\log") | Out-Null
-
-Setup-PythonProject (Join-Path $RootDir "server")
-Copy-IfMissing `
-    (Join-Path $RootDir "server\.env.sample") `
-    (Join-Path $RootDir "server\.env")
-
-Setup-PythonProject (Join-Path $RootDir "agent")
-Copy-IfMissing `
-    (Join-Path $RootDir "agent\conf\server.sample.json") `
-    (Join-Path $RootDir "agent\conf\server.json")
-Copy-IfMissing `
-    (Join-Path $RootDir "agent\conf\time_weaver.sample.json") `
-    (Join-Path $RootDir "agent\conf\time_weaver.json")
-
-Push-Location (Join-Path $RootDir "client")
-try {
-    npm ci
-    Copy-IfMissing `
-        (Join-Path $RootDir "client\config.sample.js") `
-        (Join-Path $RootDir "client\config.js")
-    if (-not $SkipUiBuild) {
-        npm run build
+# --- Config generators (write ready-to-run config, no manual editing) ---------
+function Write-ServerEnv {
+    $target = Join-Path $RootDir "server\.env"
+    if ((Test-Path -LiteralPath $target) -and -not $Reconfigure) {
+        Write-Host "Using existing server\.env (pass -Reconfigure to regenerate)."
+        return
     }
-} finally {
-    Pop-Location
+
+    $dbType = $DbType
+    if ($dbType -eq "") { $dbType = Ask "Server database type (sqlite3/mysql)" "sqlite3" }
+
+    $secret = $SecretKey
+    if ($secret -eq "") { $secret = New-SecretKey }   # auto-generated, never "change-me"
+    $origin = if ($AllowedOrigin -ne "") { $AllowedOrigin } else { "*" }
+    $ctx    = if ($Context -ne "") { $Context } else { "/time_weaver" }
+
+    if ($dbType -eq "mysql") {
+        $h  = if ($DbHost -ne "") { $DbHost } else { Ask "DB host" "127.0.0.1" }
+        $p  = if ($DbPort -ne "") { $DbPort } else { Ask "DB port" "3306" }
+        $u  = if ($DbUser -ne "") { $DbUser } else { Ask "DB user" "timeweaver" }
+        $pw = if ($DbPassword -ne "") { $DbPassword } else { Ask "DB password" "" }
+        $db = if ($DbName -ne "") { $DbName } else { Ask "DB name" "timeweaver" }
+        $sc = if ($DbSchema -ne "") { $DbSchema } else { Ask "DB schema (blank if none)" "" }
+        $dbPath = ""
+    } else {
+        $h = "127.0.0.1"; $p = "0"; $u = ""; $pw = ""; $db = ""; $sc = ""
+        $dbPath = if ($DbPath -ne "") { $DbPath } else { "./timeweaver.sqlite3" }
+    }
+
+    $content = @"
+ALLOWED_ORIGIN=$origin
+SECRET_KEY=$secret
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+CONTEXT=$ctx
+DB_TYPE=$dbType
+DB_HOST=$h
+DB_PORT=$p
+DB_USER=$u
+DB_PASSWORD=$pw
+DB_DATABASE=$db
+DB_SCHEMA=$sc
+DB_PATH=$dbPath
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_DB=0
+"@
+    Set-Content -LiteralPath $target -Value $content -Encoding ASCII
+    Write-Host "Wrote server\.env (DB_TYPE=$dbType, generated SECRET_KEY)."
 }
 
-Write-CommandFile (Join-Path $RootDir "run-server.cmd") @"
+function Write-AgentConfig {
+    $serverTarget = Join-Path $RootDir "agent\conf\server.json"
+    $twTarget     = Join-Path $RootDir "agent\conf\time_weaver.json"
+
+    if ((Test-Path -LiteralPath $serverTarget) -and (Test-Path -LiteralPath $twTarget) -and -not $Reconfigure) {
+        Write-Host "Using existing agent config (pass -Reconfigure to regenerate)."
+        return
+    }
+
+    # The agent connects to the shared MySQL database (it ships MySQL SQL only).
+    $h  = if ($DbHost -ne "") { $DbHost } else { Ask "Agent DB host" "127.0.0.1" }
+    $p  = if ($DbPort -ne "") { [int]$DbPort } else { [int](Ask "Agent DB port" "3306") }
+    $u  = if ($DbUser -ne "") { $DbUser } else { Ask "Agent DB user" "timeweaver" }
+    $pw = if ($DbPassword -ne "") { $DbPassword } else { Ask "Agent DB password" "" }
+    $db = if ($DbName -ne "") { $DbName } else { Ask "Agent DB name" "timeweaver" }
+    $sc = if ($DbSchema -ne "") { $DbSchema } else { Ask "Agent DB schema (blank if none)" "" }
+    $dev = if ($DeviceName -ne "") { $DeviceName } else { Ask "Agent device name" $env:COMPUTERNAME }
+
+    $cfg = Get-Content -LiteralPath (Join-Path $RootDir "agent\conf\server.sample.json") -Raw | ConvertFrom-Json
+    $my = $cfg.databases.time_weaver.database.mysql
+    $my.host = $h; $my.port = $p; $my.user = $u; $my.password = $pw; $my.database = $db; $my.schema = $sc
+    ($cfg | ConvertTo-Json -Depth 30) | Set-Content -LiteralPath $serverTarget -Encoding ASCII
+    Write-Host "Wrote agent\conf\server.json (host=$h db=$db)."
+
+    $tw = Get-Content -LiteralPath (Join-Path $RootDir "agent\conf\time_weaver.sample.json") -Raw | ConvertFrom-Json
+    $tw.device = $dev
+    ($tw | ConvertTo-Json -Depth 30) | Set-Content -LiteralPath $twTarget -Encoding ASCII
+    Write-Host "Wrote agent\conf\time_weaver.json (device=$dev)."
+}
+
+function Write-ClientConfig {
+    $target = Join-Path $RootDir "client\config.js"
+    if ((Test-Path -LiteralPath $target) -and -not $Reconfigure) {
+        Write-Host "Using existing client\config.js (pass -Reconfigure to regenerate)."
+        return
+    }
+    $url = if ($ApiUrl -ne "") { $ApiUrl } else { Ask "API server URL" "http://127.0.0.1:8000/time_weaver" }
+    $content = @"
+const config = {
+    API_SERVER_URL: "$url"
+};
+
+export default config;
+"@
+    Set-Content -LiteralPath $target -Value $content -Encoding ASCII
+    Write-Host "Wrote client\config.js (API_SERVER_URL=$url)."
+}
+
+# --- Run ----------------------------------------------------------------------
+if ($DoServer) { New-Item -ItemType Directory -Force -Path (Join-Path $RootDir "server\log") | Out-Null }
+if ($DoAgent)  { New-Item -ItemType Directory -Force -Path (Join-Path $RootDir "agent\log")  | Out-Null }
+
+if ($DoServer) {
+    Setup-PythonProject (Join-Path $RootDir "server")
+    Write-ServerEnv
+}
+
+if ($DoAgent) {
+    Setup-PythonProject (Join-Path $RootDir "agent")
+    Write-AgentConfig
+}
+
+if ($DoClient) {
+    Push-Location (Join-Path $RootDir "client")
+    try {
+        npm ci
+        Write-ClientConfig
+        if (-not $SkipUiBuild) { npm run build }
+    } finally {
+        Pop-Location
+    }
+}
+
+if ($DoServer) {
+    Write-CommandFile (Join-Path $RootDir "run-server.cmd") @"
 @echo off
 cd /d "%~dp0server"
 ".venv\Scripts\python.exe" -m uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1
 "@
+}
 
-Write-CommandFile (Join-Path $RootDir "run-agent.cmd") @"
+if ($DoAgent) {
+    Write-CommandFile (Join-Path $RootDir "run-agent.cmd") @"
 @echo off
 cd /d "%~dp0agent"
 ".venv\Scripts\python.exe" timeweaver.py
 "@
+}
 
 Write-Host ""
-Write-Host "TimeWeaver Windows setup complete."
-Write-Host "Next:"
-Write-Host "  1. Edit server\.env."
-Write-Host "  2. Edit agent\conf\server.json and agent\conf\time_weaver.json."
-Write-Host "  3. Run run-server.cmd and run-agent.cmd."
+Write-Host "TimeWeaver Windows setup complete (component: $Component)."
+Write-Host "Config was written automatically - no files to copy or edit."
+Write-Host "Start:"
+if ($DoServer) { Write-Host "  - run-server.cmd" }
+if ($DoAgent)  { Write-Host "  - run-agent.cmd  (needs the shared database reachable)" }
+if ($DoClient) { Write-Host "  - serve client\dist, or 'npm run serve' for development" }
