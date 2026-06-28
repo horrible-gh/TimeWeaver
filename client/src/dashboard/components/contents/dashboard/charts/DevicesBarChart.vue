@@ -7,7 +7,7 @@
 <script>
 import { getRequest } from "@api";
 import { defineComponent, ref, onMounted  } from "vue";
-import { BarChart } from "vue-chart-3"; // ✅ BarChart 사용
+import { BarChart } from "vue-chart-3"; // ✅ Use BarChart
 import {
   Chart as ChartJS,
   Title,
@@ -16,10 +16,10 @@ import {
   BarElement,
   CategoryScale,
   LinearScale,
-  BarController, // ✅ BarController 추가
+  BarController, // ✅ Add BarController
 } from "chart.js";
 
-// ✅ Chart.js 컨트롤러 등록 (BarController 추가)
+// ✅ Chart.js controller registration (Add BarController)
 ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, BarController);
 ChartJS.defaults.color = "#ffffff";
 
@@ -51,7 +51,7 @@ export default defineComponent({
         },
       ],
     });
-    // 데이터 불러오기 (onMounted에서 실행)
+    // Load data in onMounted
     onMounted(async () => {
       try {
         const response = await getRequest("/dashboard/charts/devices");
@@ -59,14 +59,14 @@ export default defineComponent({
         errorCount.value = response.error_count;
         inactiveCount.value = response.inactive_count;
 
-        // 차트 데이터 업데이트
+        // Update chart data
         chartData.value.datasets[0].data = [
           activeCount.value,
           errorCount.value,
           inactiveCount.value
         ];
       } catch (error) {
-        console.error("데이터 조회 실패:", error);
+        console.error("Failed to query data:", error);
       }
     });
 

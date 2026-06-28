@@ -17,6 +17,6 @@ function printDirectoryStructure(dirPath, indent = '') {
   });
 }
 
-// 사용 예시
-const startPath = './'; // 현재 디렉토리 기준
+// Usage example
+const startPath = './'; // Based on the current directory
 printDirectoryStructure(startPath);

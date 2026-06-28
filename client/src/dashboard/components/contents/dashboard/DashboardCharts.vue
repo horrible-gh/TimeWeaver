@@ -30,7 +30,7 @@ export default {
     name: 'DashboardChart'
     , components: {
         DevicesBarChart, SchedulesBarChart, TasksDoughnutChart
-  },  // ✅ `DevicesBarChart` 등록 확인
+  },  // ✅ Verify DevicesBarChart registration
   data() {
     return {
       currentTime: new Date().toLocaleString()

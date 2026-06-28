@@ -2,12 +2,12 @@
   <div class="board-container">
     <h2>{{ $t('sub_groups') }}</h2>
 
-    <!-- ✅ 그룹 추가 버튼 -->
+    <!-- ✅ Add group button -->
     <button class="add-button" @click="openAddGroupModal">
       <i class="ph ph-plus"></i> {{ $t('btn_add') }}
     </button>
 
-    <!-- ✅ 그룹 목록 -->
+    <!-- ✅ Group list -->
     <table v-if="paginatedPosts.length > 0" class="board-table">
       <thead>
         <tr>
@@ -38,7 +38,7 @@
 
     <BoardPagination v-if="paginatedPosts.length > 0" :total="posts.length" :perPage="perPage" @page-changed="changePage" />
 
-    <!-- ✅ 공통 모달 사용 -->
+    <!-- ✅ Use shared modal -->
     <ModalComponent
       :isOpen="isModalOpen"
       :title="isEditMode ? $t('list_label_group') + ' ' + $t('btn_edit') : $t('list_label_group') + ' ' + $t('btn_add')"
@@ -70,12 +70,12 @@
 import { useI18n } from "vue-i18n";
 import { ref, computed, onMounted } from "vue";
 import { getRequest, postRequest, putRequest, deleteRequest, useSort } from "@api";
-import ModalComponent from "../misc/ModalComponent.vue"; // ✅ 공통 모달 컴포넌트
+import ModalComponent from "../misc/ModalComponent.vue"; // ✅ Shared modal component
 import BoardPagination from "../misc/BoardPagination.vue";
 
-const { t } = useI18n(); // ✅ i18n 함수 가져오기
+const { t } = useI18n(); // ✅ Get i18n function
 
-const posts = ref([]); // ✅ 초기값 빈 배열
+const posts = ref([]); // ✅ Initial value is an empty array
 const { sortKey, sortOrder, sort } = useSort(posts);
 const isLoading = ref(true);
 const currentPage = ref(1);
@@ -84,20 +84,20 @@ const perPage = ref(7);
 // const searchGroup = ref("");
 // const selectedStatus = ref("");
 
-// ✅ 모달 상태
-const user = JSON.parse(localStorage.getItem("user") || "{}"); // ✅ 안전하게 변환
-const user_id = user.user_id; // ✅ 이제 정상적으로 사용 가능!
+// ✅ Modal state
+const user = JSON.parse(localStorage.getItem("user") || "{}"); // ✅ Convert safely
+const user_id = user.user_id; // ✅ Now usable
 const isModalOpen = ref(false);
 const isEditMode = ref(false);
 const formGroup = ref({ group_id : "", group_name: "", status: "active", creator: user_id,  modifier:user_id });
 
-// ✅ 그룹 목록 가져오기
+// ✅ Fetch group list
 const fetchGroups = async () => {
   try {
     const response = await getRequest("/dashboard/groups/get_groups");
     posts.value = response || [];
   } catch (error) {
-    console.error("데이터 가져오기 실패:", error);
+    console.error("Failed to fetch data:", error);
   } finally {
     isLoading.value = false;
   }
@@ -105,7 +105,7 @@ const fetchGroups = async () => {
 
 onMounted(fetchGroups);
 
-// ✅ 그룹 추가 모달 열기
+// ✅ Open add group modal
 const openAddGroupModal = () => {
   isEditMode.value = false;
   Object.assign(formGroup.value, {
@@ -117,21 +117,21 @@ const openAddGroupModal = () => {
   isModalOpen.value = true;
 };
 
-// ✅ 그룹 수정 모달 열기
+// ✅ Open edit group modal
 const openEditGroupModal = (group) => {
   isEditMode.value = true;
   Object.assign(formGroup.value, group, {
     modifier: user_id,
-    creator: group.creator || user_id // 기존 creator 유지
+    creator: group.creator || user_id // Keep existing creator
   });
   isModalOpen.value = true;
 };
 
-// ✅ 그룹 저장 (추가 또는 수정)
+// ✅ Save group, add or update
 const saveGroup = async () => {
   try {
-    // ✅ 요청 데이터 확인 (디버깅)
-    console.log("전송 데이터:", JSON.stringify(formGroup.value, null, 2));
+    // ✅ Check request data for debugging
+    console.log("Payload:", JSON.stringify(formGroup.value, null, 2));
     if (isEditMode.value) {
       await putRequest(`/dashboard/groups/update_group`, formGroup.value, "json");
     } else {
@@ -140,29 +140,29 @@ const saveGroup = async () => {
     await fetchGroups();
     closeModal();
   } catch (error) {
-    console.error("그룹 저장 실패:", error);
+    console.error("Failed to save group:", error);
   }
 };
 
 
-// ✅ 그룹 삭제
+// ✅ Delete group
 const deleteGroup = async (groupId) => {
   if (confirm(t('msg_delete_group_name'))) {
     try {
       await deleteRequest(`/dashboard/groups/remove_group/${groupId}`);
       await fetchGroups();
     } catch (error) {
-      console.error("그룹 삭제 실패:", error);
+      console.error("Delete group failure:", error);
     }
   }
 };
 
-// ✅ 모달 닫기
+// ✅ Close modal
 const closeModal = () => {
   isModalOpen.value = false;
 };
 
-// ✅ 페이징 처리
+// ✅ Pagination
 const paginatedPosts = computed(() => {
   const start = (currentPage.value - 1) * perPage.value;
   return posts.value.slice(start, start + perPage.value);

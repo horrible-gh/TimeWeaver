@@ -1,4 +1,4 @@
-/* ✅ 모달 오버레이 (배경 블러 효과) */
+/* ✅ Modal overlay with background blur */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -13,11 +13,11 @@
   z-index: 1000;
 }
 
-/* ✅ 모달 컨텐츠 */
+/* ✅ Modal content */
 .modal-content {
   background: var(--c-gray-600);
-  width: 600px; /* 기본 크기 */
-  max-width: 90%; /* 화면이 작을 때 자동 조정 */
+  width: 600px; /* Default size */
+  max-width: 90%; /* Adjust automatically on small screens */
   padding: 20px;
   border-radius: 8px;
   box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.2);
@@ -25,7 +25,7 @@
   text-align: left;
 }
 
-/* ✅ 닫기 버튼 (X 버튼) */
+/* ✅ Close button (X button) */
 .modal-close {
   position: absolute;
   top: 12px;
@@ -41,7 +41,7 @@
   color: #444;
 }
 
-/* ✅ 모달 제목 */
+/* ✅ Modal title */
 .modal-title {
   font-size: 18px;
   font-weight: bold;
@@ -53,11 +53,11 @@
 }
 
 .modal-body p {
-  white-space: pre-wrap; /* ✅ 개행 유지 */
+  white-space: pre-wrap; /* ✅ Preserve line breaks */
   word-wrap: break-word;
 }
 
-/* ✅ 입력 필드 */
+/* ✅ Input field */
 .modal-form {
   display: flex;
   flex-direction: column;
@@ -86,7 +86,7 @@
   box-shadow: 0px 0px 5px rgba(0, 123, 255, 0.5);
 }
 
-/* ✅ 버튼 영역 */
+/* ✅ Button area */
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -94,7 +94,7 @@
   margin-top: 15px;
 }
 
-/* ✅ 저장 버튼 (파란색) */
+/* ✅ Save button in blue */
 .save-button {
   background-color: #007bff;
   color: white;
@@ -112,7 +112,7 @@
   background-color: #0056b3;
 }
 
-/* ✅ 취소 버튼 (회색) */
+/* ✅ Cancel button in gray */
 .cancel-button {
   background-color: #6c757d;
   color: white;

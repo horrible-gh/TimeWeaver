@@ -1,4 +1,4 @@
-/* 게시판 컨테이너 */
+/* Board container */
 .board-container {
 
   width: 100%;
@@ -14,15 +14,15 @@
   margin-bottom: 1.25rem;
 }
 
-/* 테이블 스타일 */
+/* Table style */
 .board-table {
   width: 1100px;
   border-collapse: collapse;
   margin-top: 20px;
   min-height: 400px;
-  /* ✅ 최소 높이 유지 */
+  /* ✅ Keep minimum height */
   justify-content: space-between;
-  /* ✅ 테이블과 페이징을 일정한 간격으로 배치 */
+  /* ✅ Keep a consistent gap between the table and pagination */
 }
 
 @media (max-width: 1200px) {
@@ -61,7 +61,7 @@
   background-color: #353535;
 }
 
-/* 링크 스타일 */
+/* Link style */
 .board-table a {
   color: #407bff;
   text-decoration: none;
@@ -71,19 +71,19 @@
   text-decoration: underline;
 }
 
-/* 테이블 안에서 메시지 축약 */
+/* Truncate messages inside the table */
 .message-short {
   cursor: pointer;
   color: blue;
   text-decoration: underline;
 }
 
-/* ✅ 필터 폼 스타일 (가로 길이 고정 & 자동 줄바꿈) */
+/* ✅ Filter form style with fixed width and wrapping */
 .filters {
   width: 1100px;
   display: flex;
   flex-wrap: wrap;
-  /* ✅ 길면 자동 줄바꿈 */
+  /* ✅ Wrap automatically when long */
   gap: 10px;
   align-items: center;
   margin-bottom: 20px;
@@ -95,7 +95,7 @@
   }
 }
 
-/* ✅ 각 필터 요소의 기본 크기 설정 */
+/* ✅ Set default size for each filter element */
 .filters label {
   font-weight: bold;
 }
@@ -106,10 +106,10 @@
   border: 1px solid #ccc;
   border-radius: 4px;
   min-width: 150px;
-  /* ✅ 최소 너비 설정하여 UI 정리 */
+  /* ✅ Set minimum width to keep the UI aligned */
 }
 
-/* ✅ 검색 초기화 버튼 스타일 */
+/* ✅ Filter reset button style */
 .reset-button {
   background-color: #dc3545;
   color: white;
@@ -119,7 +119,7 @@
   cursor: pointer;
   font-size: 14px;
   white-space: nowrap;
-  /* ✅ 버튼이 잘리지 않도록 설정 */
+  /* ✅ Prevent button clipping */
 }
 
 .reset-button:hover {
@@ -127,7 +127,7 @@
 }
 
 
-/* ✅ 버튼 기본 스타일 */
+/* ✅ Base button style */
 button {
   font-size: 14px;
   padding: 6px 12px;
@@ -137,7 +137,7 @@ button {
   transition: 0.2s ease-in-out;
 }
 
-/* ✅ 추가 버튼 (파란색) */
+/* ✅ Add button in blue */
 .add-button {
   background-color: #006baf;
   color: white;
@@ -148,7 +148,7 @@ button {
   background-color: #0056b3;
 }
 
-/* ✅ 수정 버튼 (노란색) */
+/* ✅ Edit button in yellow */
 .edit-button {
   background-color: #ffc107;
   color: black;
@@ -158,7 +158,7 @@ button {
   background-color: #e0a800;
 }
 
-/* ✅ 삭제 버튼 (빨간색) */
+/* ✅ Delete button in red */
 .delete-button {
   background-color: #dc3545;
   color: white;
@@ -168,10 +168,10 @@ button {
   background-color: #c82333;
 }
 
-/* ✅ 버튼 컨테이너 (수직 정렬) */
+/* ✅ Button container with vertical alignment */
 .button-group {
   display: flex;
-  flex-direction: column; /* ✅ 버튼을 세로로 정렬 */
-  gap: 5px; /* 버튼 사이 간격 */
-  align-items: flex-start; /* 왼쪽 정렬 */
+  flex-direction: column; /* ✅ Align buttons vertically */
+  gap: 5px; /* Gap between buttons */
+  align-items: flex-start; /* Left aligned */
 }

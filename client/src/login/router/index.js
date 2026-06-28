@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
-import Login from "@/login/componenets/LoginForm.vue";  // 로그인 페이지
+import Login from "@/login/componenets/LoginForm.vue";  // Login page
 
 const routes = [
   { path: "/", component: Login },
@@ -15,8 +15,8 @@ router.beforeEach((to, from, next) => {
   const isAuthenticated = !!localStorage.getItem("access_token");
 
   if (!isAuthenticated && to.path !== "/login") {
-    alert("로그인이 필요합니다.");
-    window.location.href = "/login"; // ✅ 강제 리디렉트
+    alert("Login is required.");
+    window.location.href = "/login"; // ✅ Force redirect
   }
   else {
     next();

@@ -4,13 +4,13 @@
         <div class="payment-section-header">
             <p>Choose a task type</p>
             <div>
-                <button class="card-button active" title="커맨드">
+                <button class="card-button active" title="Command">
                     <i class="ph ph-terminal-window"></i>
                 </button>
-                <button class="card-button" title="복사">
+                <button class="card-button" title="Copy">
                     <i class="ph ph-copy"></i>
                 </button>
-                <button class="card-button" title="아카이브">
+                <button class="card-button" title="Archive">
                     <i class="ph ph-file-archive"></i>
                 </button>
             </div>

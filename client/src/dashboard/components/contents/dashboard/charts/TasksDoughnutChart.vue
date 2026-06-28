@@ -36,7 +36,7 @@ export default defineComponent({
       ],
     });
 
-    // 데이터 불러오기 (onMounted에서 실행)
+    // Load data in onMounted
     onMounted(async () => {
       try {
         const response = await getRequest("/dashboard/charts/tasks");
@@ -45,7 +45,7 @@ export default defineComponent({
         completedCount.value = response.completed_count;
         errorCount.value = response.error_count;
 
-        // 차트 데이터 업데이트
+        // Update chart data
         chartData.value.datasets[0].data = [
         inProgressCount.value,
         pendingCount.value,
@@ -53,7 +53,7 @@ export default defineComponent({
           errorCount.value,
         ];
       } catch (error) {
-        console.error("데이터 조회 실패:", error);
+        console.error("Failed to query data:", error);
       }
     });
 

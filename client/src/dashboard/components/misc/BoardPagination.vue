@@ -1,47 +1,47 @@
 <template>
   <nav class="pagination-container">
     <ul class="pagination">
-      <!-- 처음 페이지 이동 -->
+      <!-- Go to first page -->
       <li class="page-item" :class="{ disabled: currentPage === 1 }">
         <button class="page-link" @click.prevent="changePage(1)">«</button>
       </li>
 
-      <!-- 이전 페이지 이동 -->
+      <!-- Go to previous page -->
       <li class="page-item" :class="{ disabled: currentPage === 1 }">
         <button class="page-link" @click.prevent="changePage(currentPage - 1)">{{ $t('btn_prev') }}</button>
       </li>
 
-      <!-- 첫 번째 페이지 표시 (필요하면 항상 보이도록) -->
+      <!-- Show first page when needed -->
       <li v-if="startPage > 1" class="page-item">
         <button class="page-link" @click.prevent="changePage(1)">1</button>
       </li>
 
-      <!-- '...' (중간 생략) -->
+      <!-- '...' (Middle ellipsis) -->
       <li v-if="startPage > 2" class="page-item disabled">
         <span class="page-link">...</span>
       </li>
 
-      <!-- 페이지 번호 리스트 (최대 5개) -->
+      <!-- Page number list, up to 5 -->
       <li v-for="page in visiblePages" :key="page" class="page-item" :class="{ active: currentPage === page }">
         <button class="page-link" @click.prevent="changePage(page)">{{ page }}</button>
       </li>
 
-      <!-- '...' (끝 부분 생략) -->
+      <!-- '...' (End ellipsis) -->
       <li v-if="endPage < totalPages - 1" class="page-item disabled">
         <span class="page-link">...</span>
       </li>
 
-      <!-- 마지막 페이지 표시 (필요하면 항상 보이도록) -->
+      <!-- Show last page when needed -->
       <li v-if="endPage < totalPages" class="page-item">
         <button class="page-link" @click.prevent="changePage(totalPages)">{{ totalPages }}</button>
       </li>
 
-      <!-- 다음 페이지 이동 -->
+      <!-- Go to next page -->
       <li class="page-item" :class="{ disabled: currentPage === totalPages }">
         <button class="page-link" @click.prevent="changePage(currentPage + 1)">{{ $t('btn_next') }}</button>
       </li>
 
-      <!-- 마지막 페이지 이동 -->
+      <!-- Go to last page -->
       <li class="page-item" :class="{ disabled: currentPage === totalPages }">
         <button class="page-link" @click.prevent="changePage(totalPages)">»</button>
       </li>
@@ -59,9 +59,9 @@ const emit = defineEmits(["page-changed"]);
 const currentPage = ref(1);
 const totalPages = computed(() => Math.ceil(props.total / props.perPage));
 
-const maxVisiblePages = 5; // ✅ 최대 표시할 페이지 개수
+const maxVisiblePages = 5; // ✅ Maximum number of visible pages
 
-// ✅ 시작 페이지 & 끝 페이지 계산 (현재 페이지 중심)
+// ✅ Calculate start and end pages around the current page
 const startPage = computed(() => {
   if (totalPages.value <= maxVisiblePages) return 1;
   let start = currentPage.value - Math.floor(maxVisiblePages / 2);
@@ -75,7 +75,7 @@ const endPage = computed(() => {
   return end;
 });
 
-// ✅ 표시할 페이지 목록
+// ✅ Visible page list
 const visiblePages = computed(() => {
   const pages = [];
   for (let i = startPage.value; i <= endPage.value; i++) {

@@ -1,9 +1,10 @@
 // src/i18n.js
 import { createI18n } from 'vue-i18n'
+import ko_msg from './ko/login'
 
 const userLocale = navigator.language.split('-')[0] || 'en';
 
-// 각 언어별 메시지 객체만 정의합니다.
+// Define only the message objects for each language.
 const messages = {
   en: {
     title: 'TimeWeaver-UI',
@@ -19,20 +20,14 @@ const messages = {
     forgot: "パスワードのお忘れ",
     password: "パスワード"
   },
-  ko: {
-    title: 'TimeWeaver-UI',
-    login: "로그인",
-    join: "회원가입",
-    forgot: "패스워드 찾기",
-    password: "패스워드"
-  }
+  ko: {...ko_msg}
 }
 
-// i18n 인스턴스 생성
+// Create i18n instance
 const i18n = createI18n({
-  locale: userLocale,       // 기본 로케일 (예: 'en' 또는 브라우저의 언어)
-  fallbackLocale: 'en',     // fallback 로케일
-  messages                // 언어별 메시지 객체만 전달합니다.
+  locale: userLocale,       // Default locale, such as en or the browser language
+  fallbackLocale: 'en',     // Fallback locale
+  messages                // Pass only the language-specific message objects.
 })
 
 export default i18n

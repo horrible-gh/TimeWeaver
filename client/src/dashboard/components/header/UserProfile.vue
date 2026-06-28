@@ -1,7 +1,7 @@
 <template>
   <div class="app-header-actions">
     <div class="user-profile">
-      <span>{{ userId || 'Guest' }}</span> <!-- ✅ ID가 없으면 'Guest' 표시 -->
+      <span>{{ userId || 'Guest' }}</span> <!-- ✅ Show Guest when ID is missing -->
       <div class="dropdown">
         <button class="dropbtn">
           <img src="@/assets/img/dashboard/avartar1.webp" class="profile-icon" />
@@ -24,42 +24,42 @@
 import { ref, onMounted } from "vue";
 import DropdownContent from "@/dashboard/components/header/sub/DropdownContent.vue";
 
-// ✅ 드롭다운 메뉴 리스트
+// ✅ Dropdown menu list
 const menuList = [
-  { label: "홈", action: () => {window.location.href = "/dashboard";} },
+  { label: "Home", action: () => {window.location.href = "/dashboard";} },
   {
-    label: "테스트",
+    label: "Test",
     action: () => {
-      localStorage.removeItem("access_token"); // ✅ 토큰 삭제
+      localStorage.removeItem("access_token"); // ✅ Remove token
     }
   },
   {
-    label: "로그아웃",
+    label: "Logout",
     action: () => {
-      localStorage.removeItem("access_token"); // ✅ 토큰 삭제
-      window.location.href = "/login"; // ✅ 로그인 페이지로 강제 이동
+      localStorage.removeItem("access_token"); // ✅ Remove token
+      window.location.href = "/login"; // ✅ Force redirect to login page
     }
   },
 ];
 
-// ✅ 메뉴 클릭 시 실행되는 함수
+// ✅ Function executed on menu click
 const handleMenuClick = (item) => {
-  console.log("선택된 메뉴:", item.label);
-  item.action(); // ✅ 해당 메뉴의 액션 실행
+  console.log("Selected menu:", item.label);
+  item.action(); // ✅ Run the selected menu action
 };
 
-// ✅ 유저 ID를 저장할 반응형 변수
+// ✅ Reactive variable for the user ID
 const userId = ref("");
 
-// ✅ 마운트될 때 localStorage에서 ID 가져오기
+// ✅ Read the ID from localStorage on mount
 onMounted(() => {
-  const user = JSON.parse(localStorage.getItem("user") || "{}"); // ✅ 문자열 → 객체 변환
-  userId.value = user.name || "Guest"; // ✅ "테스트"가 표시됨
+  const user = JSON.parse(localStorage.getItem("user") || "{}"); // ✅ Convert string to object
+  userId.value = user.name || "Guest"; // ✅ Show Guest when the stored user has no name
 });
 </script>
 
 <style scoped>
-/* ✅ 드롭다운 스타일 */
+/* ✅ Dropdown style */
 .dropbtn {
   background-color: #1f1f1f;
   color: white;

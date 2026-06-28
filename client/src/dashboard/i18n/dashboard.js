@@ -1,9 +1,10 @@
 // src/i18n.js
 import { createI18n } from 'vue-i18n'
+import ko_msg from './ko/dashboard'
 
 const userLocale = navigator.language.split('-')[0] || 'en';
 
-// 각 언어별 메시지 객체만 정의합니다.
+// Define only the message objects for each language.
 const messages = {
   en: {
     sub_dashboard: 'Dashboard',
@@ -119,69 +120,14 @@ const messages = {
     msg_delete_group_name: "グループを削除しますか。",
 
   },
-  ko: {
-    sub_dashboard: '대시보드',
-    sub_devices: "장치 관리",
-    sub_schedules: "스케줄 관리",
-    sub_history: "스케줄 이력",
-    sub_groups: "그룹 관리",
-    sub_users: "사용자 관리",
-    sub_logout:"로그아웃",
-
-    chart_title: "서비스",
-    chart_subtitle_device: "디바이스 현황",
-    chart_devices_content1: "활성",
-    chart_devices_content2: "에러",
-    chart_devices_content3: "비활성",
-    chart_devices_content_title: "장치",
-    chart_subtitle_schedules: "스케줄 현황",
-    chart_schedules_content1: "활성",
-    chart_schedules_content2: "에러",
-    chart_schedules_content3: "비활성",
-    chart_schedules_content_title: "스케줄",
-    chart_subtitle_tasks: "태스크 현황",
-    chart_tasks_content_title1: "진행중",
-    chart_tasks_content_title2: "대기",
-    chart_tasks_content_title3: "완료",
-    chart_tasks_content_title4: "에러",
-    chart_last_updated_time_title: "최종 갱신 시간",
-    schedules_list_no_datas: "데이터 없음",
-    select_box_all: "전체",
-
-    list_label_group: "그룹",
-    list_label_schedule_name: "스케줄 이름",
-    list_label_start_time: "시작 시간",
-    list_label_end_time: "종료 시간",
-    list_label_exit_code: "종료 코드",
-    list_label_message: "종료 메세지",
-    list_label_status: "상태",
-    list_label_version: "버전",
-    list_label_actions: "액션",
-    list_label_device: "장치",
-    list_label_last_login_at: "마지막 로그인",
-
-    label_active: "활성",
-    label_inactive: "비활성",
-
-    btn_filter_reset: "검색 초기화",
-    btn_close: "닫기",
-    btn_prev: "이전",
-    btn_next: "다음",
-    btn_edit: "수정",
-    btn_remove: "삭제",
-    btn_add: "추가",
-    btn_save: "저장",
-
-    msg_enter_group_name: "그룹 이름을 입력하세요",
-    msg_delete_group_name: "정말 그룹을 삭제하시겠습니까?",
-  }
+  ko: {...ko_msg}
 }
 
-// i18n 인스턴스 생성
+// Create i18n instance
 const i18n = createI18n({
-  locale: userLocale,       // 기본 로케일 (예: 'en' 또는 브라우저의 언어)
-  fallbackLocale: 'en',     // fallback 로케일
-  messages                // 언어별 메시지 객체만 전달합니다.
+  locale: userLocale,       // Default locale, such as en or the browser language
+  fallbackLocale: 'en',     // Fallback locale
+  messages                // Pass only the language-specific message objects.
 })
 
 export default i18n

@@ -2,10 +2,10 @@
   <div class="board-container">
     <h2>{{ $t('sub_history') }}</h2>
 
-    <!-- ✅ 검색 필터 -->
+    <!-- ✅ Search filter -->
     <div class="filters">
       <div>
-        <!-- 그룹 선택 -->
+        <!-- Select group -->
         <label>{{ $t('list_label_group') }}:</label>
         <select v-model="selectedGroup">
           <option value="">{{ $t('select_box_all') }}</option>
@@ -14,7 +14,7 @@
       </div>
 
       <div>
-        <!-- 스케줄 이름 선택 (선택한 그룹에 따라 리스트 변경) -->
+        <!-- Select schedule name; list changes by selected group -->
         <label>{{ $t('list_label_schedule_name') }}:</label>
         <select v-model="selectedSchedule">
           <option value="">{{ $t('select_box_all') }}</option>
@@ -23,19 +23,19 @@
       </div>
 
       <div>
-        <!-- 시작 시간 선택 -->
+        <!-- Select start time -->
         <label>{{ $t('list_label_start_time') }}:</label>
         <input type="datetime-local" v-model="selectedStartTime">
       </div>
 
       <div>
-        <!-- 종료 시간 선택 -->
+        <!-- Select end time -->
         <label>{{ $t('list_label_end_time') }}:</label>
         <input type="datetime-local" v-model="selectedEndTime">
       </div>
 
       <div>
-        <!-- 종료 코드 선택 -->
+        <!-- Select exit code -->
         <label>{{ $t('list_label_exit_code') }}:</label>
         <select v-model="selectedResultCode">
           <option value="">{{ $t('select_box_all') }}</option>
@@ -43,11 +43,11 @@
         </select>
       </div>
 
-      <!-- ✅ 검색 초기화 버튼 -->
+      <!-- ✅ Filter reset button -->
       <button class="reset-button" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
     </div>
 
-    <!-- ✅ 필터링된 테이블 -->
+    <!-- ✅ Filtered table -->
     <table v-if="filteredPosts.length > 0" class="board-table">
       <thead>
         <tr>
@@ -81,7 +81,7 @@
       </tbody>
     </table>
 
-    <!-- ✅ 모달 컴포넌트 사용 -->
+    <!-- ✅ Use modal component -->
     <ModalComponent
       :isOpen="isModalOpen"
       :title="$t('sub_groups')"
@@ -100,16 +100,16 @@
 import { getRequest } from "@api";
 import { ref, computed, onMounted } from 'vue';
 import BoardPagination from '../../misc/BoardPagination.vue';
-import ModalComponent from "../../misc/ModalComponent.vue"; // ✅ 모달 컴포넌트 import
+import ModalComponent from "../../misc/ModalComponent.vue"; // ✅ Import modal component
 
-const posts = ref([]); // ✅ 초기값 빈 배열
+const posts = ref([]); // ✅ Initial value is an empty array
 const isLoading = ref(true);
 const currentPage = ref(1);
 const perPage = ref(7);
 const sortKey = ref('');
 const sortOrder = ref('asc');
 
-// ✅ 필터링 상태
+// ✅ Filter state
 const selectedGroup = ref("");
 const selectedSchedule = ref("");
 const selectedStartTime = ref("");
@@ -129,23 +129,23 @@ const openModal = (title, message, confirmText = "") => {
 };
 
 const handleConfirm = () => {
-  alert("확인 버튼이 눌렸습니다.");
+  alert("Confirm button was clicked.");
   isModalOpen.value = false;
 };
 
 
-// ✅ 종료 메시지 축약 함수 (22자까지만 표시 + '...')
+// ✅ Exit message truncation function, show up to 11 characters plus '...'
 const truncateMessage = (message) => {
   return message && message.length > 11 ? message.substring(0, 11) + "..." : message;
 };
 
-// // ✅ 종료 메시지 전체 보기 (모달 열기)
+// // ✅ View full exit message by opening modal
 // const showMessage = (message) => {
 //   modalMessage.value = message;
 //   isModalOpen.value = true;
 // };
 
-// ✅ 스케줄 보기 (모달 열기)
+// ✅ View schedule by opening modal
 const showSchedule = (task_type, command, source_path, destination_path) => {
   modalMessage.value = "Task type : " + task_type + "\n"
   if (task_type === "archive" || task_type === "copy") {
@@ -161,12 +161,12 @@ const showSchedule = (task_type, command, source_path, destination_path) => {
 };
 
 
-// // ✅ 모달 닫기
+// // ✅ Close modal
 // const closeModal = () => {
 //   isModalOpen.value = false;
 // };
 
-// ✅ 날짜 변환 함수
+// ✅ Date conversion function
 const formatDate = (dateString) => {
   if (!dateString) return "-";
   const date = new Date(dateString);
@@ -180,20 +180,20 @@ const formatDate = (dateString) => {
   });
 };
 
-// ✅ API에서 데이터 가져오기
+// ✅ Fetch data from API
 const fetchPosts = async () => {
   try {
-    const response = await getRequest("/dashboard/schedule/execution_history"); // 🔹 API 주소 변경
+    const response = await getRequest("/dashboard/schedule/execution_history"); // 🔹 API address changed
     console.log(response)
-    posts.value = response || []; // ✅ undefined일 경우 빈 배열로 대체
+    posts.value = response || []; // ✅ Use an empty array when undefined
   } catch (error) {
-    console.error("데이터를 가져오는 중 오류 발생:", error);
+    console.error("Error while fetching data:", error);
   } finally {
     isLoading.value = false;
   }
 };
 
-// ✅ 컴포넌트가 마운트될 때 API 호출
+// ✅ Call API when component is mounted
 onMounted(fetchPosts);
 
 const resetFilters = () => {
@@ -205,7 +205,7 @@ const resetFilters = () => {
 };
 
 
-// 정렬 기능
+// Sorting
 const sort = (key) => {
   if (sortKey.value === key) {
     sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
@@ -222,12 +222,12 @@ const sort = (key) => {
 };
 
 
-// ✅ 유니크한 그룹 리스트 반환
+// ✅ Return unique group list
 const uniqueGroups = computed(() => {
   return [...new Set(posts.value.map(post => post.sg_name))];
 });
 
-// ✅ 선택한 그룹에 따라 유니크한 스케줄 이름 리스트 반환
+// ✅ Return unique schedule names by selected group
 const filteredSchedules = computed(() => {
   if (!selectedGroup.value) {
     return [...new Set(posts.value.map(post => post.schedule_name))];
@@ -235,13 +235,13 @@ const filteredSchedules = computed(() => {
   return [...new Set(posts.value.filter(post => post.sg_name === selectedGroup.value).map(post => post.schedule_name))];
 });
 
-// ✅ 유니크한 종료 코드 리스트 반환
+// ✅ Return unique exit code list
 const uniqueResultCodes = computed(() => {
   return [...new Set(posts.value.map(post => post.result_code))];
 });
 
 
-// ✅ 필터링된 데이터 반환
+// ✅ Return filtered data
 const filteredPosts = computed(() => {
   return posts.value.filter(post => {
     const matchesGroup = selectedGroup.value ? post.sg_name === selectedGroup.value : true;
@@ -254,7 +254,7 @@ const filteredPosts = computed(() => {
   });
 });
 
-// ✅ 페이징 처리
+// ✅ Pagination
 const paginatedPosts = computed(() => {
   const start = (currentPage.value - 1) * perPage.value;
   return filteredPosts.value.slice(start, start + perPage.value);

@@ -21,7 +21,7 @@
 import { ref } from 'vue'
 
 const props = defineProps({
-  tabs: Array // [{ title: '기본 정보', slot: 'basic' }, ...]
+  tabs: Array // [{ title: 'Basic information', slot: 'basic' }, ...]
 })
 
 const activeTab = ref(0)

@@ -1,35 +1,35 @@
 import axios from "axios";
-import config from "@config"; // ✅ Webpack alias 사용
+import config from "@config"; // ✅ Use Webpack alias
 import { ref } from "vue";
 
 const API_BASE_URL = `${config.API_SERVER_URL}`;
 axios.defaults.withCredentials = true;
 
-// Axios 인스턴스 생성
+// Create Axios instance
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {
-    "Content-Type": "application/x-www-form-urlencoded", // ✅ 기본값 유지
+    "Content-Type": "application/x-www-form-urlencoded", // ✅ Keep default value
   },
 });
 
-// ✅ 중복 리디렉트를 방지하기 위한 상태 변수
+// ✅ State flag to prevent duplicate redirects
 let isRedirecting = false;
 
 /**
- *  ✅ 401 에러 감지 인터셉터 추가
+ *  ✅ Add interceptor for 401 errors
  */
 apiClient.interceptors.response.use(
-  (response) => response, // 응답이 정상적이면 그대로 반환
+  (response) => response, // Return successful responses as-is
   (error) => {
     if (error.response && (error.response.status === 401)) {
-      console.warn("⚠️ 401 인증 오류 발생! 로그인 페이지로 이동합니다.");
+      console.warn("⚠️ 401 authentication error. Redirecting to the login page.");
 
       if (!isRedirecting) {
-        isRedirecting = true; // ✅ 중복 리디렉트 방지
-        localStorage.removeItem("access_token"); // ✅ 토큰 삭제
-        sessionStorage.clear(); // ✅ 세션도 정리
-        window.location.href = "/login"; // ✅ 로그인 페이지로 강제 이동
+        isRedirecting = true; // ✅ Prevent duplicate redirects
+        localStorage.removeItem("access_token"); // ✅ Remove token
+        sessionStorage.clear(); // ✅ Clear session data
+        window.location.href = "/login"; // ✅ Force redirect to login page
       }
     }
     return Promise.reject(error);
@@ -37,13 +37,13 @@ apiClient.interceptors.response.use(
 );
 
 /**
- * ✅ 토큰을 가져와서 헤더 설정
+ * ✅ Get token and set headers
  */
 const getAuthHeaders = (type = "default") => {
   const token = localStorage.getItem("access_token");
   if (!token) {
-    console.warn("⚠️ 인증 토큰이 없습니다.");
-    return {}; // 토큰이 없으면 빈 헤더 반환
+    console.warn("⚠️ Authentication token is missing.");
+    return {}; // Return empty headers when token is missing
   }
 
   return {
@@ -55,7 +55,7 @@ const getAuthHeaders = (type = "default") => {
 };
 
 /**
- * ✅ API 요청 함수 (POST)
+ * ✅ API request function (POST)
  */
 export const postRequest = async (url, data, type = "default") => {
   try {
@@ -63,13 +63,13 @@ export const postRequest = async (url, data, type = "default") => {
     const response = await apiClient.post(url, data, { headers });
     return response.data;
   } catch (error) {
-    console.error("POST 요청 오류:", error);
+    console.error("POST request error:", error);
     throw error;
   }
 };
 
 /**
- * ✅ API 요청 함수 (GET)
+ * ✅ API request function (GET)
  */
 export const getRequest = async (url, params = {}, type = "default") => {
   try {
@@ -77,13 +77,13 @@ export const getRequest = async (url, params = {}, type = "default") => {
     const response = await apiClient.get(url, { params, headers });
     return response.data;
   } catch (error) {
-    console.error("GET 요청 오류:", error);
+    console.error("GET request error:", error);
     throw error;
   }
 };
 
 /**
- * ✅ API 요청 함수 (PUT)
+ * ✅ API request function (PUT)
  */
 export const putRequest = async (url, data, type = "default") => {
   try {
@@ -91,13 +91,13 @@ export const putRequest = async (url, data, type = "default") => {
     const response = await apiClient.put(url, data, { headers });
     return response.data;
   } catch (error) {
-    console.error("PUT 요청 오류:", error);
+    console.error("PUT request error:", error);
     throw error;
   }
 };
 
 /**
- * ✅ API 요청 함수 (DELETE)
+ * ✅ API request function (DELETE)
  */
 export const deleteRequest = async (url, params = {}) => {
   try {
@@ -105,7 +105,7 @@ export const deleteRequest = async (url, params = {}) => {
     const response = await apiClient.delete(url, { params, headers });
     return response.data;
   } catch (error) {
-    console.error("DELETE 요청 오류:", error);
+    console.error("DELETE request error:", error);
     throw error;
   }
 };
@@ -126,7 +126,7 @@ export function useSort(data) {
     const modifier = sortOrder.value === "asc" ? 1 : -1;
 
     data.value.sort((a, b) => {
-      const valA = a[key] || ""; // ✅ undefined 방지
+      const valA = a[key] || ""; // ✅ Avoid undefined
       const valB = b[key] || "";
 
       if (valA < valB) return -1 * modifier;

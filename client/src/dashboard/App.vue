@@ -10,7 +10,7 @@
           <NavMenu />
           <NavFooter />
       </div>
-      <router-view></router-view> <!-- ✅ 현재 라우트의 컴포넌트가 여기에 렌더링됨 -->
+      <router-view></router-view> <!-- ✅ Render the current route component here -->
   </div>
 </div>
 </template>

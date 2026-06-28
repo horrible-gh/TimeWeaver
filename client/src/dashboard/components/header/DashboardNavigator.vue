@@ -41,20 +41,20 @@ import { ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 
 const route = useRoute();
-const activeTab = ref(route.path); // ✅ 현재 URL을 기본값으로 설정
+const activeTab = ref(route.path); // ✅ Use the current URL as the default value
 
 const setActiveTab = (tabPath) => {
   activeTab.value = tabPath;
 };
 
-// ✅ URL이 변경되면 `activeTab`도 자동 업데이트
+// ✅ Update activeTab automatically when the URL changes
 watch(route, () => {
   activeTab.value = route.path;
 });
 </script>
 
 <style scoped>
-/* ✅ 탭 스타일 */
+/* ✅ Tab style */
 .tabs {
   display: flex;
   gap: 10px;
@@ -68,7 +68,7 @@ watch(route, () => {
   transition: all 0.3s;
 }
 
-/* ✅ 활성화된 탭 스타일 */
+/* ✅ Active tab style */
 .tabs a.active {
   font-weight: bold;
   color: white;

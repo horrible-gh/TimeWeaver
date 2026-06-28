@@ -14,11 +14,11 @@ const messages = {
   ja: {...ja_msg}
 };
 
-// i18n 인스턴스 생성
+// Create i18n instance
 const i18n = createI18n({
-  locale: userLocale,       // 기본 로케일 (예: 'en' 또는 브라우저의 언어)
-  fallbackLocale: 'en',     // fallback 로케일
-  messages                // 언어별 메시지 객체만 전달합니다.
+  locale: userLocale,       // Default locale, such as en or the browser language
+  fallbackLocale: 'en',     // Fallback locale
+  messages                // Pass only the language-specific message objects.
 })
 
 export default i18n

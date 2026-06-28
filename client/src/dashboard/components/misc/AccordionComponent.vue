@@ -16,7 +16,7 @@
 import { ref } from 'vue'
 
 const props = defineProps({
-  items: Array // [{ title: '기본 정보', slot: 'basic' }, ...]
+  items: Array // [{ title: 'Basic information', slot: 'basic' }, ...]
 })
 
 const openIndex = ref(null)

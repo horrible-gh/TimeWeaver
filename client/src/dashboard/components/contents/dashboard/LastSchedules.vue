@@ -60,18 +60,18 @@ export default defineComponent({
     onMounted(async () => {
       try {
         const response = await getRequest("/dashboard/lastest-schedules");
-        console.log("API 응답:", response);
-        // 만약 response 자체가 배열이면:
+        console.log("API response:", response);
+        // If response itself is an array:
         schedules.value = Array.isArray(response) ? response : [];
-        console.log("할당된 schedules:", schedules.value);
+        console.log("Assigned schedules:", schedules.value);
       } catch (error) {
         // if (error.response && error.response.status === 401) {
-        //   alert("오류가 발생 했습니다. 잠시 후 다시 이용하십시요.");
+        //   alert("An error occurred. Please try again later.");
         //   window.location.href = "/login";
         // } else {
-        //   alert(`오류가 발생 했습니다. 잠시 후 다시 이용하십시요.`); // ✅ 다른 오류는 알림 표시
+        //   alert(`An error occurred. Please try again later.`); // ✅ Show an alert for other errors
         // }
-        console.error("오류 발생." + error)
+        console.error("Error occurred." + error)
       }
     });
 

@@ -16,6 +16,6 @@
       "scripthost"
     ]
   },
-  "include": ["src/**/*"],  // ✅ `src/` 내부의 모든 파일을 포함하도록 설정
-  "exclude": ["node_modules", "dist"]  // ✅ `node_modules`과 `dist` 폴더 제외
+  "include": ["src/**/*"],  // ✅ Include all files under src/
+  "exclude": ["node_modules", "dist"]  // ✅ Exclude node_modules and dist
 }

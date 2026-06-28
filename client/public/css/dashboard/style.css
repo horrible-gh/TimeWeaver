@@ -855,27 +855,27 @@ button:focus {
   box-shadow: 0 0 0 2px var(--c-gray-800) , 0 0 0 4px var(--c-gray-300);
 }
 
-/* ✅ 모든 a 태그의 기본 스타일 제거 */
+/* ✅ Remove default styles from all anchor tags */
 .app-header-logo a {
-  text-decoration: none; /* 밑줄 제거 */
-  color: inherit; /* 부모 요소의 색상 상속 */
-  outline: none; /* 클릭 시 외곽선 제거 */
+  text-decoration: none; /* Remove underline */
+  color: inherit; /* Inherit parent color */
+  outline: none; /* Remove outline on click */
 }
 
-/* ✅ 방문한 링크 스타일 제거 */
+/* ✅ Remove visited link styles */
 .app-header-logo a:visited {
-  color: inherit; /* 방문한 링크도 부모 색상 유지 */
+  color: inherit; /* Keep visited links using the parent color */
 }
 
-/* ✅ 클릭(포커스) 시 스타일 제거 */
+/* ✅ Remove click and focus styles */
 .app-header-logo a:focus,
 .app-header-logo a:active {
-  outline: none; /* 클릭 시 외곽선 제거 */
+  outline: none; /* Remove outline on click */
   color: inherit;
-  box-shadow: none; /* ✅ 일부 브라우저에서 잔상 제거 */
+  box-shadow: none; /* ✅ Remove residual effects in some browsers */
 }
 
-/* ✅ 호버(마우스 올릴 때) 시 스타일 유지 */
+/* ✅ Keep styles on hover */
 .app-header-logo a:hover {
   text-decoration: none;
   color: inherit;

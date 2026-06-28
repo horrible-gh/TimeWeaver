@@ -78,20 +78,20 @@ export default {
         const token = response.access_token;
         localStorage.setItem("access_token", token);
         const user = response.user;
-        localStorage.setItem("user", JSON.stringify(user)); // ✅ 객체를 JSON 문자열로 변환하여 저장
-        console.log("로그인 성공:", response);
+        localStorage.setItem("user", JSON.stringify(user)); // ✅ Convert object to a JSON string before saving
+        console.log("Login succeeded:", response);
         window.location.href = "/dashboard";
       } catch (error) {
-        console.error("로그인 실패:", error);
+        console.error("Login failed:", error);
       }
     },
     register() {
       console.log("Register clicked");
-      alert("회원가입 페이지로 이동");
+      alert("Go to the registration page");
     },
     forgot() {
       console.log("Forgot password clicked");
-      alert("비밀번호 찾기 페이지 표시");
+      alert("Show password recovery page");
     },
   }
 };

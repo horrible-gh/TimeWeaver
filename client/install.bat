@@ -1,10 +1,11 @@
 @echo off
-call npm install
-call npm install -g @vue/cli
-call npm install axios
-call npm install vue-router
-call npm install --save-dev postcss-prefix-selector
-call npm install chart.js@3 vue-chart-3 --legacy-peer-deps
-call npm install @phosphor-icons/vue
-call npm install dayjs
+REM Install client dependencies reproducibly from package-lock.json.
+REM All runtime/build dependencies are declared in package.json, so a single
+REM `npm ci` installs everything (no global tools or ad-hoc packages needed).
+call npm ci
+if errorlevel 1 (
+    echo npm ci failed.
+    exit /b 1
+)
 pause
+

@@ -9,22 +9,22 @@
 <script setup>
 import { defineProps, defineEmits } from "vue";
 
-// ✅ 부모로부터 메뉴 아이템을 받음
+// ✅ Receive menu items from parent
 defineProps({
   menuItems: Array,
 });
 
-// ✅ 클릭 이벤트를 부모 컴포넌트에 전달
+// ✅ Forward click event to parent component
 const emit = defineEmits(["select"]);
 
 const handleClick = (item) => {
-  console.log("클릭된 메뉴:", item.label);
-  emit("select", item); // ✅ 부모 컴포넌트에 이벤트 전달
+  console.log("Clicked menu:", item.label);
+  emit("select", item); // ✅ Forward event to parent component
 };
 </script>
 
 <style scoped>
-/* ✅ 드롭다운 스타일 */
+/* ✅ Dropdown style */
 .dropdown-content {
   display: block;
   position: absolute;
