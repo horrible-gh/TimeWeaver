@@ -95,31 +95,34 @@ function Write-ServerEnv {
         return
     }
 
-    $dbType = $DbType
-    if ($dbType -eq "") { $dbType = Ask "Server database type (sqlite3/mysql)" "sqlite3" }
+    # Every .env value is decided at install time: a flag wins, otherwise the
+    # installer prompts (showing the default; Enter accepts it). In
+    # non-interactive mode Ask returns the default, so nothing ever blocks.
+    $dbType = if ($DbType -ne "") { $DbType } else { Ask "Server database type (sqlite3/mysql)" "sqlite3" }
 
-    $secret = $SecretKey
-    if ($secret -eq "") { $secret = New-SecretKey }   # auto-generated, never "change-me"
-    $origin = if ($AllowedOrigin -ne "") { $AllowedOrigin } else { "*" }
-    $ctx    = if ($Context -ne "") { $Context } else { "/time_weaver" }
-    $expire = if ($AccessTokenExpireMinutes -ne "") { $AccessTokenExpireMinutes } else { "30" }
+    # SECRET_KEY is decided at install too, but defaults to a fresh crypto-random
+    # value (never a placeholder). A flag can pin it for reproducible deploys.
+    $secret = if ($SecretKey -ne "") { $SecretKey } else { New-SecretKey }
+    $origin = if ($AllowedOrigin -ne "") { $AllowedOrigin } else { Ask "CORS allowed origin (ALLOWED_ORIGIN)" "*" }
+    $ctx    = if ($Context -ne "") { $Context } else { Ask "API context path (CONTEXT)" "/time_weaver" }
+    $expire = if ($AccessTokenExpireMinutes -ne "") { $AccessTokenExpireMinutes } else { Ask "Access token lifetime in minutes (ACCESS_TOKEN_EXPIRE_MINUTES)" "30" }
     # Redis is optional at runtime (server falls back to an in-process token
-    # blacklist). These values are only used when a Redis server is present.
-    $rHost  = if ($RedisHost -ne "") { $RedisHost } else { "localhost" }
-    $rPort  = if ($RedisPort -ne "") { $RedisPort } else { "6379" }
-    $rDb    = if ($RedisDb   -ne "") { $RedisDb }   else { "0" }
+    # blacklist). Values are still decided at install for the multi-host case.
+    $rHost  = if ($RedisHost -ne "") { $RedisHost } else { Ask "Redis host (optional; REDIS_HOST)" "localhost" }
+    $rPort  = if ($RedisPort -ne "") { $RedisPort } else { Ask "Redis port (REDIS_PORT)" "6379" }
+    $rDb    = if ($RedisDb   -ne "") { $RedisDb }   else { Ask "Redis db index (REDIS_DB)" "0" }
 
     if ($dbType -eq "mysql") {
-        $h  = if ($DbHost -ne "") { $DbHost } else { Ask "DB host" "127.0.0.1" }
-        $p  = if ($DbPort -ne "") { $DbPort } else { Ask "DB port" "3306" }
-        $u  = if ($DbUser -ne "") { $DbUser } else { Ask "DB user" "timeweaver" }
-        $pw = if ($DbPassword -ne "") { $DbPassword } else { Ask "DB password" "" }
-        $db = if ($DbName -ne "") { $DbName } else { Ask "DB name" "timeweaver" }
-        $sc = if ($DbSchema -ne "") { $DbSchema } else { Ask "DB schema (blank if none)" "" }
+        $h  = if ($DbHost -ne "") { $DbHost } else { Ask "DB host (DB_HOST)" "127.0.0.1" }
+        $p  = if ($DbPort -ne "") { $DbPort } else { Ask "DB port (DB_PORT)" "3306" }
+        $u  = if ($DbUser -ne "") { $DbUser } else { Ask "DB user (DB_USER)" "timeweaver" }
+        $pw = if ($DbPassword -ne "") { $DbPassword } else { Ask "DB password (DB_PASSWORD)" "" }
+        $db = if ($DbName -ne "") { $DbName } else { Ask "DB name (DB_DATABASE)" "timeweaver" }
+        $sc = if ($DbSchema -ne "") { $DbSchema } else { Ask "DB schema, blank if none (DB_SCHEMA)" "" }
         $dbPath = ""
     } else {
         $h = "127.0.0.1"; $p = "0"; $u = ""; $pw = ""; $db = ""; $sc = ""
-        $dbPath = if ($DbPath -ne "") { $DbPath } else { "./timeweaver.sqlite3" }
+        $dbPath = if ($DbPath -ne "") { $DbPath } else { Ask "SQLite file path (DB_PATH)" "./timeweaver.sqlite3" }
     }
 
     $content = @"

@@ -148,31 +148,36 @@ write_server_env() {
     echo "Using existing server/.env (pass --reconfigure to regenerate)."
     return
   fi
+  # Every .env value is decided at install time: a flag/env wins, otherwise the
+  # installer prompts (showing the default; Enter accepts it). In
+  # non-interactive mode ask() returns the default, so nothing ever blocks.
   local db_type="$DB_TYPE"
   [[ -z "$db_type" ]] && db_type="$(ask "Server database type (sqlite3/mysql)" "sqlite3")"
+  # SECRET_KEY is decided at install too, defaulting to a fresh crypto-random
+  # value (never a placeholder); a flag/env can pin it for reproducible deploys.
   local secret="$SECRET_KEY"
   [[ -z "$secret" ]] && secret="$(gen_secret)"
-  local origin="${ALLOWED_ORIGIN:-*}"
-  local ctx="${CONTEXT:-/time_weaver}"
-  local expire="${ACCESS_TOKEN_EXPIRE_MINUTES:-30}"
+  local origin="${ALLOWED_ORIGIN:-$(ask "CORS allowed origin (ALLOWED_ORIGIN)" "*")}"
+  local ctx="${CONTEXT:-$(ask "API context path (CONTEXT)" "/time_weaver")}"
+  local expire="${ACCESS_TOKEN_EXPIRE_MINUTES:-$(ask "Access token lifetime in minutes (ACCESS_TOKEN_EXPIRE_MINUTES)" "30")}"
   # Redis is optional at runtime (server falls back to an in-process token
-  # blacklist). These values are only used when a Redis server is present.
-  local rhost="${REDIS_HOST:-localhost}"
-  local rport="${REDIS_PORT:-6379}"
-  local rdb="${REDIS_DB:-0}"
+  # blacklist). Values are still decided at install for the multi-host case.
+  local rhost="${REDIS_HOST:-$(ask "Redis host (optional; REDIS_HOST)" "localhost")}"
+  local rport="${REDIS_PORT:-$(ask "Redis port (REDIS_PORT)" "6379")}"
+  local rdb="${REDIS_DB:-$(ask "Redis db index (REDIS_DB)" "0")}"
 
   local h p u pw db sc dbpath
   if [[ "$db_type" == "mysql" ]]; then
-    h="${DB_HOST:-$(ask "DB host" "127.0.0.1")}"
-    p="${DB_PORT:-$(ask "DB port" "3306")}"
-    u="${DB_USER:-$(ask "DB user" "timeweaver")}"
-    pw="${DB_PASSWORD:-$(ask "DB password" "")}"
-    db="${DB_NAME:-$(ask "DB name" "timeweaver")}"
-    sc="${DB_SCHEMA:-$(ask "DB schema (blank if none)" "")}"
+    h="${DB_HOST:-$(ask "DB host (DB_HOST)" "127.0.0.1")}"
+    p="${DB_PORT:-$(ask "DB port (DB_PORT)" "3306")}"
+    u="${DB_USER:-$(ask "DB user (DB_USER)" "timeweaver")}"
+    pw="${DB_PASSWORD:-$(ask "DB password (DB_PASSWORD)" "")}"
+    db="${DB_NAME:-$(ask "DB name (DB_DATABASE)" "timeweaver")}"
+    sc="${DB_SCHEMA:-$(ask "DB schema, blank if none (DB_SCHEMA)" "")}"
     dbpath=""
   else
     h="127.0.0.1"; p="0"; u=""; pw=""; db=""; sc=""
-    dbpath="${DB_PATH:-./timeweaver.sqlite3}"
+    dbpath="${DB_PATH:-$(ask "SQLite file path (DB_PATH)" "./timeweaver.sqlite3")}"
   fi
 
   cat > "$target" <<EOF

@@ -27,11 +27,15 @@ chmod +x install.sh
 ```
 
 Run with no arguments for an **interactive install**: the installer asks which
-component to install and prompts for the few config values it needs (press Enter
-to accept the shown default). It then writes **ready-to-run config files for you
-— there is nothing to copy or hand-edit.** With all defaults the server uses a
-local SQLite database and an auto-generated `SECRET_KEY`, so it starts
-immediately. The installer also creates Python virtual environments, installs
+component to install and then **prompts for every config value that lands in
+`server/.env` (and the agent/client config)** — `ALLOWED_ORIGIN`, `CONTEXT`,
+`ACCESS_TOKEN_EXPIRE_MINUTES`, the database connection, the optional Redis
+endpoint, and so on. Each prompt shows the default in brackets; press Enter to
+accept it or type your own value. Whatever you decide at install time is written
+into the config, so **after the install there is nothing to copy or hand-edit.**
+`SECRET_KEY` is generated as a fresh cryptographic random value (never a
+placeholder). With every default accepted the server uses a local SQLite
+database, so it starts immediately. The installer also creates Python virtual environments, installs
 dependencies, builds the Vue UI (client only), and (on Windows) creates
 `run-server.cmd` / `run-agent.cmd` in the project root.
 
@@ -161,10 +165,13 @@ On Linux, install the agent as a `systemd` service with
 
 ## Configuration
 
-**Every configuration value below is written by the installer** — from a flag,
-an interactive prompt, or a working default. After a successful install there is
-nothing left to edit before the component runs. The tables list each value, its
-default, and the flag that overrides it (Windows `-Flag` / Linux `--flag`).
+**Every configuration value below is decided at install time and written by the
+installer** — there is nothing left to edit before the component runs. In an
+interactive install each value is **prompted** (the "Default" column is what the
+prompt offers; press Enter to accept or type your own). A flag/env always wins
+over the prompt, and a `--non-interactive` install applies the defaults without
+asking. The tables list each value, its default, and the flag that overrides it
+(Windows `-Flag` / Linux `--flag`).
 
 ### server — `server/.env`
 
