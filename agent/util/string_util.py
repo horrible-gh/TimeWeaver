@@ -17,7 +17,7 @@ def check_date_format(date_format: str, default_format=DEFAULT_DATE_FORMAT) -> s
         #print(f"Invalid format (None, empty, or 'None'), using default_format={default_format}")
         return default_format
 
-    # 기본 토큰 검사 (예: % 문자가 포함되어 있어야 함)
+    # Basic token check, for example the value must contain %
     if '%' not in date_format:
         #print(f"Format does not contain any '%' tokens, using default_format={default_format}")
         return default_format
@@ -26,7 +26,7 @@ def check_date_format(date_format: str, default_format=DEFAULT_DATE_FORMAT) -> s
         base_date = datetime(2000, 1, 1)
         formatted = base_date.strftime(date_format)
         parsed_date = datetime.strptime(formatted, date_format)
-        # 날짜가 올바르게 파싱되었다면 두 값이 일치해야 함
+        # If the date parsed correctly, both values must match
         if base_date != parsed_date:
             #print(f"Parsed date does not match the base date, using default_format={default_format}")
             return default_format
@@ -37,9 +37,9 @@ def check_date_format(date_format: str, default_format=DEFAULT_DATE_FORMAT) -> s
         return default_format
 
 def is_true(value):
-    """문자열 '1'이나 정수 1 모두 True로 처리"""
+    """Treat string '1' and integer 1 as true"""
     return str(value) == '1'
 
 def is_false(value):
-    """문자열 '0'이나 정수 0 모두 True로 처리"""
+    """Treat string '0' and integer 0 as true"""
     return str(value) == '0'

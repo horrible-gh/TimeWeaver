@@ -44,7 +44,7 @@ WITH base_datas AS (
     	AND devices.status = 'active'
 )
 , task_list AS (
-    -- 일반 스케줄 리스트
+    -- Regular schedule list
     SELECT pre_schedule_id schedule_id
         , bd.*
         , '0' is_manual
@@ -58,7 +58,7 @@ WITH base_datas AS (
 
     UNION ALL
 
-    -- detail_id로 매칭
+    -- Match by detail_id
     SELECT CONCAT('m_', pre_schedule_id, '_d_', UNIX_TIMESTAMP(me.schedule_datetime)) schedule_id
         , bd.*
         , '1' is_manual

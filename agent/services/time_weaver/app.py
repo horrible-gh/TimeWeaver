@@ -19,20 +19,20 @@ device_name = ""
 db_instance: DatabasePrototype = None
 sqloader: SQLoader = None
 
-# 태스크 리스트
+# Task list
 task_list = {}
 running_tasks = {}
 
-# AP스케줄러
+# APScheduler
 scheduler = BackgroundScheduler()
 scheduler.start()
 
-# 시퀀스 정의용
+# Sequence definitions
 group_execution_status = {}
-# 현재 실행 중/남은 태스크 추적용
+# Track running and remaining tasks
 task_completion_status = {}
 
-# 재진입 Lock
+# Reentrant lock
 execution_lock = RLock()
 
 
@@ -79,12 +79,12 @@ def task_initializer():
 
     with execution_lock:
         try:
-            # 1. DB에서 최신 스케줄 정보 가져오기
+            # 1. Fetch the latest schedule data from the database
             task_datas = db_instance.fetch_all(
                 sqloader.load_sql(service_name, "get_tasks_all"), [device_name]
             )
 
-            # 2. DB 데이터 기반으로 새로운 스케줄 딕셔너리 생성
+            # 2. Build a new schedule dictionary from database data
             new_tasks = {}
             for task_data in task_datas:
                 schedule_id = task_data['schedule_id']
@@ -138,11 +138,11 @@ def task_initializer():
 
             Logger.debug(f"Fetched new_tasks from DB: {new_tasks}")
 
-            # 3. 현재 task_list와 new_tasks 비교
+            # 3. Compare current task_list with new_tasks
             existing_schedule_ids = set(task_list.keys())
             new_schedule_ids = set(new_tasks.keys())
 
-            # 3.1. 추가할 작업 (new_tasks에만 있는 schedule_id)
+            # 3.1. Tasks to add (schedule_id exists only in new_tasks)
             schedules_to_add = new_schedule_ids - existing_schedule_ids
             for schedule_id in schedules_to_add:
                 task_list[schedule_id] = {
@@ -162,13 +162,13 @@ def task_initializer():
                     "details": []
                 }
 
-                # 상세 작업 추가
+                # Add task details
                 for detail in new_tasks[schedule_id]['details'].values():
                     task_list[schedule_id]['details'].append(detail)
 
                 Logger.debug(f"Added new schedule: {schedule_id}")
 
-                # APScheduler에 새로운 작업 등록
+                # Register a new job in APScheduler
                 try:
                     if su.is_false(new_tasks[schedule_id]['is_manual']):
                         scheduler.add_job(
@@ -185,15 +185,15 @@ def task_initializer():
                             args=[schedule_id],
                             id=str(schedule_id),
                             replace_existing=True,
-                            misfire_grace_time=60  # 필요에 따라 조정
+                            misfire_grace_time=60  # Adjust as needed
                         )
                     else:
                         if su.is_true(new_tasks[schedule_id]['is_immediate']):
-                            run_time = datetime.datetime.now() + timedelta(seconds=1)  # 1초 뒤 실행
+                            run_time = datetime.datetime.now() + timedelta(seconds=1)  # Run one second later
                         else:
                             run_time = new_tasks[schedule_id]['schedule_datetime']
                             if isinstance(run_time, str):
-                                # MySQL datetime 형식: 'YYYY-MM-DD HH:MM:SS'
+                                # MySQL datetime format: 'YYYY-MM-DD HH:MM:SS'
                                 run_time = datetime.strptime(run_time, '%Y/%m/%d %H:%M:%S')
                         scheduler.add_job(
                             func=start_group_execution,
@@ -209,37 +209,37 @@ def task_initializer():
                 except Exception as e:
                     error_handle(f"Error adding scheduler job {schedule_id}: {e}")
 
-            # 3.2. 수정할 작업 (두 딕셔너리에 모두 있는 schedule_id)
+            # 3.2. Tasks to update (schedule_id exists in both dictionaries)
             schedules_to_update = new_schedule_ids & existing_schedule_ids
             for schedule_id in schedules_to_update:
                 existing_task = task_list[schedule_id]
                 new_task = new_tasks[schedule_id]
 
                 if su.is_true(new_task['is_manual']):
-                    # 즉시실행은 수정 불필요
+                    # Immediate execution does not need updates
                     if su.is_true(new_task['is_immediate']):
                         continue
 
-                    # 예약실행의 경우
+                    # For scheduled execution
                     run_time = new_task['schedule_datetime']
                     if isinstance(run_time, str):
                         run_time = datetime.datetime.strptime(run_time, '%Y/%m/%d %H:%M:%S')
 
-                    # 이미 지난 시간이면 수정 불필요
+                    # No update needed if the time has already passed
                     if run_time <= datetime.datetime.now():
                         continue
 
-                    # schedule_datetime 변경 체크
+                    # Check schedule_datetime changes
                     existing_schedule_datetime = existing_task.get('sg_schedule_datetime')
                     if isinstance(existing_schedule_datetime, str):
                         existing_schedule_datetime = datetime.datetime.strptime(existing_schedule_datetime, '%Y/%m/%d %H:%M:%S')
 
-                    # schedule_datetime이 변경되었으면 재스케줄링
+                    # Reschedule if schedule_datetime changed
                     if existing_schedule_datetime != run_time:
                         task_list[schedule_id]['sg_schedule_datetime'] = new_task['schedule_datetime']
                         Logger.debug(f"Schedule {schedule_id} schedule_datetime changed from '{existing_schedule_datetime}' to '{run_time}'")
 
-                        # APScheduler 작업 재등록
+                        # Re-register APScheduler job
                         job_id = str(schedule_id)
                         try:
                             scheduler.remove_job(job_id)
@@ -257,12 +257,12 @@ def task_initializer():
                         )
                         Logger.info(f"Rescheduled manual job: {job_id} to {run_time}")
 
-                    # 수동 실행은 details만 업데이트하고 continue
-                    # (아래 자동 스케줄 로직 스킵)
+                    # For manual execution, update only details and continue
+                    # (Skip the automatic schedule logic below)
 
                 else:
-                    # 자동 스케줄 처리
-                    # 그룹 레벨 필드 비교
+                    # Handle automatic schedule
+                    # Compare group-level fields
                     compare_fields = ['name', 'sg_year', 'sg_month', 'sg_day_of_week', 'sg_day', 'sg_hour', 'sg_minute', 'sg_second', 'sg_is_error_stop']
                     needs_update = False
 
@@ -273,12 +273,12 @@ def task_initializer():
                             break
 
                     if needs_update:
-                        # 그룹 레벨 필드 업데이트
+                        # Update group-level fields
                         for field in compare_fields:
                             task_list[schedule_id][field] = new_task[field]
                         Logger.debug(f"Updated schedule fields: {schedule_id}")
 
-                        # APScheduler 작업 수정
+                        # Update APScheduler job
                         job_id = str(schedule_id)
                         try:
                             scheduler.remove_job(job_id)
@@ -304,17 +304,17 @@ def task_initializer():
                         )
                         Logger.info(f"Added new scheduler job: {job_id}")
 
-                # 상세 작업 비교 및 업데이트 (자동/수동 공통)
+                # Compare and update task details (common to automatic and manual schedules)
                 existing_details = {detail['detail_id']: detail for detail in existing_task['details']}
                 new_details = new_task['details']
 
-                # 3.2.1. 추가할 상세 작업
+                # 3.2.1. Task details to add
                 details_to_add = set(new_details.keys()) - set(existing_details.keys())
                 for detail_id in details_to_add:
                     task_list[schedule_id]['details'].append(new_details[detail_id])
                     Logger.debug(f"Added new detail: {detail_id} to schedule: {schedule_id}")
 
-                # 3.2.2. 수정할 상세 작업
+                # 3.2.2. Task details to update
                 details_to_update = set(new_details.keys()) & set(existing_details.keys())
                 for detail_id in details_to_update:
                     existing_detail = existing_details[detail_id]
@@ -335,12 +335,12 @@ def task_initializer():
                             break
 
                     if detail_needs_update:
-                        # 상세 작업 필드 업데이트
+                        # Update task detail fields
                         for field in detail_fields:
                             existing_detail[field] = new_detail[field]
                         Logger.info(f"Updated detail: {detail_id} in schedule: {schedule_id}")
 
-                # 3.2.3. 삭제할 상세 작업
+                # 3.2.3. Task details to delete
                 details_to_remove = set(existing_details.keys()) - set(new_details.keys())
                 if details_to_remove:
                     task_list[schedule_id]['details'] = [
@@ -351,13 +351,13 @@ def task_initializer():
                         Logger.info(f"Removed detail: {detail_id} from schedule: {schedule_id}")
 
 
-            # 3.3. 삭제할 작업 (task_list에만 있는 schedule_id)
+            # 3.3. Tasks to delete (schedule_id exists only in task_list)
             schedules_to_remove = existing_schedule_ids - new_schedule_ids
             for schedule_id in schedules_to_remove:
                 del task_list[schedule_id]
                 Logger.debug(f"Removed schedule: {schedule_id}")
 
-                # APScheduler에서 작업 제거
+                # Remove job from APScheduler
                 try:
                     scheduler.remove_job(str(schedule_id))
                     Logger.info(f"Removed scheduler job: {schedule_id}")
@@ -372,9 +372,9 @@ def task_initializer():
 
 def start_group_execution(group_id):
     """
-    그룹 실행을 시작하는 함수.
-    - group_execution_status[group_id]에 시퀀스별 태스크 목록을 세팅
-    - 가장 먼저 실행할 시퀀스(보통 1번) 호출
+    Start group execution.
+    - Set the task list by sequence in group_execution_status[group_id]
+    - Call the first sequence to run, usually 1
     """
 
     global group_execution_status
@@ -392,13 +392,13 @@ def start_group_execution(group_id):
     Logger.debug(f"group_execution_status={group_execution_status}")
     Logger.debug(f"[start_group_execution] Starting Group={group_id}")
 
-    # 1번 시퀀스부터 시작한다고 가정
+    # Assume execution starts from sequence 1
     execute_next_task(group_id, sequence=1)
 
 
 def execute_next_task(group_id, sequence):
     """
-    특정 시퀀스의 태스크들을 실제 스케줄러에 등록하는 함수.
+    Register tasks for a specific sequence in the scheduler.
     """
 
     global group_execution_status
@@ -420,7 +420,7 @@ def execute_next_task(group_id, sequence):
         return
 
     with execution_lock:
-        # 다음 시퀀스를 시작할 때, 해당 시퀀스의 태스크 목록을 기록
+        # When starting the next sequence, record that sequence task list
         task_completion_status[group_id][sequence] = [
             t['detail_id'] for t in tasks]
 
@@ -429,7 +429,7 @@ def execute_next_task(group_id, sequence):
 
     for t in tasks:
         if su.is_false(t['is_manual']) or t['me_status'] == 'wait':
-            run_time = datetime.datetime.now() + timedelta(seconds=1)  # 1초 뒤 실행
+            run_time = datetime.datetime.now() + timedelta(seconds=1)  # Run one second later
             job_id = f"{group_id}_{t['detail_id']}_{sequence}"
             is_error_stop_detail = t['sd_is_error_stop']
             is_manual = t['is_manual']
@@ -455,8 +455,8 @@ def execute_next_task(group_id, sequence):
 
 def execute_task(detail_id, group_id, sequence, task_data, is_error_stop_group, is_error_stop_detail, manual_id):
     """
-    실제 태스크 실행 함수.
-    시퀀스/태스크 완료 처리를 한 뒤, 필요하면 다음 시퀀스를 스케줄한다.
+    Execute an actual task.
+    After completing sequence/task handling, schedule the next sequence if needed.
     """
 
     global group_execution_status
@@ -469,20 +469,20 @@ def execute_task(detail_id, group_id, sequence, task_data, is_error_stop_group, 
     Logger.debug(f"[execute_task] Task={task_data}")
     Logger.debug(f"[execute_task] Start: Group={group_id}, Detail={detail_id}, Seq={sequence}")
 
-    # 수동실행의 경우 상태변경
+    # Update status for manual execution
     if manual_id:
         db_instance.execute_query(sqloader.load_sql(service_name, "update_manual_execution_status"), ['processing', manual_id])
         Logger.debug(f"[execute_task] Manual ID={manual_id}")
 
-    # 태스크 실행 - 예외 처리 추가
+    # Execute task with exception handling
     start_time = datetime.datetime.now()
-    result = -1  # 기본값을 실패로 설정
+    result = -1  # Default to failure
     msg = None
 
     try:
         result, msg = task.task_run(task_data)
     except Exception as e:
-        # 예외 발생 시 처리
+        # Handle exceptions
         import traceback
         msg = f"Unexpected error during task execution:\n{traceback.format_exc()}"
         result = -1
@@ -509,12 +509,12 @@ def execute_task(detail_id, group_id, sequence, task_data, is_error_stop_group, 
     if result != 0:
         Logger.debug(f"[execute_task] Entered error handling block")
         if manual_id:
-            # 수동실행의 경우 상태변경
+            # Update status for manual execution
             Logger.debug(f"[execute_task] Updating manual_id={manual_id} to failed")
             db_instance.execute_query(sqloader.load_sql(service_name, "update_manual_execution_status"), ['failed', manual_id])
             Logger.debug(f"[DEBUG] Successfully updated manual_id={manual_id} to failed")
         if su.is_true(is_error_stop_group):
-            # 수동실행의 경우 상태변경
+            # Update status for manual execution
             if manual_id:
 
                 db_instance.execute_query(sqloader.load_sql(service_name, "update_manual_execution_group_status"), ['failed', group_id])
@@ -527,34 +527,34 @@ def execute_task(detail_id, group_id, sequence, task_data, is_error_stop_group, 
             exclude_task(group_id, detail_id)
         Logger.error(msg)
     else:
-        # 성공 - elif을 else로 변경
+        # Success path; replaced elif with else
         if manual_id:
             db_instance.execute_query(sqloader.load_sql(service_name, "update_manual_execution_status"), ['done', manual_id])
 
     if next_task_run:
         with execution_lock:
-            # 1) 현재 태스크 '완료' 처리
+            # 1) Mark the current task as completed
             task_completion_status[group_id][sequence].remove(detail_id)
             Logger.info(
                 f"[execute_task] Done Task={detail_id}. Remaining in Seq {sequence}: {task_completion_status[group_id][sequence]}")
 
-            # 시퀀스가 다 끝났는지 확인
+            # Check whether the sequence is complete
             sequence_finished = False
             if not task_completion_status[group_id][sequence]:
                 Logger.debug(
                     f"[execute_task] Seq {sequence} in Group={group_id} is complete.")
-                del task_completion_status[group_id][sequence]  # 시퀀스 삭제
+                del task_completion_status[group_id][sequence]  # Delete sequence
                 sequence_finished = True
 
-            # 2) 시퀀스가 완전히 끝났다면 → 다음 시퀀스가 있는지 확인 & 등록
+            # 2) If the sequence is fully complete → Check and register the next sequence
             next_sequence = sequence + 1
             if sequence_finished and next_sequence in group_execution_status[group_id]:
                 Logger.debug(
                     f"[execute_task] Preparing next sequence={next_sequence} for Group={group_id}")
-                # 여기서 다시 execute_next_task()를 호출해도 RLock 덕분에 데드락 X
+                # RLock prevents deadlock even if execute_next_task() is called again here
                 execute_next_task(group_id, next_sequence)
 
-            # 3) 현재 그룹 내 모든 시퀀스가 사라졌으면(더 이상 할 게 없으면) 종료
+            # 3) Finish when all sequences in the current group are gone
             if not task_completion_status[group_id]:
                 Logger.debug(
                     f"[execute_task] All tasks in Group={log_group_id} are complete.")
@@ -587,10 +587,10 @@ def error_handle(msg):
     Logger.debug(f"Error param={param}")
     db_instance.execute_query(sqloader.load_sql(service_name, "insert_execute_log"), param)
 
-# 미적용 함수
+# Unused function
 def cleanup_stale_tasks(self, timeout_minutes=60):
     """
-    일정 시간 이상 processing 상태인 태스크를 실패 처리
+    Mark tasks stuck in processing beyond a threshold as failed
     """
     sql = """
         UPDATE manual_execution
@@ -606,12 +606,12 @@ def cleanup_stale_tasks(self, timeout_minutes=60):
         self.db_connection.commit()
         Logger.info(f"Cleaned up {affected} stale tasks")
 
-# 미적용 함수
+# Unused function
 def retry_failed_task(self, task_id, max_retries=3):
     """
-    실패한 태스크를 재시도
+    Retry failed tasks
     """
-    # 현재 재시도 횟수 확인
+    # Check the current retry count
     with self.db_connection.cursor() as cursor:
         cursor.execute(
             "SELECT retry_count FROM manual_execution WHERE id = %s",
@@ -620,7 +620,7 @@ def retry_failed_task(self, task_id, max_retries=3):
         result = cursor.fetchone()
 
         if result and result[0] < max_retries:
-            # 재시도 가능
+            # Retry is available
             cursor.execute("""
                 UPDATE manual_execution
                 SET status = 'pending',

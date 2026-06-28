@@ -17,7 +17,7 @@ def execute_process(command):
     try:
         logger.debug(f"Executing command: {command}")
 
-        # Windows에서 UTF-8 인코딩을 위한 환경변수 설정
+        # Set environment variables for UTF-8 encoding on Windows
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
 
@@ -46,19 +46,19 @@ def execute_process(command):
 
 
 def house_keep(task_path, days):
-    # 현재 시간에서 days일 전의 시간 타임스탬프를 계산
+    # Calculate the timestamp for the given number of days before now
     cutoff = time.time() - (days * 86400)
 
-    # 태스크 경로에서 파일 목록 가져오기
+    # Get file list from the task path
     files = os.listdir(task_path)
 
-    # 각 파일에 대해
+    # For each file
     for file in files:
         file_path = os.path.join(task_path, file)
-        # 파일의 최종 수정 시간 타임스탬프 가져오기
+        # Get the file last-modified timestamp
         file_time = os.path.getmtime(file_path)
 
-        # 파일의 최종 수정 시간이 cutoff보다 이전이면 파일 삭제
+        # Delete the file if its last-modified time is older than the cutoff
         if file_time < cutoff:
             logger.info(f"Deleting {task_path}/{file}...")
             os.remove(file_path)
@@ -66,12 +66,12 @@ def house_keep(task_path, days):
 
 def task_run(task: dict):
     """
-    태스크를 실행하고 결과를 반환합니다.
+    Execute a task and return the result.
 
     Returns:
         tuple: (result_code, error_message)
-        - result_code: 0(성공), -1(실패)
-        - error_message: 에러 발생 시 메시지, 정상 시 None
+        - result_code: 0(success), -1(failure)
+        - error_message: Error message when an error occurs, otherwise None
     """
     result = 0
     msg = None
@@ -85,12 +85,12 @@ def task_run(task: dict):
         logger.debug(f"task_type={task_type}")
 
         if task_type == "archive":
-            # 파일 아카이브 태스크 처리
+            # Handle file archive task
             archive_type = task.get("archive_type", None)
             if archive_type in ('zip',):
                 check_result = check_source_path(task, source_path, destination_path)
                 if check_result == CHECKED_SOURCE:
-                    # 해당 정보를 사용하여 태스크 처리 수행
+                    # Process the task using that information
                     import zipfile
                     with zipfile.ZipFile(f"{destination_path}.{archive_type}", 'w', zipfile.ZIP_DEFLATED) as zipf:
                         for root, dirs, files in os.walk(source_path):
@@ -106,7 +106,7 @@ def task_run(task: dict):
                 elif check_result == -1:
                     raise ValueError(f"Source path error: {source_path}")
                 else:
-                    # check_result == 0: 소스 파일 없음, 스킵
+                    # check_result == 0: source file missing, skip
                     logger.info(f"Skipping archive task - source not found")
                     return 0, None
             else:
@@ -114,21 +114,21 @@ def task_run(task: dict):
 
 
         elif task_type == "command":
-            # 명령어를 사용한 태스크 처리
+            # Handle task using a command
             command = task.get("command", "").format(
                 date=datetime.now().strftime(date_format)
             )
 
-            # 해당 명령어로 태스크 처리 수행
+            # Process the task with the command
             result, msg = execute_process(command)
             if result != 0:
-                # 에러가 발생했지만 계속 진행 (house_keep 등)하지 않고 즉시 반환
+                # Return immediately on error instead of continuing, such as for house_keep
                 raise Exception(f"Command execution failed: {command}\n{msg}")
 
         elif task_type == "copy":
             check_result = check_source_path(task, source_path, destination_path)
             if check_result == CHECKED_SOURCE:
-                # 대상 디렉터리가 없으면 생성
+                # Create the destination directory if missing
                 dest_dir = os.path.dirname(destination_path)
                 if dest_dir and not os.path.exists(dest_dir):
                     os.makedirs(dest_dir, exist_ok=True)
@@ -138,7 +138,7 @@ def task_run(task: dict):
             elif check_result == -1:
                 raise ValueError(f"Source path error: {source_path}")
             else:
-                # check_result == 0: 소스 파일 없음, 스킵
+                # check_result == 0: source file missing, skip
                 logger.info(f"Skipping copy task - source not found")
                 return 0, None
 
@@ -151,8 +151,8 @@ def task_run(task: dict):
             house_keep_days = strutil.none_check(task.get("house_keep_days", 0), 0)
 
         if house_keep_days > 0 and house_keep_path != "":
-            # 하우스 킵
-            time.sleep(1)  # 1초 대기
+            # Housekeeping
+            time.sleep(1)  # Wait one second
             house_keep(house_keep_path, house_keep_days)
 
     except Exception as e:
@@ -176,7 +176,7 @@ def check_paths(task: dict):
     destination_date_format = strutil.check_date_format(task.get("destination_date_format", BASIC_DATE_FORMAT), date_format)
     logger.debug(f"destination_date_format={destination_date_format}")
 
-    # source_path, destination_path가 None이면 빈 문자열("")을 기본값으로 설정
+    # Default source_path and destination_path to an empty string when they are None
     source_path = task.get("source_path") or ""
     source_path = source_path.format(
         date=datetime.now().strftime(target_date_format)
@@ -194,12 +194,12 @@ def check_paths(task: dict):
 
 def check_source_path(task: dict, source_path, destination_path):
     """
-    소스 경로의 존재 여부를 확인합니다.
+    Check whether the source path exists.
 
     Returns:
-        int: CHECKED_SOURCE(1): 소스 존재
-             -1: 에러 (error_on_missing_source=True이고 소스 없음)
-             0: 스킵 (error_on_missing_source=False이고 소스 없음)
+        int: CHECKED_SOURCE(1): source exists
+             -1: error when error_on_missing_source=True and source is missing
+             0: skip when error_on_missing_source=False and source is missing
     """
     error_on_missing_source = task.get("error_on_missing_source", None)
     logger.debug(f"error_on_missing_source={error_on_missing_source}")
