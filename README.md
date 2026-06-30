@@ -57,9 +57,16 @@ Pick the component interactively, or pass it directly:
 
 ### Unattended (non-interactive) install
 
-For CI or scripted provisioning, supply config as flags/env and skip all prompts
-(a no-TTY / `CI` session is also auto-detected). Existing config is kept unless
-you pass `--reconfigure` / `-Reconfigure`.
+For CI or scripted provisioning, supply config as flags/env and pass
+`--non-interactive` / `-NonInteractive` (a `CI` session enables this
+automatically). Note: a plain interactive install **always** walks you through
+the config and never silences the prompts on its own — only an explicit
+non-interactive run uses defaults without asking.
+
+Re-running the installer always re-enters the config step: existing values are
+offered as the prompt defaults (press Enter to keep them) and the previous file
+is copied to `backups/<timestamp>/` before being rewritten. (`--reconfigure` /
+`-Reconfigure` is accepted for backward compatibility but is no longer required.)
 
 ```powershell
 # Windows: server with defaults (sqlite3, generated SECRET_KEY)
@@ -184,7 +191,16 @@ asking. The tables list each value, its default, and the flag that overrides it
 | `DB_TYPE` | `sqlite3` | `-DbType` / `--db-type` |
 | `DB_HOST/PORT/USER/PASSWORD/DATABASE/SCHEMA` | sqlite: empty; mysql: prompted | `-Db*` / `--db-*` |
 | `DB_PATH` (sqlite file) | `./timeweaver.sqlite3` | `-DbPath` / `--db-path` |
+| `DB_LOG` (log SQL queries) | `true` | `-DbLog` / `--db-log` |
 | `REDIS_HOST/PORT/DB` | `localhost` / `6379` / `0` | `-RedisHost/-RedisPort/-RedisDb` / `--redis-host/--redis-port/--redis-db` |
+| uvicorn bind host (written into `run-server.cmd` / start command) | `0.0.0.0` | `-ServerHost` / `--server-host` |
+| uvicorn bind port (written into `run-server.cmd` / start command) | `8000` | `-ServerPort` / `--server-port` |
+
+> **`all` install unifies the database.** The agent ships MySQL SQL only, while
+> the server supports both. If you choose an `all` install with a non-MySQL
+> server the installer warns that the agent would not share the server's data and
+> offers to switch the whole stack to a shared MySQL (DB connection asked once and
+> reused for both server and agent).
 
 > **Redis is optional.** It is only a shared logout-blacklist store for
 > multi-worker / multi-host deployments. If no Redis is running, the server falls
@@ -198,7 +214,9 @@ asking. The tables list each value, its default, and the flag that overrides it
 | DB connection (`host/port/user/password/database/schema`) | prompted (MySQL) | `-Db*` / `--db-*` |
 | log level (`base`/`console`/`file_timed`) | `debug` | `-LogLevel` / `--log-level` |
 | `device` name | machine hostname | `-DeviceName` / `--device-name` |
+| `reschedule.year/month/day/hour` (poll cron) | `*` | `-RescheduleYear/-RescheduleMonth/-RescheduleDay/-RescheduleHour` / `--reschedule-year/--reschedule-month/--reschedule-day/--reschedule-hour` |
 | `reschedule.minute` (poll cron) | `*/5` | `-RescheduleMinute` / `--reschedule-minute` |
+| `reschedule.second` (poll cron) | `0` | `-RescheduleSecond` / `--reschedule-second` |
 | `version` | shipped `conf/version.json` | — |
 
 The remaining `server.json` fields (logging format/rotation, sqloader and
