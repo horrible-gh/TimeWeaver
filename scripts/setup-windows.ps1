@@ -12,16 +12,24 @@ param(
     [string]$DbName = "",
     [string]$DbSchema = "",
     [string]$DbPath = "",
+    [string]$DbLog = "",
     [string]$SecretKey = "",
     [string]$AllowedOrigin = "",
     [string]$Context = "",
     [string]$AccessTokenExpireMinutes = "",
+    [string]$ServerHost = "",
+    [string]$ServerPort = "",
     [string]$RedisHost = "",
     [string]$RedisPort = "",
     [string]$RedisDb = "",
     # Agent config
     [string]$DeviceName = "",
+    [string]$RescheduleYear = "",
+    [string]$RescheduleMonth = "",
+    [string]$RescheduleDay = "",
+    [string]$RescheduleHour = "",
     [string]$RescheduleMinute = "",
+    [string]$RescheduleSecond = "",
     [string]$LogLevel = "",
     # Client config
     [string]$ApiUrl = "",
@@ -34,10 +42,11 @@ param(
 $ErrorActionPreference = "Stop"
 $RootDir = Split-Path -Parent $PSScriptRoot
 
-# Auto-detect a non-interactive session so prompts never hang in CI / pipelines.
-if (-not $NonInteractive) {
-    if ($env:CI -or [Console]::IsInputRedirected) { $NonInteractive = $true }
-}
+# NOTE: $NonInteractive is honoured ONLY when explicitly passed (or CI=true). The
+# installer no longer auto-detects a redirected stdin: the whole point is that a
+# plain interactive install lets you set every value, so we never silence the
+# prompts behind your back. CI keeps a safe escape hatch via the env var.
+if (-not $NonInteractive -and $env:CI) { $NonInteractive = $true }
 
 function Ask {
     param([string]$Prompt, [string]$Default = "")
@@ -57,6 +66,42 @@ function New-SecretKey {
     return -join ($bytes | ForEach-Object { $_.ToString('x2') })
 }
 
+function Backup-IfExists {
+    param([string]$Path)
+    if (Test-Path -LiteralPath $Path) {
+        $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $backupDir = Join-Path $RootDir "backups\$stamp"
+        New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+        $dest = Join-Path $backupDir (Split-Path -Leaf $Path)
+        Copy-Item -LiteralPath $Path -Destination $dest -Force
+        Write-Host "  Backed up existing $(Split-Path -Leaf $Path) -> backups\$stamp\"
+    }
+}
+
+# Read an existing server\.env into a hashtable so re-runs can offer current
+# values as defaults instead of silently skipping the whole config step.
+function Read-EnvFile {
+    param([string]$Path)
+    $map = @{}
+    if (Test-Path -LiteralPath $Path) {
+        foreach ($line in Get-Content -LiteralPath $Path) {
+            if ($line -match '^\s*([A-Za-z0-9_]+)\s*=\s*(.*)$') {
+                $map[$Matches[1]] = $Matches[2]
+            }
+        }
+    }
+    return $map
+}
+
+function Pick {
+    # Resolve a value: explicit flag wins, else prompt (seeded with the existing
+    # value when present, otherwise the built-in default).
+    param([string]$Flag, [string]$Prompt, [string]$Existing, [string]$Default)
+    if ($Flag -ne "") { return $Flag }
+    $seed = if ($Existing -ne "" -and $null -ne $Existing) { $Existing } else { $Default }
+    return Ask $Prompt $seed
+}
+
 # --- Component selection ------------------------------------------------------
 if ($Component -eq "") {
     $Component = Ask "Install which component? (all/server/agent/client)" "all"
@@ -68,6 +113,43 @@ if ($Component -notin @("all", "server", "agent", "client")) {
 $DoServer = $Component -in @("all", "server")
 $DoAgent  = $Component -in @("all", "agent")
 $DoClient = $Component -in @("all", "client")
+
+# --- Shared database resolution ----------------------------------------------
+# The agent ships MySQL SQL only; the server supports both. Resolve the DB once
+# so an "all" install asks a single set of DB questions and the server + agent
+# end up pointing at the SAME database. If the agent is involved but the server
+# is on sqlite3, warn loudly (they would otherwise never share data).
+$script:DbType = $DbType
+$script:My = @{ host = ""; port = ""; user = ""; password = ""; database = ""; schema = "" }
+
+function Resolve-SharedDb {
+    $existingEnv = Read-EnvFile (Join-Path $RootDir "server\.env")
+
+    if ($DoServer) {
+        $seedType = if ($existingEnv.ContainsKey("DB_TYPE") -and $existingEnv["DB_TYPE"]) { $existingEnv["DB_TYPE"] } else { "sqlite3" }
+        $script:DbType = Pick $DbType "Server database type (sqlite3/mysql)" $seedType "sqlite3"
+    }
+
+    if ($DoServer -and $DoAgent -and $script:DbType -ne "mysql") {
+        Write-Host ""
+        Write-Host "  [!] The agent works with MySQL ONLY, but the server DB is '$($script:DbType)'." -ForegroundColor Yellow
+        Write-Host "      With different databases the agent cannot see the server's data." -ForegroundColor Yellow
+        $switch = Ask "      Switch the whole stack to a shared MySQL? (Y/n)" "Y"
+        if ($switch -match '^(y|yes)$') { $script:DbType = "mysql" }
+        else { Write-Host "      Proceeding split: server on $($script:DbType), agent on its own MySQL." -ForegroundColor Yellow }
+        Write-Host ""
+    }
+
+    # Collect MySQL connection details once if anything needs MySQL.
+    if ($script:DbType -eq "mysql" -or $DoAgent) {
+        $script:My.host     = Pick $DbHost     "DB host"     $existingEnv["DB_HOST"]     "127.0.0.1"
+        $script:My.port     = Pick $DbPort     "DB port"     $existingEnv["DB_PORT"]     "3306"
+        $script:My.user     = Pick $DbUser     "DB user"     $existingEnv["DB_USER"]     "timeweaver"
+        $script:My.password = Pick $DbPassword "DB password" $existingEnv["DB_PASSWORD"] ""
+        $script:My.database = Pick $DbName     "DB name"     $existingEnv["DB_DATABASE"] "timeweaver"
+        $script:My.schema   = Pick $DbSchema   "DB schema (blank if none)" $existingEnv["DB_SCHEMA"] ""
+    }
+}
 
 function Setup-PythonProject {
     param([Parameter(Mandatory = $true)][string]$ProjectDir)
@@ -87,42 +169,33 @@ function Write-CommandFile {
     Write-Host "Created $Path"
 }
 
-# --- Config generators (write ready-to-run config, no manual editing) ---------
+# --- Config generators (always enter config; existing values become defaults) -
 function Write-ServerEnv {
     $target = Join-Path $RootDir "server\.env"
-    if ((Test-Path -LiteralPath $target) -and -not $Reconfigure) {
-        Write-Host "Using existing server\.env (pass -Reconfigure to regenerate)."
-        return
-    }
+    $existing = Read-EnvFile $target
 
-    # Every .env value is decided at install time: a flag wins, otherwise the
-    # installer prompts (showing the default; Enter accepts it). In
-    # non-interactive mode Ask returns the default, so nothing ever blocks.
-    $dbType = if ($DbType -ne "") { $DbType } else { Ask "Server database type (sqlite3/mysql)" "sqlite3" }
-
-    # SECRET_KEY is decided at install too, but defaults to a fresh crypto-random
+    $dbType = $script:DbType
+    # SECRET_KEY: keep the existing one on re-run, else a fresh crypto-random
     # value (never a placeholder). A flag can pin it for reproducible deploys.
-    $secret = if ($SecretKey -ne "") { $SecretKey } else { New-SecretKey }
-    $origin = if ($AllowedOrigin -ne "") { $AllowedOrigin } else { Ask "CORS allowed origin (ALLOWED_ORIGIN)" "*" }
-    $ctx    = if ($Context -ne "") { $Context } else { Ask "API context path (CONTEXT)" "/time_weaver" }
-    $expire = if ($AccessTokenExpireMinutes -ne "") { $AccessTokenExpireMinutes } else { Ask "Access token lifetime in minutes (ACCESS_TOKEN_EXPIRE_MINUTES)" "30" }
-    # Redis is optional at runtime (server falls back to an in-process token
-    # blacklist). Values are still decided at install for the multi-host case.
-    $rHost  = if ($RedisHost -ne "") { $RedisHost } else { Ask "Redis host (optional; REDIS_HOST)" "localhost" }
-    $rPort  = if ($RedisPort -ne "") { $RedisPort } else { Ask "Redis port (REDIS_PORT)" "6379" }
-    $rDb    = if ($RedisDb   -ne "") { $RedisDb }   else { Ask "Redis db index (REDIS_DB)" "0" }
+    $secret = if ($SecretKey -ne "") { $SecretKey }
+              elseif ($existing.ContainsKey("SECRET_KEY") -and $existing["SECRET_KEY"]) { $existing["SECRET_KEY"] }
+              else { New-SecretKey }
+
+    $origin   = Pick $AllowedOrigin "CORS allowed origin (ALLOWED_ORIGIN)" $existing["ALLOWED_ORIGIN"] "*"
+    $ctx      = Pick $Context "API context path (CONTEXT)" $existing["CONTEXT"] "/time_weaver"
+    $expire   = Pick $AccessTokenExpireMinutes "Access token lifetime in minutes (ACCESS_TOKEN_EXPIRE_MINUTES)" $existing["ACCESS_TOKEN_EXPIRE_MINUTES"] "30"
+    $dbLog    = Pick $DbLog "Log DB queries? (true/false; DB_LOG)" $existing["DB_LOG"] "true"
+    $rHost    = Pick $RedisHost "Redis host (optional; REDIS_HOST)" $existing["REDIS_HOST"] "localhost"
+    $rPort    = Pick $RedisPort "Redis port (REDIS_PORT)" $existing["REDIS_PORT"] "6379"
+    $rDb      = Pick $RedisDb "Redis db index (REDIS_DB)" $existing["REDIS_DB"] "0"
 
     if ($dbType -eq "mysql") {
-        $h  = if ($DbHost -ne "") { $DbHost } else { Ask "DB host (DB_HOST)" "127.0.0.1" }
-        $p  = if ($DbPort -ne "") { $DbPort } else { Ask "DB port (DB_PORT)" "3306" }
-        $u  = if ($DbUser -ne "") { $DbUser } else { Ask "DB user (DB_USER)" "timeweaver" }
-        $pw = if ($DbPassword -ne "") { $DbPassword } else { Ask "DB password (DB_PASSWORD)" "" }
-        $db = if ($DbName -ne "") { $DbName } else { Ask "DB name (DB_DATABASE)" "timeweaver" }
-        $sc = if ($DbSchema -ne "") { $DbSchema } else { Ask "DB schema, blank if none (DB_SCHEMA)" "" }
+        $h = $script:My.host; $p = $script:My.port; $u = $script:My.user
+        $pw = $script:My.password; $db = $script:My.database; $sc = $script:My.schema
         $dbPath = ""
     } else {
         $h = "127.0.0.1"; $p = "0"; $u = ""; $pw = ""; $db = ""; $sc = ""
-        $dbPath = if ($DbPath -ne "") { $DbPath } else { Ask "SQLite file path (DB_PATH)" "./timeweaver.sqlite3" }
+        $dbPath = Pick $DbPath "SQLite file path (DB_PATH)" $existing["DB_PATH"] "./timeweaver.sqlite3"
     }
 
     $content = @"
@@ -137,58 +210,79 @@ DB_USER=$u
 DB_PASSWORD=$pw
 DB_DATABASE=$db
 DB_SCHEMA=$sc
+DB_LOG=$dbLog
 DB_PATH=$dbPath
 REDIS_HOST=$rHost
 REDIS_PORT=$rPort
 REDIS_DB=$rDb
 "@
+    Backup-IfExists $target
     Set-Content -LiteralPath $target -Value $content -Encoding ASCII
-    Write-Host "Wrote server\.env (DB_TYPE=$dbType, generated SECRET_KEY, all keys populated)."
+    Write-Host "Wrote server\.env (DB_TYPE=$dbType, all keys populated)."
 }
 
 function Write-AgentConfig {
     $serverTarget = Join-Path $RootDir "agent\conf\server.json"
     $twTarget     = Join-Path $RootDir "agent\conf\time_weaver.json"
 
-    if ((Test-Path -LiteralPath $serverTarget) -and (Test-Path -LiteralPath $twTarget) -and -not $Reconfigure) {
-        Write-Host "Using existing agent config (pass -Reconfigure to regenerate)."
-        return
-    }
+    # Existing values become the defaults so a re-run is non-destructive if you
+    # just press Enter - but the config step ALWAYS runs (no silent skip).
+    $exTw = $null
+    if (Test-Path -LiteralPath $twTarget) { $exTw = Get-Content -LiteralPath $twTarget -Raw | ConvertFrom-Json }
+    $exSrv = $null
+    if (Test-Path -LiteralPath $serverTarget) { $exSrv = Get-Content -LiteralPath $serverTarget -Raw | ConvertFrom-Json }
 
-    # The agent connects to the shared MySQL database (it ships MySQL SQL only).
-    $h  = if ($DbHost -ne "") { $DbHost } else { Ask "Agent DB host" "127.0.0.1" }
-    $p  = if ($DbPort -ne "") { [int]$DbPort } else { [int](Ask "Agent DB port" "3306") }
-    $u  = if ($DbUser -ne "") { $DbUser } else { Ask "Agent DB user" "timeweaver" }
-    $pw = if ($DbPassword -ne "") { $DbPassword } else { Ask "Agent DB password" "" }
-    $db = if ($DbName -ne "") { $DbName } else { Ask "Agent DB name" "timeweaver" }
-    $sc = if ($DbSchema -ne "") { $DbSchema } else { Ask "Agent DB schema (blank if none)" "" }
-    $dev = if ($DeviceName -ne "") { $DeviceName } else { Ask "Agent device name" $env:COMPUTERNAME }
+    # The agent always talks to MySQL; reuse the shared DB resolved earlier.
+    $h  = $script:My.host
+    $p  = $script:My.port
+    $u  = $script:My.user
+    $pw = $script:My.password
+    $db = $script:My.database
+    $sc = $script:My.schema
 
-    $level = if ($LogLevel -ne "") { $LogLevel } else { "debug" }
-    $rmin  = if ($RescheduleMinute -ne "") { $RescheduleMinute } else { "*/5" }
+    $exDev = if ($exTw) { [string]$exTw.device } else { "" }
+    $dev = Pick $DeviceName "Agent device name" $exDev $env:COMPUTERNAME
+
+    $exLevel = if ($exSrv) { [string]$exSrv.log.base.level } else { "" }
+    $level = Pick $LogLevel "Agent log level (debug/info/warning/error)" $exLevel "debug"
+
+    # Full reschedule cron is configurable here - not just the minute field.
+    $exRe = if ($exTw) { $exTw.reschedule } else { $null }
+    $ry = Pick $RescheduleYear   "Reschedule cron - year"   ($(if($exRe){[string]$exRe.year})  ) "*"
+    $rmo= Pick $RescheduleMonth  "Reschedule cron - month"  ($(if($exRe){[string]$exRe.month}) ) "*"
+    $rd = Pick $RescheduleDay    "Reschedule cron - day"    ($(if($exRe){[string]$exRe.day})   ) "*"
+    $rh = Pick $RescheduleHour   "Reschedule cron - hour"   ($(if($exRe){[string]$exRe.hour})  ) "*"
+    $rmi= Pick $RescheduleMinute "Reschedule cron - minute" ($(if($exRe){[string]$exRe.minute})) "*/5"
+    $rs = Pick $RescheduleSecond "Reschedule cron - second" ($(if($exRe){[string]$exRe.second})) "0"
 
     $cfg = Get-Content -LiteralPath (Join-Path $RootDir "agent\conf\server.sample.json") -Raw | ConvertFrom-Json
     $my = $cfg.databases.time_weaver.database.mysql
-    $my.host = $h; $my.port = $p; $my.user = $u; $my.password = $pw; $my.database = $db; $my.schema = $sc
+    $my.host = $h; $my.port = [int]$p; $my.user = $u; $my.password = $pw; $my.database = $db; $my.schema = $sc
     $cfg.log.base.level = $level; $cfg.log.console.level = $level; $cfg.log.file_timed.level = $level
+    Backup-IfExists $serverTarget
     ($cfg | ConvertTo-Json -Depth 30) | Set-Content -LiteralPath $serverTarget -Encoding ASCII
     Write-Host "Wrote agent\conf\server.json (host=$h db=$db, log level=$level)."
 
     $tw = Get-Content -LiteralPath (Join-Path $RootDir "agent\conf\time_weaver.sample.json") -Raw | ConvertFrom-Json
     $tw.device = $dev
-    $tw.reschedule.minute = $rmin
+    $tw.reschedule.year = $ry; $tw.reschedule.month = $rmo; $tw.reschedule.day = $rd
+    $tw.reschedule.hour = $rh; $tw.reschedule.minute = $rmi; $tw.reschedule.second = $rs
+    Backup-IfExists $twTarget
     ($tw | ConvertTo-Json -Depth 30) | Set-Content -LiteralPath $twTarget -Encoding ASCII
-    Write-Host "Wrote agent\conf\time_weaver.json (device=$dev, reschedule minute=$rmin)."
+    Write-Host "Wrote agent\conf\time_weaver.json (device=$dev, reschedule=$ry $rmo $rd $rh $rmi $rs)."
     Write-Host "  The agent registers this device automatically on first run (no manual DB seeding)."
 }
 
 function Write-ClientConfig {
     $target = Join-Path $RootDir "client\config.js"
-    if ((Test-Path -LiteralPath $target) -and -not $Reconfigure) {
-        Write-Host "Using existing client\config.js (pass -Reconfigure to regenerate)."
-        return
+    $existingUrl = ""
+    if (Test-Path -LiteralPath $target) {
+        $m = Select-String -LiteralPath $target -Pattern 'API_SERVER_URL:\s*"([^"]*)"' | Select-Object -First 1
+        if ($m) { $existingUrl = $m.Matches[0].Groups[1].Value }
     }
-    $url = if ($ApiUrl -ne "") { $ApiUrl } else { Ask "API server URL" "http://127.0.0.1:8000/time_weaver" }
+    # Default the client URL to the server bind we just chose.
+    $defUrl = "http://127.0.0.1:$($script:ServerPort)$($script:ServerCtx)"
+    $url = Pick $ApiUrl "API server URL" $existingUrl $defUrl
     $content = @"
 const config = {
     API_SERVER_URL: "$url"
@@ -196,9 +290,22 @@ const config = {
 
 export default config;
 "@
+    Backup-IfExists $target
     Set-Content -LiteralPath $target -Value $content -Encoding ASCII
     Write-Host "Wrote client\config.js (API_SERVER_URL=$url)."
 }
+
+# --- Resolve cross-cutting values up front -----------------------------------
+Resolve-SharedDb
+
+# Server bind host/port are real install settings (no longer hard-coded in
+# run-server.cmd). The client default URL derives from them.
+$existingEnvTop = Read-EnvFile (Join-Path $RootDir "server\.env")
+$script:ServerHost = Pick $ServerHost "Server bind host" "" "0.0.0.0"
+$script:ServerPort = Pick $ServerPort "Server bind port" "" "8000"
+$script:ServerCtx  = if ($Context -ne "") { $Context }
+                     elseif ($existingEnvTop.ContainsKey("CONTEXT") -and $existingEnvTop["CONTEXT"]) { $existingEnvTop["CONTEXT"] }
+                     else { "/time_weaver" }
 
 # --- Run ----------------------------------------------------------------------
 if ($DoServer) { New-Item -ItemType Directory -Force -Path (Join-Path $RootDir "server\log") | Out-Null }
@@ -229,7 +336,7 @@ if ($DoServer) {
     Write-CommandFile (Join-Path $RootDir "run-server.cmd") @"
 @echo off
 cd /d "%~dp0server"
-".venv\Scripts\python.exe" -m uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1
+".venv\Scripts\python.exe" -m uvicorn app:app --host $($script:ServerHost) --port $($script:ServerPort) --workers 1
 "@
 }
 
@@ -245,6 +352,6 @@ Write-Host ""
 Write-Host "TimeWeaver Windows setup complete (component: $Component)."
 Write-Host "Config was written automatically - no files to copy or edit."
 Write-Host "Start:"
-if ($DoServer) { Write-Host "  - run-server.cmd" }
+if ($DoServer) { Write-Host "  - run-server.cmd  (listens on $($script:ServerHost):$($script:ServerPort))" }
 if ($DoAgent)  { Write-Host "  - run-agent.cmd  (needs the shared database reachable)" }
 if ($DoClient) { Write-Host "  - serve client\dist, or 'npm run serve' for development" }

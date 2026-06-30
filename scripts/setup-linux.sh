@@ -18,15 +18,23 @@ DB_PASSWORD="${DB_PASSWORD:-}"
 DB_NAME="${DB_NAME:-}"
 DB_SCHEMA="${DB_SCHEMA:-}"
 DB_PATH="${DB_PATH:-}"
+DB_LOG="${DB_LOG:-}"
 SECRET_KEY="${SECRET_KEY:-}"
 ALLOWED_ORIGIN="${ALLOWED_ORIGIN:-}"
 CONTEXT="${CONTEXT:-}"
 ACCESS_TOKEN_EXPIRE_MINUTES="${ACCESS_TOKEN_EXPIRE_MINUTES:-}"
+SERVER_HOST="${SERVER_HOST:-}"
+SERVER_PORT="${SERVER_PORT:-}"
 REDIS_HOST="${REDIS_HOST:-}"
 REDIS_PORT="${REDIS_PORT:-}"
 REDIS_DB="${REDIS_DB:-}"
 DEVICE_NAME="${DEVICE_NAME:-}"
+RESCHEDULE_YEAR="${RESCHEDULE_YEAR:-}"
+RESCHEDULE_MONTH="${RESCHEDULE_MONTH:-}"
+RESCHEDULE_DAY="${RESCHEDULE_DAY:-}"
+RESCHEDULE_HOUR="${RESCHEDULE_HOUR:-}"
 RESCHEDULE_MINUTE="${RESCHEDULE_MINUTE:-}"
+RESCHEDULE_SECOND="${RESCHEDULE_SECOND:-}"
 LOG_LEVEL="${LOG_LEVEL:-}"
 API_URL="${API_URL:-}"
 
@@ -41,18 +49,22 @@ Config (optional; installer prompts interactively otherwise, sensible defaults a
   --db-type sqlite3|mysql               Server database type (default sqlite3)
   --db-host / --db-port / --db-user / --db-password / --db-name / --db-schema
   --db-path PATH                        sqlite file path (server, sqlite3 only)
+  --db-log true|false                   Log DB queries (default true)
   --secret-key KEY                      Server SECRET_KEY (auto-generated if omitted)
   --allowed-origin ORIGIN               Server CORS origin (default *)
   --context PATH                        Server API context (default /time_weaver)
   --access-token-expire-minutes N       JWT lifetime in minutes (default 30)
+  --server-host HOST                    uvicorn bind host (default 0.0.0.0)
+  --server-port PORT                    uvicorn bind port (default 8000)
   --redis-host / --redis-port / --redis-db   Optional Redis blacklist store (defaults localhost:6379/0)
   --device-name NAME                    Agent device name (default: hostname)
-  --reschedule-minute CRON              Agent poll cron minute field (default */5)
+  --reschedule-year / --reschedule-month / --reschedule-day
+  --reschedule-hour / --reschedule-minute / --reschedule-second   Agent poll cron fields
   --log-level LEVEL                     Agent log level (default debug)
   --api-url URL                         Client API server URL
 
 Behaviour:
-  --reconfigure                         Overwrite existing config files
+  --reconfigure                         (kept for compatibility; config always runs now)
   --non-interactive                     Never prompt; use flags/env/defaults
   --install-services                    Install systemd services (server/agent)
   --service-user USER                   systemd service user (default: current user)
@@ -72,15 +84,23 @@ while [[ $# -gt 0 ]]; do
     --db-name) DB_NAME="${2:?}"; shift 2 ;;
     --db-schema) DB_SCHEMA="${2:?}"; shift 2 ;;
     --db-path) DB_PATH="${2:?}"; shift 2 ;;
+    --db-log) DB_LOG="${2:?}"; shift 2 ;;
     --secret-key) SECRET_KEY="${2:?}"; shift 2 ;;
     --allowed-origin) ALLOWED_ORIGIN="${2:?}"; shift 2 ;;
     --context) CONTEXT="${2:?}"; shift 2 ;;
     --access-token-expire-minutes) ACCESS_TOKEN_EXPIRE_MINUTES="${2:?}"; shift 2 ;;
+    --server-host) SERVER_HOST="${2:?}"; shift 2 ;;
+    --server-port) SERVER_PORT="${2:?}"; shift 2 ;;
     --redis-host) REDIS_HOST="${2:?}"; shift 2 ;;
     --redis-port) REDIS_PORT="${2:?}"; shift 2 ;;
     --redis-db) REDIS_DB="${2:?}"; shift 2 ;;
     --device-name) DEVICE_NAME="${2:?}"; shift 2 ;;
+    --reschedule-year) RESCHEDULE_YEAR="${2:?}"; shift 2 ;;
+    --reschedule-month) RESCHEDULE_MONTH="${2:?}"; shift 2 ;;
+    --reschedule-day) RESCHEDULE_DAY="${2:?}"; shift 2 ;;
+    --reschedule-hour) RESCHEDULE_HOUR="${2:?}"; shift 2 ;;
     --reschedule-minute) RESCHEDULE_MINUTE="${2:?}"; shift 2 ;;
+    --reschedule-second) RESCHEDULE_SECOND="${2:?}"; shift 2 ;;
     --log-level) LOG_LEVEL="${2:?}"; shift 2 ;;
     --api-url) API_URL="${2:?}"; shift 2 ;;
     --reconfigure) RECONFIGURE=1; shift ;;
@@ -92,8 +112,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Auto-detect non-interactive (no TTY) so prompts never block.
-if [[ ! -t 0 || -n "${CI:-}" ]]; then NONINTERACTIVE=1; fi
+# Honour non-interactive ONLY when explicitly requested (flag) or under CI. We no
+# longer auto-disable prompts on a redirected stdin: a plain interactive install
+# must let you set every value, never silently fall back to defaults.
+if [[ -n "${CI:-}" ]]; then NONINTERACTIVE=1; fi
 
 ask() {  # ask "Prompt" "default" -> echoes answer
   local prompt="$1" default="${2:-}" reply
@@ -106,9 +128,35 @@ ask() {  # ask "Prompt" "default" -> echoes answer
   echo "${reply:-$default}"
 }
 
+# pick FLAG "Prompt" EXISTING DEFAULT  -> flag wins, else prompt seeded by existing/default
+pick() {
+  local flag="$1" prompt="$2" existing="$3" default="$4"
+  if [[ -n "$flag" ]]; then echo "$flag"; return; fi
+  local seed="${existing:-$default}"
+  ask "$prompt" "$seed"
+}
+
 gen_secret() {
   if command -v openssl >/dev/null 2>&1; then openssl rand -hex 32; return; fi
   "$PYTHON_BIN" -c "import secrets; print(secrets.token_hex(32))"
+}
+
+env_get() {  # env_get KEY FILE -> echoes value or empty
+  local key="$1" file="$2"
+  [[ -f "$file" ]] || { echo ""; return; }
+  sed -n "s/^${key}=//p" "$file" | head -n1
+}
+
+backup_if_exists() {
+  local path="$1"
+  if [[ -f "$path" ]]; then
+    local stamp backup_dir
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    backup_dir="$ROOT_DIR/backups/$stamp"
+    mkdir -p "$backup_dir"
+    cp -f "$path" "$backup_dir/$(basename "$path")"
+    echo "  Backed up existing $(basename "$path") -> backups/$stamp/"
+  fi
 }
 
 if [[ -z "$COMPONENT" ]]; then
@@ -123,6 +171,37 @@ DO_SERVER=0; DO_AGENT=0; DO_CLIENT=0
 [[ "$COMPONENT" == "all" || "$COMPONENT" == "server" ]] && DO_SERVER=1
 [[ "$COMPONENT" == "all" || "$COMPONENT" == "agent" ]] && DO_AGENT=1
 [[ "$COMPONENT" == "all" || "$COMPONENT" == "client" ]] && DO_CLIENT=1
+
+# --- Shared database resolution (server + agent point at the same DB) ---------
+ENV_FILE="$ROOT_DIR/server/.env"
+RESOLVED_DB_TYPE="$DB_TYPE"
+MY_HOST=""; MY_PORT=""; MY_USER=""; MY_PASSWORD=""; MY_DB=""; MY_SCHEMA=""
+
+resolve_shared_db() {
+  if [[ "$DO_SERVER" == "1" ]]; then
+    local seed_type; seed_type="$(env_get DB_TYPE "$ENV_FILE")"; seed_type="${seed_type:-sqlite3}"
+    RESOLVED_DB_TYPE="$(pick "$DB_TYPE" "Server database type (sqlite3/mysql)" "$seed_type" "sqlite3")"
+  fi
+
+  if [[ "$DO_SERVER" == "1" && "$DO_AGENT" == "1" && "$RESOLVED_DB_TYPE" != "mysql" ]]; then
+    echo ""
+    echo "  [!] The agent works with MySQL ONLY, but the server DB is '$RESOLVED_DB_TYPE'." >&2
+    echo "      With different databases the agent cannot see the server's data." >&2
+    local switch; switch="$(ask "      Switch the whole stack to a shared MySQL? (Y/n)" "Y")"
+    if [[ "$switch" =~ ^([Yy]|[Yy][Ee][Ss])$ ]]; then RESOLVED_DB_TYPE="mysql"
+    else echo "      Proceeding split: server on $RESOLVED_DB_TYPE, agent on its own MySQL." >&2; fi
+    echo ""
+  fi
+
+  if [[ "$RESOLVED_DB_TYPE" == "mysql" || "$DO_AGENT" == "1" ]]; then
+    MY_HOST="$(pick "$DB_HOST" "DB host" "$(env_get DB_HOST "$ENV_FILE")" "127.0.0.1")"
+    MY_PORT="$(pick "$DB_PORT" "DB port" "$(env_get DB_PORT "$ENV_FILE")" "3306")"
+    MY_USER="$(pick "$DB_USER" "DB user" "$(env_get DB_USER "$ENV_FILE")" "timeweaver")"
+    MY_PASSWORD="$(pick "$DB_PASSWORD" "DB password" "$(env_get DB_PASSWORD "$ENV_FILE")" "")"
+    MY_DB="$(pick "$DB_NAME" "DB name" "$(env_get DB_DATABASE "$ENV_FILE")" "timeweaver")"
+    MY_SCHEMA="$(pick "$DB_SCHEMA" "DB schema (blank if none)" "$(env_get DB_SCHEMA "$ENV_FILE")" "")"
+  fi
+}
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -144,42 +223,30 @@ setup_python_project() {
 
 write_server_env() {
   local target="$ROOT_DIR/server/.env"
-  if [[ -f "$target" && "$RECONFIGURE" != "1" ]]; then
-    echo "Using existing server/.env (pass --reconfigure to regenerate)."
-    return
-  fi
-  # Every .env value is decided at install time: a flag/env wins, otherwise the
-  # installer prompts (showing the default; Enter accepts it). In
-  # non-interactive mode ask() returns the default, so nothing ever blocks.
-  local db_type="$DB_TYPE"
-  [[ -z "$db_type" ]] && db_type="$(ask "Server database type (sqlite3/mysql)" "sqlite3")"
-  # SECRET_KEY is decided at install too, defaulting to a fresh crypto-random
-  # value (never a placeholder); a flag/env can pin it for reproducible deploys.
+  # Existing values become defaults; the config step ALWAYS runs (no silent skip).
+  local db_type="$RESOLVED_DB_TYPE"
   local secret="$SECRET_KEY"
+  [[ -z "$secret" ]] && secret="$(env_get SECRET_KEY "$target")"
   [[ -z "$secret" ]] && secret="$(gen_secret)"
-  local origin="${ALLOWED_ORIGIN:-$(ask "CORS allowed origin (ALLOWED_ORIGIN)" "*")}"
-  local ctx="${CONTEXT:-$(ask "API context path (CONTEXT)" "/time_weaver")}"
-  local expire="${ACCESS_TOKEN_EXPIRE_MINUTES:-$(ask "Access token lifetime in minutes (ACCESS_TOKEN_EXPIRE_MINUTES)" "30")}"
-  # Redis is optional at runtime (server falls back to an in-process token
-  # blacklist). Values are still decided at install for the multi-host case.
-  local rhost="${REDIS_HOST:-$(ask "Redis host (optional; REDIS_HOST)" "localhost")}"
-  local rport="${REDIS_PORT:-$(ask "Redis port (REDIS_PORT)" "6379")}"
-  local rdb="${REDIS_DB:-$(ask "Redis db index (REDIS_DB)" "0")}"
+
+  local origin ctx expire dblog rhost rport rdb
+  origin="$(pick "$ALLOWED_ORIGIN" "CORS allowed origin (ALLOWED_ORIGIN)" "$(env_get ALLOWED_ORIGIN "$target")" "*")"
+  ctx="$(pick "$CONTEXT" "API context path (CONTEXT)" "$(env_get CONTEXT "$target")" "/time_weaver")"
+  expire="$(pick "$ACCESS_TOKEN_EXPIRE_MINUTES" "Access token lifetime in minutes (ACCESS_TOKEN_EXPIRE_MINUTES)" "$(env_get ACCESS_TOKEN_EXPIRE_MINUTES "$target")" "30")"
+  dblog="$(pick "$DB_LOG" "Log DB queries? (true/false; DB_LOG)" "$(env_get DB_LOG "$target")" "true")"
+  rhost="$(pick "$REDIS_HOST" "Redis host (optional; REDIS_HOST)" "$(env_get REDIS_HOST "$target")" "localhost")"
+  rport="$(pick "$REDIS_PORT" "Redis port (REDIS_PORT)" "$(env_get REDIS_PORT "$target")" "6379")"
+  rdb="$(pick "$REDIS_DB" "Redis db index (REDIS_DB)" "$(env_get REDIS_DB "$target")" "0")"
 
   local h p u pw db sc dbpath
   if [[ "$db_type" == "mysql" ]]; then
-    h="${DB_HOST:-$(ask "DB host (DB_HOST)" "127.0.0.1")}"
-    p="${DB_PORT:-$(ask "DB port (DB_PORT)" "3306")}"
-    u="${DB_USER:-$(ask "DB user (DB_USER)" "timeweaver")}"
-    pw="${DB_PASSWORD:-$(ask "DB password (DB_PASSWORD)" "")}"
-    db="${DB_NAME:-$(ask "DB name (DB_DATABASE)" "timeweaver")}"
-    sc="${DB_SCHEMA:-$(ask "DB schema, blank if none (DB_SCHEMA)" "")}"
-    dbpath=""
+    h="$MY_HOST"; p="$MY_PORT"; u="$MY_USER"; pw="$MY_PASSWORD"; db="$MY_DB"; sc="$MY_SCHEMA"; dbpath=""
   else
     h="127.0.0.1"; p="0"; u=""; pw=""; db=""; sc=""
-    dbpath="${DB_PATH:-$(ask "SQLite file path (DB_PATH)" "./timeweaver.sqlite3")}"
+    dbpath="$(pick "$DB_PATH" "SQLite file path (DB_PATH)" "$(env_get DB_PATH "$target")" "./timeweaver.sqlite3")"
   fi
 
+  backup_if_exists "$target"
   cat > "$target" <<EOF
 ALLOWED_ORIGIN=$origin
 SECRET_KEY=$secret
@@ -192,33 +259,39 @@ DB_USER=$u
 DB_PASSWORD=$pw
 DB_DATABASE=$db
 DB_SCHEMA=$sc
+DB_LOG=$dblog
 DB_PATH=$dbpath
 REDIS_HOST=$rhost
 REDIS_PORT=$rport
 REDIS_DB=$rdb
 EOF
-  echo "Wrote server/.env (DB_TYPE=$db_type, generated SECRET_KEY, all keys populated)."
+  echo "Wrote server/.env (DB_TYPE=$db_type, all keys populated)."
 }
 
 write_agent_config() {
   local server_target="$ROOT_DIR/agent/conf/server.json"
   local tw_target="$ROOT_DIR/agent/conf/time_weaver.json"
-  if [[ -f "$server_target" && -f "$tw_target" && "$RECONFIGURE" != "1" ]]; then
-    echo "Using existing agent config (pass --reconfigure to regenerate)."
-    return
-  fi
-  # The agent connects to the shared MySQL database (it ships MySQL SQL only).
-  local h p u pw db sc dev
-  h="${DB_HOST:-$(ask "Agent DB host" "127.0.0.1")}"
-  p="${DB_PORT:-$(ask "Agent DB port" "3306")}"
-  u="${DB_USER:-$(ask "Agent DB user" "timeweaver")}"
-  pw="${DB_PASSWORD:-$(ask "Agent DB password" "")}"
-  db="${DB_NAME:-$(ask "Agent DB name" "timeweaver")}"
-  sc="${DB_SCHEMA:-$(ask "Agent DB schema (blank if none)" "")}"
-  dev="${DEVICE_NAME:-$(ask "Agent device name" "$(hostname)")}"
-  local level="${LOG_LEVEL:-debug}"
-  local rmin="${RESCHEDULE_MINUTE:-*/5}"
 
+  # The agent always talks to MySQL; reuse the shared DB resolved earlier.
+  local h="$MY_HOST" p="$MY_PORT" u="$MY_USER" pw="$MY_PASSWORD" db="$MY_DB" sc="$MY_SCHEMA"
+
+  local ex_dev ex_level dev level
+  ex_dev="$([[ -f "$tw_target" ]] && "$PYTHON_BIN" -c "import json;print(json.load(open('$tw_target')).get('device',''))" 2>/dev/null || true)"
+  dev="$(pick "$DEVICE_NAME" "Agent device name" "$ex_dev" "$(hostname)")"
+  ex_level="$([[ -f "$server_target" ]] && "$PYTHON_BIN" -c "import json;print(json.load(open('$server_target'))['log']['base']['level'])" 2>/dev/null || true)"
+  level="$(pick "$LOG_LEVEL" "Agent log level (debug/info/warning/error)" "$ex_level" "debug")"
+
+  # Full reschedule cron is configurable here - not just the minute field.
+  ex_re() { [[ -f "$tw_target" ]] && "$PYTHON_BIN" -c "import json;print(json.load(open('$tw_target'))['reschedule'].get('$1',''))" 2>/dev/null || true; }
+  local ry rmo rd rh rmi rs
+  ry="$(pick "$RESCHEDULE_YEAR"   "Reschedule cron - year"   "$(ex_re year)"   "*")"
+  rmo="$(pick "$RESCHEDULE_MONTH" "Reschedule cron - month"  "$(ex_re month)"  "*")"
+  rd="$(pick "$RESCHEDULE_DAY"    "Reschedule cron - day"    "$(ex_re day)"    "*")"
+  rh="$(pick "$RESCHEDULE_HOUR"   "Reschedule cron - hour"   "$(ex_re hour)"   "*")"
+  rmi="$(pick "$RESCHEDULE_MINUTE" "Reschedule cron - minute" "$(ex_re minute)" "*/5")"
+  rs="$(pick "$RESCHEDULE_SECOND" "Reschedule cron - second" "$(ex_re second)" "0")"
+
+  backup_if_exists "$server_target"
   DB_HOST="$h" DB_PORT="$p" DB_USER="$u" DB_PASSWORD="$pw" DB_NAME="$db" DB_SCHEMA="$sc" LOG_LEVEL="$level" \
   "$PYTHON_BIN" - "$ROOT_DIR/agent/conf/server.sample.json" "$server_target" <<'PY'
 import json, os, sys
@@ -240,25 +313,34 @@ json.dump(cfg, open(dst, "w"), indent=4)
 PY
   echo "Wrote agent/conf/server.json (host=$h db=$db, log level=$level)."
 
-  DEVICE_NAME="$dev" RESCHEDULE_MINUTE="$rmin" "$PYTHON_BIN" - "$ROOT_DIR/agent/conf/time_weaver.sample.json" "$tw_target" <<'PY'
+  backup_if_exists "$tw_target"
+  DEVICE_NAME="$dev" RE_YEAR="$ry" RE_MONTH="$rmo" RE_DAY="$rd" RE_HOUR="$rh" RE_MINUTE="$rmi" RE_SECOND="$rs" \
+  "$PYTHON_BIN" - "$ROOT_DIR/agent/conf/time_weaver.sample.json" "$tw_target" <<'PY'
 import json, os, sys
 src, dst = sys.argv[1], sys.argv[2]
 cfg = json.load(open(src))
 cfg["device"] = os.environ["DEVICE_NAME"]
-cfg["reschedule"]["minute"] = os.environ["RESCHEDULE_MINUTE"]
+cfg["reschedule"].update({
+    "year": os.environ["RE_YEAR"],
+    "month": os.environ["RE_MONTH"],
+    "day": os.environ["RE_DAY"],
+    "hour": os.environ["RE_HOUR"],
+    "minute": os.environ["RE_MINUTE"],
+    "second": os.environ["RE_SECOND"],
+})
 json.dump(cfg, open(dst, "w"), indent=4)
 PY
-  echo "Wrote agent/conf/time_weaver.json (device=$dev, reschedule minute=$rmin)."
+  echo "Wrote agent/conf/time_weaver.json (device=$dev, reschedule=$ry $rmo $rd $rh $rmi $rs)."
   echo "  The agent registers this device automatically on first run (no manual DB seeding)."
 }
 
 write_client_config() {
   local target="$ROOT_DIR/client/config.js"
-  if [[ -f "$target" && "$RECONFIGURE" != "1" ]]; then
-    echo "Using existing client/config.js (pass --reconfigure to regenerate)."
-    return
-  fi
-  local url="${API_URL:-$(ask "API server URL" "http://127.0.0.1:8000/time_weaver")}"
+  local existing_url=""
+  [[ -f "$target" ]] && existing_url="$(sed -n 's/.*API_SERVER_URL:[[:space:]]*"\([^"]*\)".*/\1/p' "$target" | head -n1)"
+  local def_url="http://127.0.0.1:${RESOLVED_SERVER_PORT}${RESOLVED_SERVER_CTX}"
+  local url; url="$(pick "$API_URL" "API server URL" "$existing_url" "$def_url")"
+  backup_if_exists "$target"
   cat > "$target" <<EOF
 const config = {
     API_SERVER_URL: "$url"
@@ -287,6 +369,13 @@ install_systemd_service() {
 
 require_command "$PYTHON_BIN"
 if [[ "$DO_CLIENT" == "1" ]]; then require_command npm; fi
+
+# Resolve cross-cutting values up front.
+resolve_shared_db
+RESOLVED_SERVER_HOST="$(pick "$SERVER_HOST" "Server bind host" "" "0.0.0.0")"
+RESOLVED_SERVER_PORT="$(pick "$SERVER_PORT" "Server bind port" "" "8000")"
+RESOLVED_SERVER_CTX="${CONTEXT:-$(env_get CONTEXT "$ENV_FILE")}"
+RESOLVED_SERVER_CTX="${RESOLVED_SERVER_CTX:-/time_weaver}"
 
 if [[ "$DO_SERVER" == "1" ]]; then
   mkdir -p "$ROOT_DIR/server/log"
@@ -334,6 +423,6 @@ TimeWeaver Linux setup complete (component: $COMPONENT).
 Config was written automatically - no files to copy or edit.
 Start:
 EOF
-[[ "$DO_SERVER" == "1" ]] && echo "  - cd \"$ROOT_DIR/server\" && . .venv/bin/activate && uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1"
+[[ "$DO_SERVER" == "1" ]] && echo "  - cd \"$ROOT_DIR/server\" && . .venv/bin/activate && uvicorn app:app --host $RESOLVED_SERVER_HOST --port $RESOLVED_SERVER_PORT --workers 1"
 [[ "$DO_AGENT" == "1" ]]  && echo "  - cd \"$ROOT_DIR/agent\" && . .venv/bin/activate && python timeweaver.py   (needs the shared database reachable)"
 [[ "$DO_CLIENT" == "1" ]] && echo "  - serve client/dist, or 'npm run serve' for development"
