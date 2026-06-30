@@ -65,8 +65,14 @@ function Ask {
 }
 
 function New-SecretKey {
+    # Use the instance API (Create().GetBytes()) rather than the static
+    # RandomNumberGenerator::Fill(Span<byte>): Fill only exists on .NET Core 3.0 /
+    # .NET 5+, so it throws MethodNotFound under Windows PowerShell 5.1 (which runs
+    # on .NET Framework). Create()+GetBytes() exist on BOTH runtimes (and pwsh 7+),
+    # with identical cryptographic strength and output.
     $bytes = New-Object byte[] 32
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
     return -join ($bytes | ForEach-Object { $_.ToString('x2') })
 }
 
