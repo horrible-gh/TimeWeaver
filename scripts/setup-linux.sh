@@ -66,7 +66,10 @@ Config (optional; installer prompts interactively otherwise, sensible defaults a
 Behaviour:
   --reconfigure                         (kept for compatibility; config always runs now)
   --non-interactive                     Never prompt; use flags/env/defaults
-  --install-services                    Install systemd services (server/agent)
+  --install-services                    Install systemd services (server/agent).
+                                        Interactive installs also OFFER this as a
+                                        prompt, so the flag is only needed for
+                                        unattended/CI runs.
   --service-user USER                   systemd service user (default: current user)
 
 Config is generated ready-to-run; no sample files to copy or hand-edit.
@@ -352,19 +355,39 @@ EOF
 }
 
 install_systemd_service() {
+  # Root is verified by the caller before we get here.
   local template="$1" target_name="$2"
   local target="/etc/systemd/system/${target_name}"
-  if [[ "$(id -u)" -ne 0 ]]; then
-    echo "Installing systemd services requires root. Re-run with sudo." >&2
-    exit 1
-  fi
-  sed \
+  local rendered
+  rendered="$(sed \
     -e "s#__TIMEWEAVER_ROOT__#${ROOT_DIR}#g" \
     -e "s#__TIMEWEAVER_USER__#${SERVICE_USER}#g" \
-    "$template" > "$target"
+    -e "s#__TIMEWEAVER_SERVER_HOST__#${RESOLVED_SERVER_HOST}#g" \
+    -e "s#__TIMEWEAVER_SERVER_PORT__#${RESOLVED_SERVER_PORT}#g" \
+    "$template")"
+  # G5: an agent-only deployment has no server unit on this host, so drop the
+  # ordering dependency on it - otherwise the agent unit references a unit that
+  # will never exist on this machine (harmless to systemd, but a real smell).
+  if [[ "$DO_SERVER" != "1" ]]; then
+    rendered="${rendered/ timeweaver-server.service/}"
+  fi
+  printf '%s\n' "$rendered" > "$target"
   systemctl daemon-reload
   systemctl enable "$target_name"
   echo "Installed and enabled $target_name"
+}
+
+# G1: in an interactive install, surface the service question instead of hiding
+# it behind a flag nobody discovers. A flag (--install-services) or CI keep the
+# unattended behaviour untouched; we only ask when nothing decided it already.
+maybe_prompt_services() {
+  # Only server/agent have units; nothing to register for a client-only install.
+  if [[ "$DO_SERVER" != "1" && "$DO_AGENT" != "1" ]]; then return; fi
+  if [[ "$INSTALL_SERVICES" == "1" ]]; then return; fi
+  if [[ "$NONINTERACTIVE" == "1" ]]; then return; fi
+  local ans
+  ans="$(ask "Register TimeWeaver to start on boot as a systemd service? (y/N)" "N")"
+  [[ "$ans" =~ ^([Yy]|[Yy][Ee][Ss])$ ]] && INSTALL_SERVICES=1
 }
 
 require_command "$PYTHON_BIN"
@@ -376,6 +399,7 @@ RESOLVED_SERVER_HOST="$(pick "$SERVER_HOST" "Server bind host" "" "0.0.0.0")"
 RESOLVED_SERVER_PORT="$(pick "$SERVER_PORT" "Server bind port" "" "8000")"
 RESOLVED_SERVER_CTX="${CONTEXT:-$(env_get CONTEXT "$ENV_FILE")}"
 RESOLVED_SERVER_CTX="${RESOLVED_SERVER_CTX:-/time_weaver}"
+maybe_prompt_services
 
 if [[ "$DO_SERVER" == "1" ]]; then
   mkdir -p "$ROOT_DIR/server/log"
@@ -397,8 +421,17 @@ if [[ "$DO_CLIENT" == "1" ]]; then
   popd >/dev/null
 fi
 
+SERVICES_INSTALLED=0
 if [[ "$INSTALL_SERVICES" == "1" ]]; then
-  if [[ "$(id -u)" -eq 0 ]]; then
+  if [[ "$(id -u)" -ne 0 ]]; then
+    # G4: don't abort a finished install just because we can't write unit files.
+    # Everything else is already done; tell the user exactly how to add the
+    # services in a second, root-only pass (config is reused, not rebuilt).
+    echo "" >&2
+    echo "  [!] Registering systemd services requires root, but this install is not running as root." >&2
+    echo "      Everything else is done. To add the services, re-run as root - this only writes the unit files:" >&2
+    echo "        sudo ./install.sh --component $COMPONENT --install-services --service-user \"$SERVICE_USER\" --non-interactive" >&2
+  else
     SERVICE_GROUP="$(id -gn "$SERVICE_USER")"
     CHOWN_TARGETS=()
     [[ "$DO_SERVER" == "1" ]] && CHOWN_TARGETS+=("$ROOT_DIR/server")
@@ -407,22 +440,40 @@ if [[ "$INSTALL_SERVICES" == "1" ]]; then
     if [[ ${#CHOWN_TARGETS[@]} -gt 0 ]]; then
       chown -R "$SERVICE_USER:$SERVICE_GROUP" "${CHOWN_TARGETS[@]}"
     fi
+    if [[ "$DO_SERVER" == "1" ]]; then
+      install_systemd_service "$ROOT_DIR/scripts/systemd/timeweaver-server.service" "timeweaver-server.service"
+      SERVICES_INSTALLED=1
+    fi
+    if [[ "$DO_AGENT" == "1" ]]; then
+      install_systemd_service "$ROOT_DIR/scripts/systemd/timeweaver-agent.service" "timeweaver-agent.service"
+      SERVICES_INSTALLED=1
+    fi
   fi
-  if [[ "$DO_SERVER" == "1" ]]; then
-    install_systemd_service "$ROOT_DIR/scripts/systemd/timeweaver-server.service" "timeweaver-server.service"
-  fi
-  if [[ "$DO_AGENT" == "1" ]]; then
-    install_systemd_service "$ROOT_DIR/scripts/systemd/timeweaver-agent.service" "timeweaver-agent.service"
-  fi
-  echo "Start services with: sudo systemctl start timeweaver-server timeweaver-agent"
 fi
 
 cat <<EOF
 
 TimeWeaver Linux setup complete (component: $COMPONENT).
 Config was written automatically - no files to copy or edit.
-Start:
 EOF
-[[ "$DO_SERVER" == "1" ]] && echo "  - cd \"$ROOT_DIR/server\" && . .venv/bin/activate && uvicorn app:app --host $RESOLVED_SERVER_HOST --port $RESOLVED_SERVER_PORT --workers 1"
-[[ "$DO_AGENT" == "1" ]]  && echo "  - cd \"$ROOT_DIR/agent\" && . .venv/bin/activate && python timeweaver.py   (needs the shared database reachable)"
-[[ "$DO_CLIENT" == "1" ]] && echo "  - serve client/dist, or 'npm run serve' for development"
+
+# G3: branch the closing "how to start" guidance on what actually happened. If
+# services were registered, advertise systemctl (not a foreground command that
+# makes it look like manual running is all there is).
+if [[ "$SERVICES_INSTALLED" == "1" ]]; then
+  SVC_NAMES=()
+  [[ "$DO_SERVER" == "1" ]] && SVC_NAMES+=("timeweaver-server")
+  [[ "$DO_AGENT" == "1" ]]  && SVC_NAMES+=("timeweaver-agent")
+  echo "Services were registered and enabled (they start automatically on boot)."
+  echo "Start them now without rebooting:"
+  echo "  sudo systemctl start ${SVC_NAMES[*]}"
+  echo "Check status / logs:"
+  echo "  systemctl status ${SVC_NAMES[*]}"
+  echo "  journalctl -u ${SVC_NAMES[0]:-timeweaver-server} -f"
+  [[ "$DO_CLIENT" == "1" ]] && echo "Client: serve client/dist, or 'npm run serve' for development"
+else
+  echo "Start:"
+  [[ "$DO_SERVER" == "1" ]] && echo "  - cd \"$ROOT_DIR/server\" && . .venv/bin/activate && uvicorn app:app --host $RESOLVED_SERVER_HOST --port $RESOLVED_SERVER_PORT --workers 1"
+  [[ "$DO_AGENT" == "1" ]]  && echo "  - cd \"$ROOT_DIR/agent\" && . .venv/bin/activate && python timeweaver.py   (needs the shared database reachable)"
+  [[ "$DO_CLIENT" == "1" ]] && echo "  - serve client/dist, or 'npm run serve' for development"
+fi

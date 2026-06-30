@@ -36,7 +36,11 @@ param(
     # Behaviour
     [switch]$NonInteractive,
     [switch]$Reconfigure,
-    [switch]$SkipUiBuild
+    [switch]$SkipUiBuild,
+    # Register server/agent to start on boot (scheduled task running as SYSTEM).
+    # Interactive installs also OFFER this as a prompt, so the switch is only
+    # needed for unattended/CI runs. Requires an elevated (Administrator) shell.
+    [switch]$InstallServices
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,6 +80,28 @@ function Backup-IfExists {
         Copy-Item -LiteralPath $Path -Destination $dest -Force
         Write-Host "  Backed up existing $(Split-Path -Leaf $Path) -> backups\$stamp\"
     }
+}
+
+function Test-Admin {
+    $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object System.Security.Principal.WindowsPrincipal($id)
+    return $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# G2: Windows had no service support at all (Linux at least had a flag). Register
+# the run-*.cmd launchers as scheduled tasks that start at boot under SYSTEM,
+# with automatic restart - the native parity for systemd without bundling NSSM.
+function Install-WindowsService {
+    param([string]$TaskName, [string]$CmdPath, [string]$Description)
+    $action  = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$CmdPath`""
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    # No execution time limit (long-running), restart a few times on failure.
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal `
+        -Settings $settings -Description $Description -Force | Out-Null
+    Write-Host "Registered scheduled task '$TaskName' (starts at boot, runs as SYSTEM)."
 }
 
 # Read an existing server\.env into a hashtable so re-runs can offer current
@@ -307,6 +333,13 @@ $script:ServerCtx  = if ($Context -ne "") { $Context }
                      elseif ($existingEnvTop.ContainsKey("CONTEXT") -and $existingEnvTop["CONTEXT"]) { $existingEnvTop["CONTEXT"] }
                      else { "/time_weaver" }
 
+# G1: surface the service question in interactive installs instead of hiding it
+# behind a switch. The -InstallServices switch or CI keep unattended runs as-is.
+if (-not $InstallServices -and -not $NonInteractive -and ($DoServer -or $DoAgent)) {
+    $ans = Ask "Register TimeWeaver to start on boot (Windows scheduled task, runs as SYSTEM)? (y/N)" "N"
+    if ($ans -match '^(y|yes)$') { $InstallServices = $true }
+}
+
 # --- Run ----------------------------------------------------------------------
 if ($DoServer) { New-Item -ItemType Directory -Force -Path (Join-Path $RootDir "server\log") | Out-Null }
 if ($DoAgent)  { New-Item -ItemType Directory -Force -Path (Join-Path $RootDir "agent\log")  | Out-Null }
@@ -348,10 +381,43 @@ cd /d "%~dp0agent"
 "@
 }
 
+# --- Service registration (scheduled tasks) ----------------------------------
+$servicesInstalled = $false
+if ($InstallServices) {
+    if (-not (Test-Admin)) {
+        # G4 (Windows): don't fail a finished install; tell the user how to add
+        # the tasks from an elevated shell in a second pass.
+        Write-Host ""
+        Write-Host "  [!] Registering a Windows scheduled task needs an elevated (Administrator) PowerShell." -ForegroundColor Yellow
+        Write-Host "      Everything else is done. To add the auto-start tasks, re-run from an elevated prompt:" -ForegroundColor Yellow
+        Write-Host "        .\install.ps1 -Component $Component -InstallServices -NonInteractive" -ForegroundColor Yellow
+    } else {
+        if ($DoServer) {
+            Install-WindowsService "TimeWeaver Server" (Join-Path $RootDir "run-server.cmd") "TimeWeaver FastAPI server (auto-start at boot)."
+            $servicesInstalled = $true
+        }
+        if ($DoAgent) {
+            Install-WindowsService "TimeWeaver Agent" (Join-Path $RootDir "run-agent.cmd") "TimeWeaver scheduler agent (auto-start at boot)."
+            $servicesInstalled = $true
+        }
+    }
+}
+
 Write-Host ""
 Write-Host "TimeWeaver Windows setup complete (component: $Component)."
 Write-Host "Config was written automatically - no files to copy or edit."
-Write-Host "Start:"
-if ($DoServer) { Write-Host "  - run-server.cmd  (listens on $($script:ServerHost):$($script:ServerPort))" }
-if ($DoAgent)  { Write-Host "  - run-agent.cmd  (needs the shared database reachable)" }
-if ($DoClient) { Write-Host "  - serve client\dist, or 'npm run serve' for development" }
+# G3: advertise the scheduled tasks when they exist, not a foreground command
+# that makes manual running look like the only option.
+if ($servicesInstalled) {
+    Write-Host "Services were registered as scheduled tasks (start at boot, run as SYSTEM)."
+    Write-Host "Start them now without rebooting:"
+    if ($DoServer) { Write-Host "  schtasks /run /tn `"TimeWeaver Server`"" }
+    if ($DoAgent)  { Write-Host "  schtasks /run /tn `"TimeWeaver Agent`"" }
+    Write-Host "Inspect them in Task Scheduler, or: schtasks /query /tn `"TimeWeaver Server`""
+    if ($DoClient) { Write-Host "Client: serve client\dist, or 'npm run serve' for development" }
+} else {
+    Write-Host "Start:"
+    if ($DoServer) { Write-Host "  - run-server.cmd  (listens on $($script:ServerHost):$($script:ServerPort))" }
+    if ($DoAgent)  { Write-Host "  - run-agent.cmd  (needs the shared database reachable)" }
+    if ($DoClient) { Write-Host "  - serve client\dist, or 'npm run serve' for development" }
+}

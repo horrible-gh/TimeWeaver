@@ -1,3 +1,6 @@
+# The server-unit ordering in After= below only applies when the server is
+# co-located on this host (an "all" install). For agent-only deployments the
+# installer strips that token, since no such unit exists on the machine.
 [Unit]
 Description=TimeWeaver Scheduler Agent
 After=network-online.target timeweaver-server.service

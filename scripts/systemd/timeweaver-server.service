@@ -8,7 +8,7 @@ Type=simple
 User=__TIMEWEAVER_USER__
 WorkingDirectory=__TIMEWEAVER_ROOT__/server
 Environment=PYTHONUNBUFFERED=1
-ExecStart=__TIMEWEAVER_ROOT__/server/.venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1
+ExecStart=__TIMEWEAVER_ROOT__/server/.venv/bin/python -m uvicorn app:app --host __TIMEWEAVER_SERVER_HOST__ --port __TIMEWEAVER_SERVER_PORT__ --workers 1
 Restart=on-failure
 RestartSec=5
 
