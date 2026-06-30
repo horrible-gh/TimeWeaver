@@ -17,7 +17,7 @@
                 <i class="ph ph-calendar"></i>
                 <span>{{ $t('sub_schedules') }}</span>
             </a>
-            <a href="#">
+            <a href="/dashboard/tasks">
                 <i class="ph ph-alarm"></i>
                 <span>{{ $t('sub_tasks') }}</span>
             </a>
@@ -25,7 +25,7 @@
                 <i class="ph ph-clock-counter-clockwise"></i>
                 <span>{{ $t('sub_history') }}</span>
             </a>
-            <a href="#">
+            <a href="/dashboard/users">
                 <i class="ph ph-user"></i>
                 <span>{{ $t('sub_users') }}</span>
             </a>
