@@ -150,6 +150,35 @@ env_get() {  # env_get KEY FILE -> echoes value or empty
   sed -n "s/^${key}=//p" "$file" | head -n1
 }
 
+# Read one field from the existing agent MySQL block (agent/conf/server.json).
+# Empty if the file/key is absent. Placeholder values from the sample config
+# (e.g. "<DB_USER>") are treated as absent so they never become a seed.
+agent_db_get() {  # agent_db_get KEY -> echoes value or empty
+  local key="$1" file="$ROOT_DIR/agent/conf/server.json"
+  [[ -f "$file" ]] || { echo ""; return; }
+  "$PYTHON_BIN" - "$file" "$key" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    my = json.load(open(sys.argv[1]))["databases"]["time_weaver"]["database"]["mysql"]
+    v = my.get(sys.argv[2], "")
+    v = "" if v is None else str(v)
+    if v.startswith("<") and v.endswith(">"):  # unfilled sample placeholder
+        v = ""
+    print(v)
+except Exception:
+    print("")
+PY
+}
+
+# Seed for a shared-DB prompt: prefer server/.env, else fall back to the value
+# already in agent/conf/server.json. This stops an agent-only re-install (which
+# has no server/.env on this host) from resetting valid DB settings to defaults.
+db_seed() {  # db_seed ENV_KEY JSON_KEY -> echoes seed value or empty
+  local v; v="$(env_get "$1" "$ENV_FILE")"
+  [[ -n "$v" ]] && { echo "$v"; return; }
+  agent_db_get "$2"
+}
+
 backup_if_exists() {
   local path="$1"
   if [[ -f "$path" ]]; then
@@ -197,12 +226,12 @@ resolve_shared_db() {
   fi
 
   if [[ "$RESOLVED_DB_TYPE" == "mysql" || "$DO_AGENT" == "1" ]]; then
-    MY_HOST="$(pick "$DB_HOST" "DB host" "$(env_get DB_HOST "$ENV_FILE")" "127.0.0.1")"
-    MY_PORT="$(pick "$DB_PORT" "DB port" "$(env_get DB_PORT "$ENV_FILE")" "3306")"
-    MY_USER="$(pick "$DB_USER" "DB user" "$(env_get DB_USER "$ENV_FILE")" "timeweaver")"
-    MY_PASSWORD="$(pick "$DB_PASSWORD" "DB password" "$(env_get DB_PASSWORD "$ENV_FILE")" "")"
-    MY_DB="$(pick "$DB_NAME" "DB name" "$(env_get DB_DATABASE "$ENV_FILE")" "timeweaver")"
-    MY_SCHEMA="$(pick "$DB_SCHEMA" "DB schema (blank if none)" "$(env_get DB_SCHEMA "$ENV_FILE")" "")"
+    MY_HOST="$(pick "$DB_HOST" "DB host" "$(db_seed DB_HOST host)" "127.0.0.1")"
+    MY_PORT="$(pick "$DB_PORT" "DB port" "$(db_seed DB_PORT port)" "3306")"
+    MY_USER="$(pick "$DB_USER" "DB user" "$(db_seed DB_USER user)" "timeweaver")"
+    MY_PASSWORD="$(pick "$DB_PASSWORD" "DB password" "$(db_seed DB_PASSWORD password)" "")"
+    MY_DB="$(pick "$DB_NAME" "DB name" "$(db_seed DB_DATABASE database)" "timeweaver")"
+    MY_SCHEMA="$(pick "$DB_SCHEMA" "DB schema (blank if none)" "$(db_seed DB_SCHEMA schema)" "")"
   fi
 }
 

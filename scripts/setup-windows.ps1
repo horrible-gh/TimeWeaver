@@ -128,6 +128,34 @@ function Pick {
     return Ask $Prompt $seed
 }
 
+# Read the existing agent MySQL block (agent\conf\server.json) into a hashtable.
+# Empty values for missing keys; unfilled sample placeholders like "<DB_USER>"
+# are treated as empty so they never become a seed.
+function Read-AgentDbConfig {
+    param([string]$Path)
+    $map = @{ host = ""; port = ""; user = ""; password = ""; database = ""; schema = "" }
+    if (-not (Test-Path -LiteralPath $Path)) { return $map }
+    try {
+        $cfg = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $my = $cfg.databases.time_weaver.database.mysql
+        foreach ($k in @($map.Keys)) {
+            $v = [string]$my.$k
+            if ($v -like "<*>") { $v = "" }   # unfilled sample placeholder
+            $map[$k] = $v
+        }
+    } catch { }
+    return $map
+}
+
+# Seed for a shared-DB prompt: prefer server\.env, else fall back to the value
+# already in agent\conf\server.json. This stops an agent-only re-install (which
+# has no server\.env on this host) from resetting valid DB settings to defaults.
+function Get-DbSeed {
+    param([hashtable]$Env, [string]$EnvKey, [hashtable]$AgentDb, [string]$JsonKey)
+    if ($Env.ContainsKey($EnvKey) -and $Env[$EnvKey]) { return $Env[$EnvKey] }
+    return $AgentDb[$JsonKey]
+}
+
 # --- Component selection ------------------------------------------------------
 if ($Component -eq "") {
     $Component = Ask "Install which component? (all/server/agent/client)" "all"
@@ -150,6 +178,7 @@ $script:My = @{ host = ""; port = ""; user = ""; password = ""; database = ""; s
 
 function Resolve-SharedDb {
     $existingEnv = Read-EnvFile (Join-Path $RootDir "server\.env")
+    $existingAgentDb = Read-AgentDbConfig (Join-Path $RootDir "agent\conf\server.json")
 
     if ($DoServer) {
         $seedType = if ($existingEnv.ContainsKey("DB_TYPE") -and $existingEnv["DB_TYPE"]) { $existingEnv["DB_TYPE"] } else { "sqlite3" }
@@ -168,12 +197,12 @@ function Resolve-SharedDb {
 
     # Collect MySQL connection details once if anything needs MySQL.
     if ($script:DbType -eq "mysql" -or $DoAgent) {
-        $script:My.host     = Pick $DbHost     "DB host"     $existingEnv["DB_HOST"]     "127.0.0.1"
-        $script:My.port     = Pick $DbPort     "DB port"     $existingEnv["DB_PORT"]     "3306"
-        $script:My.user     = Pick $DbUser     "DB user"     $existingEnv["DB_USER"]     "timeweaver"
-        $script:My.password = Pick $DbPassword "DB password" $existingEnv["DB_PASSWORD"] ""
-        $script:My.database = Pick $DbName     "DB name"     $existingEnv["DB_DATABASE"] "timeweaver"
-        $script:My.schema   = Pick $DbSchema   "DB schema (blank if none)" $existingEnv["DB_SCHEMA"] ""
+        $script:My.host     = Pick $DbHost     "DB host"     (Get-DbSeed $existingEnv "DB_HOST"     $existingAgentDb "host")     "127.0.0.1"
+        $script:My.port     = Pick $DbPort     "DB port"     (Get-DbSeed $existingEnv "DB_PORT"     $existingAgentDb "port")     "3306"
+        $script:My.user     = Pick $DbUser     "DB user"     (Get-DbSeed $existingEnv "DB_USER"     $existingAgentDb "user")     "timeweaver"
+        $script:My.password = Pick $DbPassword "DB password" (Get-DbSeed $existingEnv "DB_PASSWORD" $existingAgentDb "password") ""
+        $script:My.database = Pick $DbName     "DB name"     (Get-DbSeed $existingEnv "DB_DATABASE" $existingAgentDb "database") "timeweaver"
+        $script:My.schema   = Pick $DbSchema   "DB schema (blank if none)" (Get-DbSeed $existingEnv "DB_SCHEMA" $existingAgentDb "schema") ""
     }
 }
 
