@@ -86,12 +86,28 @@ is copied to `backups/<timestamp>/` before being rewritten. (`--reconfigure` /
 Run `./install.sh --help` (Linux) or `Get-Help .\install.ps1` (Windows) for the
 full list of config flags.
 
-To also install systemd services on Linux:
+To also start TimeWeaver on boot as a service:
 
 ```bash
+# Linux (systemd) — run as root so the unit files can be written
 sudo ./install.sh --install-services --service-user "$USER"
 sudo systemctl start timeweaver-server timeweaver-agent
 ```
+
+```powershell
+# Windows (scheduled task that runs at boot as SYSTEM) — from an elevated shell
+.\install.ps1 -InstallServices
+```
+
+> An **interactive install also asks** "Register TimeWeaver to start on boot?"
+> for whichever components you selected, so you no longer have to know the flag
+> exists. The flags above are only needed for unattended/CI runs. If you answer
+> yes (or pass the flag) without the required privileges — root on Linux, an
+> elevated PowerShell on Windows — the rest of the install still completes and
+> the installer prints the exact command to add the services in a second pass.
+> On Linux the services register for **every component you installed** (an `all`
+> install registers both the server and the agent); an agent-only install
+> registers just the agent.
 
 > The agent **registers its own device row automatically** on first run (created
 > as `active`, matching the schema default), so no manual database seeding is
@@ -167,8 +183,11 @@ pip install -r requirements.txt
 python timeweaver.py
 ```
 
-On Linux, install the agent as a `systemd` service with
-`sudo ./install.sh --component agent --install-services --service-user "$USER"`.
+To start the agent on boot, install it as a service: on Linux with
+`sudo ./install.sh --component agent --install-services --service-user "$USER"`
+(systemd), or on Windows with `.\install.ps1 -Component agent -InstallServices`
+from an elevated shell (a scheduled task that runs at boot as SYSTEM). An
+interactive install offers this as a prompt, so the flag is optional.
 
 ## Configuration
 
@@ -263,11 +282,18 @@ chmod +x scripts/setup-linux.sh
 ./scripts/setup-linux.sh --component agent    # agent only
 ```
 
-To also install systemd services for the FastAPI server and scheduler agent:
+To also register the FastAPI server and scheduler agent as boot services
+(interactive installs ask about this; the flags are for unattended runs):
 
 ```bash
+# Linux (systemd), as root
 sudo ./scripts/setup-linux.sh --install-services --service-user "$USER"
 sudo systemctl start timeweaver-server timeweaver-agent
+```
+
+```powershell
+# Windows (scheduled task at boot, runs as SYSTEM), from an elevated shell
+.\scripts\setup-windows.ps1 -InstallServices
 ```
 
 Windows PowerShell:
