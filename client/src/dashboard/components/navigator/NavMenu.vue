@@ -25,7 +25,11 @@
                 <i class="ph ph-clock-counter-clockwise"></i>
                 <span>{{ $t('sub_history') }}</span>
             </a>
-            <a href="/dashboard/users">
+            <a href="/dashboard/manual-execution">
+                <i class="ph ph-play-pause"></i>
+                <span>{{ $t('sub_manual_execution') }}</span>
+            </a>
+            <a href="#">
                 <i class="ph ph-user"></i>
                 <span>{{ $t('sub_users') }}</span>
             </a>

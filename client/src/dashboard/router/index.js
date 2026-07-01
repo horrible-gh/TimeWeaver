@@ -4,6 +4,8 @@ import ScheduleHistoryForm from "@/dashboard/components/contents/history/Schedul
 import GroupsOverviewForm from "@/dashboard/components/contents/groups/GroupsOverview.vue";  // Main page
 import DevicesOverviewForm from "@/dashboard/components/contents/devices/DevicesOverview.vue";  // Main page
 import SchedulesOverviewForm from "@/dashboard/components/contents/schedules/SchedulesOverview.vue";  // Main page
+import TasksOverviewForm from "@/dashboard/components/contents/tasks/TasksOverview.vue";  // Main page
+import ManualExecutionOverviewForm from "@/dashboard/components/contents/manual_execution/ManualExecutionHistory.vue";  // Main page
 import { postRequest } from "@api";
 
 const routes = [
@@ -12,6 +14,8 @@ const routes = [
   { path: "/groups", component: GroupsOverviewForm },
   { path: "/devices", component: DevicesOverviewForm },
   { path: "/schedules", component: SchedulesOverviewForm },
+  { path: "/tasks", component: TasksOverviewForm },
+  { path: "/manual-execution", component: ManualExecutionOverviewForm },
 ];
 
 const router = createRouter({
