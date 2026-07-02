@@ -196,7 +196,7 @@ const changePage = (page) => {
 }
 
 .title2 {
-  width:20%
+  width:16%
 }
 
 .title3 {
@@ -212,7 +212,7 @@ const changePage = (page) => {
 }
 
 .title6 {
-  width:10%
+  width:20%
 }
 
 </style>
