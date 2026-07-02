@@ -168,10 +168,30 @@ button {
   background-color: #c82333;
 }
 
-/* ✅ Button container with vertical alignment */
+/* ✅ Manual execution abandon button in red */
+.abandon-button {
+  background-color: #903333;
+  color: white;
+}
+
+.abandon-button:hover {
+  background-color: #802222;
+}
+
+/* ✅ Button container with horizontal alignment */
 .button-group {
   display: flex;
-  flex-direction: column; /* ✅ Align buttons vertically */
-  gap: 5px; /* Gap between buttons */
+  flex-direction: row; /* ✅ Align buttons horizontally */
+  gap: 10px; /* Gap between buttons */
   align-items: flex-start; /* Left aligned */
+}
+
+/* ✅ Run button in green */
+.run-button {
+  background-color: #458c35;
+  color: white;
+}
+
+.run-button:hover {
+  background-color: #336823;
 }
