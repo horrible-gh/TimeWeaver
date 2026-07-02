@@ -16,7 +16,6 @@ module.exports = defineConfig({
       // when the page is served over the LAN rather than localhost.
       client: {
         webSocketURL: {
-          protocol: "auto",
           hostname: "0.0.0.0",
           port: 0,
           pathname: "/ws",
