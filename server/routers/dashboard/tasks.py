@@ -10,6 +10,18 @@ sqloader = db.sqloader
 
 router = APIRouter()
 
+
+def to_bool(value, default=True):
+    """The form posts "0"/"1" as strings, and bool("0") is True, so a plain
+    bool() turns every "No" into a "Yes"."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    return str(value).strip().lower() not in ("0", "false", "no", "")
+
 @router.get("/get_tasks", dependencies=[Depends(verify_token)])
 async def get_Tasks(task: TaskGetRequest = Depends()):
     task_data = task.model_dump()
@@ -30,7 +42,7 @@ async def insert_task(task: TaskInsertRequest):
     row = task.model_dump()
     detail_id = uuid.uuid4()
 
-    query = sqloader.load_sql("time_weaver.json", "tasks.insert_schedule_detail")
+    detail_query = sqloader.load_sql("time_weaver.json", "tasks.insert_schedule_detail")
     schedule_detail_data = (
         str(detail_id),
         row.get("task_name"),
@@ -42,13 +54,12 @@ async def insert_task(task: TaskInsertRequest):
         row.get("hour"),
         row.get("minute"),
         row.get("second"),
-        bool(row.get("is_error_stop", 1)),
+        to_bool(row.get("is_error_stop")),
         row.get("sequence", 0),
         row.get("retry_count", 0),
         row.get("status"),
         row.get("creator"),
     )
-    db_instance.execute_query(query, schedule_detail_data)
 
     task_data = (
         str(detail_id),  # detail_id - Convert UUID to string
@@ -56,7 +67,7 @@ async def insert_task(task: TaskInsertRequest):
         row.get("task_type"),  # task_type
         row.get("archive_type"),  # archive_type
         row.get("source_path"),  # source_path
-        bool(row.get("error_on_missing_source", 1)),  # error_on_missing_source
+        to_bool(row.get("error_on_missing_source")),  # error_on_missing_source
         row.get("destination_path"),  # destination_path
         row.get("date_format"),  # date_format
         row.get("target_date_format"),  # target_date_format
@@ -64,13 +75,19 @@ async def insert_task(task: TaskInsertRequest):
         row.get("house_keep_days"),  # house_keep_days
         row.get("creator"),  # creator
     )
-    query = sqloader.load_sql("time_weaver.json", "tasks.insert_task")
-    return db_instance.execute_query(query, task_data)
+    task_query = sqloader.load_sql("time_weaver.json", "tasks.insert_task")
+
+    # Both rows must land together. Committing them separately leaves an orphan
+    # schedule_detail row behind every time the task_detail insert fails, and
+    # get_tasks LEFT JOINs task_detail so the orphan shows up as an empty task.
+    with db_instance.begin_transaction() as txn:
+        txn.execute(detail_query, schedule_detail_data)
+        return txn.execute(task_query, task_data)
 
 @router.put("/update_task", dependencies=[Depends(verify_token)])
 async def update_tasks(task: TaskUpdateRequest):
     row = task.model_dump()
-    query = sqloader.load_sql("time_weaver.json", "tasks.update_schedule_detail")
+    detail_query = sqloader.load_sql("time_weaver.json", "tasks.update_schedule_detail")
     schedule_detail_data = {
         "schedule_name": row.get("task_name"),
         "schedule_id": row["schedule_id"],
@@ -81,7 +98,7 @@ async def update_tasks(task: TaskUpdateRequest):
         "hour": row.get("hour"),
         "minute": row.get("minute"),
         "second": row.get("second"),
-        "is_error_stop": bool(row.get("is_error_stop", 1)),
+        "is_error_stop": to_bool(row.get("is_error_stop")),
         "sequence": row.get("sequence", 0),
         "retry_count": row.get("retry_count", 0),
         "status": row.get("status"),
@@ -106,14 +123,13 @@ async def update_tasks(task: TaskUpdateRequest):
         schedule_detail_data["modifier"],
         schedule_detail_data["detail_id"],
     )
-    db_instance.execute_query(query, schedule_detail_tuple)
 
     task_data = {
         "command": row.get("command"),
         "task_type": row.get("task_type"),
         "archive_type": row.get("archive_type"),
         "source_path": row.get("source_path"),
-        "error_on_missing_source": bool(row.get("error_on_missing_source", 1)),
+        "error_on_missing_source": to_bool(row.get("error_on_missing_source")),
         "destination_path": row.get("destination_path"),
         "date_format": row.get("date_format"),
         "target_date_format": row.get("target_date_format"),
@@ -137,8 +153,11 @@ async def update_tasks(task: TaskUpdateRequest):
         task_data["modifier"],
         task_data["detail_id"],
     )
-    query = sqloader.load_sql("time_weaver.json", "tasks.update_task")
-    return db_instance.execute_query(query, task_tuple)
+    task_query = sqloader.load_sql("time_weaver.json", "tasks.update_task")
+
+    with db_instance.begin_transaction() as txn:
+        txn.execute(detail_query, schedule_detail_tuple)
+        return txn.execute(task_query, task_tuple)
 
 @router.delete("/remove_task/{task_id}", dependencies=[Depends(verify_token)])
 async def remove_Task(task_id: str):

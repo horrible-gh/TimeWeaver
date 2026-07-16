@@ -119,4 +119,5 @@ export default {
     task_error_on_missing_source: "Error if source is missing",
     task_destination_path: "Destination Path",
     task_house_keep_days: "Housekeep Days",
+    msg_save_failed: "Save failed. Please check the entered values.",
 }

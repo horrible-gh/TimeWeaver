@@ -119,4 +119,5 @@ export default {
     task_error_on_missing_source: "ソースがない場合エラー",
     task_destination_path: "宛先パス",
     task_house_keep_days: "ハウスキープ日",
+    msg_save_failed: "保存に失敗しました。入力値をご確認ください。",
 }
