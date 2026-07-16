@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings
 from enum import Enum
 from sqloader.init import database_init
+from schema_guard import ensure_critical_schema
 
 # 🔹 Define DB_TYPE explicitly with an enum
 class DBType(str, Enum):
@@ -93,6 +94,11 @@ class DatabaseSetting:
     def instance_init(self):
         """Initialize database instance"""
         self.db_instance, self.sqloader, self.migrator = database_init(self.config)
+        if settings.DB_TYPE.value == DBType.MYSQL:
+            # Migrations only run when this filename is new to the DB; the
+            # guard re-checks the live schema so an unapplied or falsely
+            # recorded timeweaver_server_004.sql cannot leave B0001 in place.
+            ensure_critical_schema(self.db_instance)
 
     def get_db_instance(self):
         return self.db_instance
