@@ -26,6 +26,8 @@ class TaskInsertRequest(BaseModel):
     error_on_missing_source: bool | int | str = False
     destination_path: str | None = None
     date_format: str | None = None
+    target_date_format: str | None = None
+    destination_date_format: str | None = None
     house_keep_days: int | None = None
     creator: str | None = None
 
@@ -57,6 +59,8 @@ class TaskUpdateRequest(BaseModel):
     error_on_missing_source: bool | int | str = False
     destination_path: str | None = None
     date_format: str | None = None
+    target_date_format: str | None = None
+    destination_date_format: str | None = None
     house_keep_days: int | None = None
     modifier: str | None = None
 

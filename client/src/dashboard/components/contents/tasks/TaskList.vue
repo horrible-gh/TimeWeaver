@@ -338,6 +338,7 @@ const saveTasks = async () => {
     closeModal();
   } catch (error) {
     console.error("그룹 저장 실패:", error);
+    alert(t('msg_save_failed'));
   }
 };
 

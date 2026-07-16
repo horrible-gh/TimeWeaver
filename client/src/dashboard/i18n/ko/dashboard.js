@@ -119,4 +119,5 @@ export default {
     task_error_on_missing_source: "소스가 없으면 에러",
     task_destination_path: "대상 경로",
     task_house_keep_days: "하우스킵 일수",
+    msg_save_failed: "저장에 실패했습니다. 입력값을 확인해 주세요.",
 }
