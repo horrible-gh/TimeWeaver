@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from config import settings, db
 from schemas.tasks import TaskInsertRequest, TaskUpdateRequest, TaskGetRequest, ScheduleGetRequest  # ✅ Import
 from routers.login.auth import verify_token
+from services.blocking import BlockingQueueFull, RETRY_AFTER, run_blocking
 import LogAssist.log as logger
 import uuid
 
@@ -9,6 +10,17 @@ db_instance = db.db_instance
 sqloader = db.sqloader
 
 router = APIRouter()
+
+
+async def _db_call(function, *args):
+    try:
+        return await run_blocking(function, *args)
+    except BlockingQueueFull as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "unavailable", "message": "Service is busy"},
+            headers={"Retry-After": str(RETRY_AFTER)},
+        ) from exc
 
 
 def to_bool(value, default=True):
@@ -27,14 +39,14 @@ async def get_Tasks(task: TaskGetRequest = Depends()):
     task_data = task.model_dump()
     #data = {"group_id": task_data['group_id']}
     data = {}
-    return db_instance.fetch_all(sqloader.load_sql("time_weaver.json", "tasks.get_tasks"), data)
+    return await _db_call(db_instance.fetch_all, sqloader.load_sql("time_weaver.json", "tasks.get_tasks"), data)
 
 
 @router.get("/get_schedule_groups", dependencies=[Depends(verify_token)])
 async def get_schedule_groups(schedule: ScheduleGetRequest = Depends()):
     schedule_data = schedule.model_dump()
     data = {"group_id": schedule_data['group_id']}
-    return db_instance.fetch_all(sqloader.load_sql("time_weaver.json", "schedules.get_schedule_groups"), data)
+    return await _db_call(db_instance.fetch_all, sqloader.load_sql("time_weaver.json", "schedules.get_schedule_groups"), data)
 
 
 @router.post("/insert_task", dependencies=[Depends(verify_token)])
@@ -80,9 +92,12 @@ async def insert_task(task: TaskInsertRequest):
     # Both rows must land together. Committing them separately leaves an orphan
     # schedule_detail row behind every time the task_detail insert fails, and
     # get_tasks LEFT JOINs task_detail so the orphan shows up as an empty task.
-    with db_instance.begin_transaction() as txn:
-        txn.execute(detail_query, schedule_detail_data)
-        return txn.execute(task_query, task_data)
+    def write_task():
+        with db_instance.begin_transaction() as txn:
+            txn.execute(detail_query, schedule_detail_data)
+            return txn.execute(task_query, task_data)
+
+    return await _db_call(write_task)
 
 @router.put("/update_task", dependencies=[Depends(verify_token)])
 async def update_tasks(task: TaskUpdateRequest):
@@ -155,17 +170,23 @@ async def update_tasks(task: TaskUpdateRequest):
     )
     task_query = sqloader.load_sql("time_weaver.json", "tasks.update_task")
 
-    with db_instance.begin_transaction() as txn:
-        txn.execute(detail_query, schedule_detail_tuple)
-        return txn.execute(task_query, task_tuple)
+    def write_task():
+        with db_instance.begin_transaction() as txn:
+            txn.execute(detail_query, schedule_detail_tuple)
+            return txn.execute(task_query, task_tuple)
+
+    return await _db_call(write_task)
 
 @router.delete("/remove_task/{task_id}", dependencies=[Depends(verify_token)])
 async def remove_Task(task_id: str):
     query = sqloader.load_sql("time_weaver.json", "tasks.remove_task")
-    result_task = db_instance.execute_query(query, {"task_id": task_id})
-    query = sqloader.load_sql("time_weaver.json", "tasks.remove_schedule_detail")
-    result_detail = db_instance.execute_query(query, {"task_id": task_id})
-    return result_task & result_detail
+    def remove_rows():
+        result_task = db_instance.execute_query(query, {"task_id": task_id})
+        detail_query = sqloader.load_sql("time_weaver.json", "tasks.remove_schedule_detail")
+        result_detail = db_instance.execute_query(detail_query, {"task_id": task_id})
+        return result_task & result_detail
+
+    return await _db_call(remove_rows)
 
 
 @router.post("/insert_manual_task", dependencies=[Depends(verify_token)])
@@ -184,4 +205,4 @@ async def insert_manual_task(schedule: TaskInsertRequest):
         schedule_data["detail_id"],         # 9. WHERE comparison
     )
 
-    return db_instance.execute_query(query, data)
+    return await _db_call(db_instance.execute_query, query, data)

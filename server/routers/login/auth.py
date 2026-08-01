@@ -1,51 +1,65 @@
-import jwt
 from datetime import datetime, timezone
+
+import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
+
 from config import settings
+from services.security.revocation import (
+    RevocationStoreUnavailable,
+    get_revocation_store,
+)
 
-import LogAssist.log as Logger
 
-# JWT settings
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = "HS256"
+USER_AUDIENCE = "timeweaver-dashboard"
+USER_TOKEN_TYPE = "user"
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
 
-# ✅ Redis or memory-based blacklist store example
-token_blacklist = set()  # Use Redis or similar storage in production
 
-def is_token_blacklisted(token: str) -> bool:
-    """ Check whether the token is blacklisted """
-    return token in token_blacklist
-
-def verify_token(token: str = Depends(oauth2_scheme)):
-    #Logger.debug(f"🔍 Received token: {token}")
-
-    credentials_exception = HTTPException(
+def _authentication_error(code="invalid_token", message="Invalid authentication credentials"):
+    return HTTPException(
         status_code=401,
-        detail="Invalid authentication credentials",
+        detail={"code": code, "message": message},
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+
+def decode_user_token(token: str):
     try:
-        # ✅ Check whether the token is blacklisted
-        if is_token_blacklisted(token):
-            raise HTTPException(status_code=401, detail="Token has been logged out")
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            audience=USER_AUDIENCE,
+            options={"require": ["sub", "exp", "aud", "typ", "jti"]},
+        )
+    except jwt.ExpiredSignatureError as exc:
+        raise _authentication_error("token_expired", "Token has expired") from exc
+    except jwt.InvalidTokenError as exc:
+        raise _authentication_error() from exc
+    if payload.get("typ") != USER_TOKEN_TYPE:
+        raise _authentication_error()
+    if not isinstance(payload.get("sub"), str) or not payload["sub"]:
+        raise _authentication_error()
+    if not isinstance(payload.get("jti"), str) or not payload["jti"]:
+        raise _authentication_error()
+    return payload
 
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": True})
-        user_id: str = payload.get("sub")
-        exp: int = payload.get("exp")
 
-        if user_id is None or exp is None:
-            raise credentials_exception
-
-        if datetime.now(timezone.utc) > datetime.fromtimestamp(exp, timezone.utc):
-            raise HTTPException(status_code=401, detail="Token has expired")
-
-        return user_id
-
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token has expired")
-    except jwt.InvalidTokenError:
-        raise credentials_exception
-
+def verify_token(token: str = Depends(oauth2_scheme)):
+    payload = decode_user_token(token)
+    try:
+        revoked = get_revocation_store().is_revoked(payload["jti"])
+    except RevocationStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "unavailable",
+                "message": "Authentication service unavailable",
+            },
+        ) from exc
+    if revoked:
+        raise _authentication_error("invalid_token", "Token has been revoked")
+    return payload["sub"]
