@@ -1,1 +1,0 @@
-INSERT INTO devices(device_id,device_name) VALUES (-1, '%');

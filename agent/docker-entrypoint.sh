@@ -22,31 +22,6 @@ cat > conf/server.json <<EOF
       "interval": 1,
       "backup_count": 30
     }
-  },
-  "databases": {
-    "time_weaver": {
-      "database": {
-        "type": "mysql",
-        "mysql": {
-          "host": "${DB_HOST:-mysql}",
-          "port": ${DB_PORT:-3306},
-          "user": "${DB_USER:-timeweaver}",
-          "password": "${DB_PASSWORD:-timeweaver}",
-          "database": "${DB_DATABASE:-timeweaver}",
-          "schema": "${DB_SCHEMA:-timeweaver}",
-          "log": ${DB_LOG:-true},
-          "sqloder": "res/time_weaver/sql/sqloader"
-        },
-        "migration": {
-          "auto_migration": true,
-          "migration_path": "res/time_weaver/sql/migration"
-        },
-        "service": {
-          "log": true,
-          "sqloder": "res/time_weaver/sql/sqloader"
-        }
-      }
-    }
   }
 }
 EOF
@@ -54,6 +29,11 @@ EOF
 cat > conf/time_weaver.json <<EOF
 {
   "device": "${DEVICE_NAME:-test}",
+  "api": {
+    "base_url": "${TIMEWEAVER_SERVER_URL:-http://server:8000${CONTEXT:-/time_weaver}}",
+    "credential_path": "conf/agent_credential.json",
+    "enrollment_token_env": "TIMEWEAVER_ENROLLMENT_TOKEN"
+  },
   "reschedule": {
     "year": "${RESCHEDULE_YEAR:-*}",
     "month": "${RESCHEDULE_MONTH:-*}",

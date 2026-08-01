@@ -1,5 +1,24 @@
 {
     "device": "test",
+    "api": {
+        "base_url": "http://127.0.0.1:8080",
+        "credential_path": "conf/agent_credential.json",
+        "enrollment_token_env": "TIMEWEAVER_ENROLLMENT_TOKEN",
+        "connect_timeout": 5,
+        "read_timeout": 30,
+        "heartbeat_interval": 30,
+        "snapshot_sync_interval": 60,
+        "shutdown_grace": 30,
+        "outbox_capacity": 10000,
+        "outbox_high_watermark": 8000,
+        "outbox_low_watermark": 5000,
+        "outbox_sender_workers": 4,
+        "manual_dispatch_delay": 1,
+        "retry_initial_delay": 1,
+        "retry_multiplier": 2,
+        "retry_max_delay": 60,
+        "retry_jitter_ratio": 0.2
+    },
     "reschedule": {
         "year": "*",
         "month": "*",

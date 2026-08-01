@@ -1,642 +1,669 @@
-from util import jsonutil, string_util as su
-from sqloader import DatabasePrototype, SQLoader
-import LogAssist.log as Logger
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-from threading import RLock
+"""Snapshot-backed scheduling, manual claims and acknowledged result delivery."""
+
+from __future__ import annotations
+
 import datetime
-from datetime import timedelta
-import os
+from collections.abc import Mapping
+from datetime import timedelta, timezone
 import getpass
+import os
 import socket
-from configure import time_weaver_config as twconfig, version
-import sys
-import services.time_weaver.task as task
+from threading import RLock
 import uuid
+
+import LogAssist.log as Logger
+from apscheduler.jobstores.base import JobLookupError
+from apscheduler.schedulers.background import BackgroundScheduler
+
+
+try:
+    from agent.configure import agent_api_config, time_weaver_config as twconfig
+    from agent.services.time_weaver import task
+    from agent.services.time_weaver.api_client import (
+        ApiClientError,
+        AuthenticationError,
+        ClientRejectedError,
+        DeviceInactiveError,
+        TransientServerError,
+    )
+    from agent.services.time_weaver.models import (
+        ManualExecution, ScheduleDetail, ScheduleGroup, ScheduleSnapshot,
+    )
+    from agent.services.time_weaver.outbox import ResultEnvelope, ResultOutbox
+    from agent.services.time_weaver.scheduler_adapter import ApSchedulerAdapter
+    from agent.services.time_weaver.sync_coordinator import RunningContext, build_reconcile_plan
+except ImportError:  # Script execution from the agent directory.
+    from configure import agent_api_config, time_weaver_config as twconfig
+    import services.time_weaver.task as task
+    from services.time_weaver.api_client import (
+        ApiClientError,
+        AuthenticationError,
+        ClientRejectedError,
+        DeviceInactiveError,
+        TransientServerError,
+    )
+    from services.time_weaver.models import (
+        ManualExecution, ScheduleDetail, ScheduleGroup, ScheduleSnapshot,
+    )
+    from services.time_weaver.outbox import ResultEnvelope, ResultOutbox
+    from services.time_weaver.scheduler_adapter import ApSchedulerAdapter
+    from services.time_weaver.sync_coordinator import RunningContext, build_reconcile_plan
+
 
 service_name = "time_weaver"
 device_name = ""
-db_instance: DatabasePrototype = None
-sqloader: SQLoader = None
 
-# Task list
-task_list = {}
-running_tasks = {}
+credential_manager = None
+operating_state_manager = None
+api_client = None
+sync_coordinator = None
+scheduler_adapter: ApSchedulerAdapter | None = None
+result_outbox: ResultOutbox | None = None
 
-# APScheduler
+running_tasks: dict[int, bool] = {}
+group_execution_status: dict[int, dict] = {}
+task_completion_status: dict[int, dict[int, list[str]]] = {}
+manual_execution_status: dict[int, dict] = {}
+_event_causes: set[str] = set()
+_event_suppressed_counts: dict[str, int] = {}
+event_delivery_failures = 0
+
 scheduler = BackgroundScheduler()
-scheduler.start()
-
-# Sequence definitions
-group_execution_status = {}
-# Track running and remaining tasks
-task_completion_status = {}
-
-# Reentrant lock
 execution_lock = RLock()
 
 
-def set_instances(_db_instance: DatabasePrototype, _sqloader: SQLoader):
-    global db_instance, sqloader, device_name
+def configure_sync(
+    _credential_manager,
+    _operating_state_manager,
+    _api_client,
+    _sync_coordinator,
+    _scheduler_adapter: ApSchedulerAdapter | None = None,
+    _result_outbox: ResultOutbox | None = None,
+) -> ApSchedulerAdapter:
+    """Wire snapshot, execution and result-delivery boundaries."""
+    global device_name
+    global credential_manager, operating_state_manager, api_client, sync_coordinator
+    global scheduler_adapter, result_outbox
 
-    db_instance = _db_instance
-    sqloader = _sqloader
-    device_name = twconfig['device']
-    device = db_instance.fetch_one(sqloader.load_sql(service_name, "get_device"), [device_name])
+    if result_outbox is not None and result_outbox is not _result_outbox:
+        result_outbox.close(wait=False)
 
-    if device is None:
-        # Zero-touch onboarding: register this device automatically on first run.
-        # The devices schema defaults new rows to 'active', so a fresh install
-        # runs without any manual DB seeding. A device that an operator has
-        # explicitly set to 'inactive' is left untouched (handled below).
-        Logger.info(f"Device {device_name} not found; registering it automatically.")
-        db_instance.execute_query(sqloader.load_sql(service_name, "insert_device"), [device_name])
-        device = db_instance.fetch_one(sqloader.load_sql(service_name, "get_device"), [device_name])
-
-    Logger.debug(f"device={device}")
-
-    device_error = False
-    msg = ""
-
-    if device is None:
-        msg = f"Device {device_name} could not be registered."
-        device_error = True
-    elif device['status'] != 'active':
-        msg = f"Device {device_name} is inactive"
-        device_error = True
-
-    if device_error:
-        error_handle(msg)
-        sys.exit(1)
-
-def task_rescheduler():
-    scheduler.add_job(
-        func=task_initializer
-        , trigger='cron'
-        , id="header"
-        , replace_existing=True
-        , year=f"{twconfig['reschedule']['year']}"
-        , month=f"{twconfig['reschedule']['month']}"
-        , day=f"{twconfig['reschedule']['day']}"
-        , hour=f"{twconfig['reschedule']['hour']}"
-        , minute=f"{twconfig['reschedule']['minute']}"
-        , second=f"{twconfig['reschedule']['second']}"
+    device_name = twconfig["device"]
+    credential_manager = _credential_manager
+    operating_state_manager = _operating_state_manager
+    api_client = _api_client
+    sync_coordinator = _sync_coordinator
+    scheduler_adapter = _scheduler_adapter or ApSchedulerAdapter(
+        scheduler,
+        start_group_execution,
+        dispatch_manual,
+        manual_dispatch_delay=agent_api_config["manual_dispatch_delay"],
     )
+    result_outbox = _result_outbox or ResultOutbox(
+        api_client,
+        state_manager=operating_state_manager,
+        capacity=agent_api_config["outbox_capacity"],
+        high_watermark=agent_api_config["outbox_high_watermark"],
+        low_watermark=agent_api_config["outbox_low_watermark"],
+        sender_workers=agent_api_config["outbox_sender_workers"],
+        retry_initial_delay=agent_api_config["retry_initial_delay"],
+        retry_multiplier=agent_api_config["retry_multiplier"],
+        retry_max_delay=agent_api_config["retry_max_delay"],
+        retry_jitter_ratio=agent_api_config["retry_jitter_ratio"],
+        access_token_provider=_result_access_token,
+        event_reporter=report_event_once,
+        ack_callback=handle_result_ack,
+        rejection_callback=handle_result_rejection,
+    )
+    add_listener = getattr(operating_state_manager, "add_transition_listener", None)
+    if add_listener is not None:
+        add_listener(_handle_operating_transition)
+    return scheduler_adapter
 
 
-def task_initializer():
-    global task_list
+def apply_snapshot(snapshot: ScheduleSnapshot) -> ScheduleSnapshot:
+    """Build and apply a deterministic reconcile plan in a short lock section."""
+    if sync_coordinator is None or scheduler_adapter is None:
+        raise RuntimeError("configure_sync must be called before applying a snapshot")
 
     with execution_lock:
-        try:
-            # 1. Fetch the latest schedule data from the database
-            task_datas = db_instance.fetch_all(
-                sqloader.load_sql(service_name, "get_tasks_all"), [device_name]
+        contexts = []
+        for schedule_id, status in group_execution_status.items():
+            if running_tasks.get(schedule_id):
+                contexts.append(
+                    RunningContext(
+                        context_id=str(status["context_id"]),
+                        kind="schedule",
+                        schedule_id=schedule_id,
+                    )
+                )
+        for manual_id, status in manual_execution_status.items():
+            contexts.append(
+                RunningContext(
+                    context_id=str(status["execution_grp_id"]),
+                    kind="manual",
+                    schedule_id=status["schedule_id"],
+                )
             )
-
-            # 2. Build a new schedule dictionary from database data
-            new_tasks = {}
-            for task_data in task_datas:
-                schedule_id = task_data['schedule_id']
-
-                if schedule_id not in new_tasks:
-                    new_tasks[schedule_id] = {
-                        "name": task_data['name'],
-                        "sg_year": task_data['sg_year'],
-                        "sg_month": task_data['sg_month'],
-                        "sg_day_of_week": task_data['sg_day_of_week'],
-                        "sg_day": task_data['sg_day'],
-                        "sg_hour": task_data['sg_hour'],
-                        "sg_minute": task_data['sg_minute'],
-                        "sg_second": task_data['sg_second'],
-                        "sg_is_error_stop": task_data['sg_is_error_stop'],
-                        "is_manual": task_data['is_manual'],
-                        "is_immediate": task_data['is_immediate'],
-                        "schedule_datetime": task_data['schedule_datetime'],
-                        "details": {}
-                    }
-
-                detail_id = task_data['detail_id']
-                new_tasks[schedule_id]['details'][detail_id] = {
-                    "detail_id": task_data['detail_id'],
-                    "is_manual": task_data['is_manual'],
-                    "manual_id": task_data['manual_id'],
-                    "me_status": task_data['me_status'],
-                    "sd_year": task_data['sd_year'],
-                    "sd_month": task_data['sd_month'],
-                    "sd_day_of_week": task_data['sd_day_of_week'],
-                    "sd_day": task_data['sd_day'],
-                    "sd_hour": task_data['sd_hour'],
-                    "sd_minute": task_data['sd_minute'],
-                    "sd_second": task_data['sd_second'],
-                    "sd_is_error_stop": task_data['sd_is_error_stop'],
-                    "sequence": task_data['sequence'],
-                    "retry_count": task_data['retry_count'],
-                    "new_sequence": task_data['new_sequence'],
-
-                    "task_type": task_data['task_type'],
-                    "command": task_data['command'],
-                    "archive_type": task_data['archive_type'],
-                    "source_path": task_data['source_path'],
-                    "error_on_missing_source": task_data['error_on_missing_source'],
-                    "destination_path": task_data['destination_path'],
-                    "date_format": task_data['date_format'],
-                    "target_date_format": task_data['target_date_format'],
-                    "destination_date_format": task_data['destination_date_format'],
-                    "house_keep_days": task_data['house_keep_days'],
-                }
-
-            Logger.debug(f"Fetched new_tasks from DB: {new_tasks}")
-
-            # 3. Compare current task_list with new_tasks
-            existing_schedule_ids = set(task_list.keys())
-            new_schedule_ids = set(new_tasks.keys())
-
-            # 3.1. Tasks to add (schedule_id exists only in new_tasks)
-            schedules_to_add = new_schedule_ids - existing_schedule_ids
-            for schedule_id in schedules_to_add:
-                task_list[schedule_id] = {
-                    "name": new_tasks[schedule_id]['name'],
-                    "sg_year": new_tasks[schedule_id]['sg_year'],
-                    "sg_month": new_tasks[schedule_id]['sg_month'],
-                    "sg_day_of_week": new_tasks[schedule_id]['sg_day_of_week'],
-                    "sg_day": new_tasks[schedule_id]['sg_day'],
-                    "sg_hour": new_tasks[schedule_id]['sg_hour'],
-                    "sg_minute": new_tasks[schedule_id]['sg_minute'],
-                    "sg_second": new_tasks[schedule_id]['sg_second'],
-                    "sg_is_error_stop": new_tasks[schedule_id]['sg_is_error_stop'],
-                    "sg_is_manual": new_tasks[schedule_id]['is_manual'],
-                    "sg_is_immediate": new_tasks[schedule_id]['is_immediate'],
-                    "sg_schedule_datetime": new_tasks[schedule_id]['schedule_datetime'],
-
-                    "details": []
-                }
-
-                # Add task details
-                for detail in new_tasks[schedule_id]['details'].values():
-                    task_list[schedule_id]['details'].append(detail)
-
-                Logger.debug(f"Added new schedule: {schedule_id}")
-
-                # Register a new job in APScheduler
-                try:
-                    if su.is_false(new_tasks[schedule_id]['is_manual']):
-                        scheduler.add_job(
-                            func=start_group_execution,
-                            trigger=CronTrigger(
-                                year=new_tasks[schedule_id]['sg_year'],
-                                month=new_tasks[schedule_id]['sg_month'],
-                                day_of_week=new_tasks[schedule_id]['sg_day_of_week'],
-                                day=new_tasks[schedule_id]['sg_day'],
-                                hour=new_tasks[schedule_id]['sg_hour'],
-                                minute=new_tasks[schedule_id]['sg_minute'],
-                                second=new_tasks[schedule_id]['sg_second']
-                            ),
-                            args=[schedule_id],
-                            id=str(schedule_id),
-                            replace_existing=True,
-                            misfire_grace_time=60  # Adjust as needed
-                        )
-                    else:
-                        if su.is_true(new_tasks[schedule_id]['is_immediate']):
-                            run_time = datetime.datetime.now() + timedelta(seconds=1)  # Run one second later
-                        else:
-                            run_time = new_tasks[schedule_id]['schedule_datetime']
-                            if isinstance(run_time, str):
-                                # MySQL datetime format: 'YYYY-MM-DD HH:MM:SS'
-                                run_time = datetime.strptime(run_time, '%Y/%m/%d %H:%M:%S')
-                        scheduler.add_job(
-                            func=start_group_execution,
-                            id=str(schedule_id),
-                            args=[schedule_id],
-                            trigger='date',
-                            run_date=run_time,
-                            replace_existing=True
-                        )
-
-                    Logger.info(f"Added new scheduler job: {schedule_id}")
-                    Logger.debug(f'Group={schedule_id} / {task_list[schedule_id]["sg_year"]} / {task_list[schedule_id]["sg_month"]} / {task_list[schedule_id]["sg_day_of_week"]}  / {task_list[schedule_id]["sg_day"]} / {task_list[schedule_id]["sg_hour"]} / {task_list[schedule_id]["sg_minute"]} / {task_list[schedule_id]["sg_second"]}')
-                except Exception as e:
-                    error_handle(f"Error adding scheduler job {schedule_id}: {e}")
-
-            # 3.2. Tasks to update (schedule_id exists in both dictionaries)
-            schedules_to_update = new_schedule_ids & existing_schedule_ids
-            for schedule_id in schedules_to_update:
-                existing_task = task_list[schedule_id]
-                new_task = new_tasks[schedule_id]
-
-                if su.is_true(new_task['is_manual']):
-                    # Immediate execution does not need updates
-                    if su.is_true(new_task['is_immediate']):
-                        continue
-
-                    # For scheduled execution
-                    run_time = new_task['schedule_datetime']
-                    if isinstance(run_time, str):
-                        run_time = datetime.datetime.strptime(run_time, '%Y/%m/%d %H:%M:%S')
-
-                    # No update needed if the time has already passed
-                    if run_time <= datetime.datetime.now():
-                        continue
-
-                    # Check schedule_datetime changes
-                    existing_schedule_datetime = existing_task.get('sg_schedule_datetime')
-                    if isinstance(existing_schedule_datetime, str):
-                        existing_schedule_datetime = datetime.datetime.strptime(existing_schedule_datetime, '%Y/%m/%d %H:%M:%S')
-
-                    # Reschedule if schedule_datetime changed
-                    if existing_schedule_datetime != run_time:
-                        task_list[schedule_id]['sg_schedule_datetime'] = new_task['schedule_datetime']
-                        Logger.debug(f"Schedule {schedule_id} schedule_datetime changed from '{existing_schedule_datetime}' to '{run_time}'")
-
-                        # Re-register APScheduler job
-                        job_id = str(schedule_id)
-                        try:
-                            scheduler.remove_job(job_id)
-                            Logger.info(f"Removed existing manual scheduler job: {job_id}")
-                        except Exception as e:
-                            Logger.debug(f"No existing job {job_id} to remove: {e}")
-
-                        scheduler.add_job(
-                            func=start_group_execution,
-                            id=job_id,
-                            args=[schedule_id],
-                            trigger='date',
-                            run_date=run_time,
-                            replace_existing=True
-                        )
-                        Logger.info(f"Rescheduled manual job: {job_id} to {run_time}")
-
-                    # For manual execution, update only details and continue
-                    # (Skip the automatic schedule logic below)
-
-                else:
-                    # Handle automatic schedule
-                    # Compare group-level fields
-                    compare_fields = ['name', 'sg_year', 'sg_month', 'sg_day_of_week', 'sg_day', 'sg_hour', 'sg_minute', 'sg_second', 'sg_is_error_stop']
-                    needs_update = False
-
-                    for field in compare_fields:
-                        if str(existing_task.get(field, '')) != str(new_task.get(field, '')):
-                            needs_update = True
-                            Logger.debug(f"Schedule {schedule_id} field '{field}' changed from '{existing_task.get(field, '')}' to '{new_task.get(field, '')}'")
-                            break
-
-                    if needs_update:
-                        # Update group-level fields
-                        for field in compare_fields:
-                            task_list[schedule_id][field] = new_task[field]
-                        Logger.debug(f"Updated schedule fields: {schedule_id}")
-
-                        # Update APScheduler job
-                        job_id = str(schedule_id)
-                        try:
-                            scheduler.remove_job(job_id)
-                            Logger.info(f"Removed existing scheduler job: {job_id}")
-                        except Exception as e:
-                            Logger.debug(f"No existing job {job_id} to remove: {e}")
-
-                        scheduler.add_job(
-                            func=start_group_execution,
-                            trigger=CronTrigger(
-                                year=new_task['sg_year'],
-                                month=new_task['sg_month'],
-                                day_of_week=new_task['sg_day_of_week'],
-                                day=new_task['sg_day'],
-                                hour=new_task['sg_hour'],
-                                minute=new_task['sg_minute'],
-                                second=new_task['sg_second']
-                            ),
-                            args=[schedule_id],
-                            id=job_id,
-                            replace_existing=True,
-                            misfire_grace_time=60
-                        )
-                        Logger.info(f"Added new scheduler job: {job_id}")
-
-                # Compare and update task details (common to automatic and manual schedules)
-                existing_details = {detail['detail_id']: detail for detail in existing_task['details']}
-                new_details = new_task['details']
-
-                # 3.2.1. Task details to add
-                details_to_add = set(new_details.keys()) - set(existing_details.keys())
-                for detail_id in details_to_add:
-                    task_list[schedule_id]['details'].append(new_details[detail_id])
-                    Logger.debug(f"Added new detail: {detail_id} to schedule: {schedule_id}")
-
-                # 3.2.2. Task details to update
-                details_to_update = set(new_details.keys()) & set(existing_details.keys())
-                for detail_id in details_to_update:
-                    existing_detail = existing_details[detail_id]
-                    new_detail = new_details[detail_id]
-
-                    detail_fields = [
-                        'sd_year', 'sd_month', 'sd_day_of_week', 'sd_day', 'sd_hour',
-                        'sd_minute', 'sd_second', 'sd_is_error_stop',
-                        'sequence', 'retry_count', 'new_sequence','task_type', 'command', "archive_type",
-                        "source_path", "error_on_missing_source", "destination_path", "date_format", "target_date_format",  "destination_date_format",
-                        "house_keep_days"]
-                    detail_needs_update = False
-
-                    for field in detail_fields:
-                        if str(existing_detail.get(field, '')) != str(new_detail.get(field, '')):
-                            detail_needs_update = True
-                            Logger.debug(f"Detail {detail_id} field '{field}' changed from '{existing_detail.get(field, '')}' to '{new_detail.get(field, '')}'")
-                            break
-
-                    if detail_needs_update:
-                        # Update task detail fields
-                        for field in detail_fields:
-                            existing_detail[field] = new_detail[field]
-                        Logger.info(f"Updated detail: {detail_id} in schedule: {schedule_id}")
-
-                # 3.2.3. Task details to delete
-                details_to_remove = set(existing_details.keys()) - set(new_details.keys())
-                if details_to_remove:
-                    task_list[schedule_id]['details'] = [
-                        detail for detail in task_list[schedule_id]['details']
-                        if detail['detail_id'] not in details_to_remove
-                    ]
-                    for detail_id in details_to_remove:
-                        Logger.info(f"Removed detail: {detail_id} from schedule: {schedule_id}")
+        old_snapshot = sync_coordinator.current_snapshot
+        plan = build_reconcile_plan(old_snapshot, snapshot, contexts)
+        applied = sync_coordinator.apply_reconcile_plan(
+            None if old_snapshot is None else old_snapshot.revision,
+            snapshot,
+            plan,
+            scheduler_adapter,
+        )
+        markers = set(plan.stop_after_current_sequence)
+        for status in group_execution_status.values():
+            if str(status["context_id"]) in markers:
+                status["stop_after_current_sequence"] = True
+    scheduler_adapter.schedule_pending_manuals()
+    return applied
 
 
-            # 3.3. Tasks to delete (schedule_id exists only in task_list)
-            schedules_to_remove = existing_schedule_ids - new_schedule_ids
-            for schedule_id in schedules_to_remove:
-                del task_list[schedule_id]
-                Logger.debug(f"Removed schedule: {schedule_id}")
+def get_current_snapshot() -> ScheduleSnapshot | None:
+    return None if sync_coordinator is None else sync_coordinator.current_snapshot
 
-                # Remove job from APScheduler
-                try:
-                    scheduler.remove_job(str(schedule_id))
-                    Logger.info(f"Removed scheduler job: {schedule_id}")
-                except Exception as e:
-                    error_handle(f"Error removing scheduler job {schedule_id}: {e}")
 
-            db_instance.execute_query(sqloader.load_sql("time_weaver", "update_device"), [version['version'], twconfig['device']])
-            Logger.debug(f"Final task_list after initialization: {task_list}")
-
-        except Exception as e:
-            Logger.error(f"Process Error: {e}")
-
-def start_group_execution(group_id):
-    """
-    Start group execution.
-    - Set the task list by sequence in group_execution_status[group_id]
-    - Call the first sequence to run, usually 1
-    """
-
-    global group_execution_status
-    global task_completion_status
+def start_group_execution(group_id: int) -> bool:
+    """Copy a regular group from the current snapshot into an execution context."""
+    if operating_state_manager is None or not operating_state_manager.execution_allowed():
+        Logger.warn(f"[start_group_execution] execution blocked for Group={group_id}")
+        return False
 
     with execution_lock:
-        group_execution_status[group_id] = {}
+        if running_tasks.get(group_id):
+            return False
+        schedule_group = _find_schedule(group_id)
+        if schedule_group is None:
+            Logger.warn(f"[start_group_execution] schedule missing for Group={group_id}")
+            return False
+        sequences: dict[int, list[ScheduleDetail]] = {}
+        for detail in schedule_group.details:
+            sequences.setdefault(detail.exec_sequence, []).append(detail)
+        if not sequences:
+            return False
+        context_id = uuid.uuid4()
+        group_execution_status[group_id] = {
+            "context_id": context_id,
+            "schedule": schedule_group,
+            "sequences": {key: tuple(value) for key, value in sequences.items()},
+            "stop_after_current_sequence": False,
+        }
         task_completion_status[group_id] = {}
+        running_tasks[group_id] = True
+        first_sequence = min(sequences)
 
-        for t in task_list[group_id]['details']:
-            seq = t['new_sequence']
-            group_execution_status[group_id].setdefault(seq, []).append(t)
-
-
-    Logger.debug(f"group_execution_status={group_execution_status}")
     Logger.debug(f"[start_group_execution] Starting Group={group_id}")
-
-    # Assume execution starts from sequence 1
-    execute_next_task(group_id, sequence=1)
-
-
-def execute_next_task(group_id, sequence):
-    """
-    Register tasks for a specific sequence in the scheduler.
-    """
-
-    global group_execution_status
-    global task_completion_status
-
-    if sequence == 1:
-        group_execution_status[group_id]['uuid'] = uuid.uuid4()
-        Logger.debug(f"Allocation of UUID={group_execution_status[group_id]['uuid']}")
+    if not execute_next_task(group_id, first_sequence):
+        with execution_lock:
+            running_tasks[group_id] = False
+        return False
+    return True
 
 
-    is_error_stop_group = task_list[group_id]["sg_is_error_stop"]
-    tasks = group_execution_status[group_id].get(sequence, [])
-    Logger.debug(
-        f"[execute_next_task] Found tasks for Seq={sequence} in Group={group_id}: {tasks}")
+def execute_next_task(group_id: int, sequence: int) -> bool:
+    """Reserve result capacity, then register an immutable execution sequence."""
+    if result_outbox is None:
+        raise RuntimeError("result outbox is not configured")
+    with execution_lock:
+        status = group_execution_status.get(group_id)
+        if status is None:
+            return False
+        tasks = status["sequences"].get(sequence, ())
+        if not tasks:
+            return False
+        schedule_group: ScheduleGroup = status["schedule"]
 
-    if not tasks:
-        Logger.debug(
-            f"[execute_next_task] No tasks for Seq={sequence}. Nothing to schedule.")
-        return
+    reserved = 0
+    for _detail in tasks:
+        if not result_outbox.reserve_slot():
+            for _ in range(reserved):
+                result_outbox.release_slot()
+            with execution_lock:
+                status["stop_after_current_sequence"] = True
+            return False
+        reserved += 1
 
     with execution_lock:
-        # When starting the next sequence, record that sequence task list
         task_completion_status[group_id][sequence] = [
-            t['detail_id'] for t in tasks]
-
-    Logger.debug(
-        f"[execute_next_task] Scheduling Seq={sequence} for Group={group_id}, Tasks={[t['detail_id'] for t in tasks]}")
-
-    for t in tasks:
-        if su.is_false(t['is_manual']) or t['me_status'] == 'wait':
-            run_time = datetime.datetime.now() + timedelta(seconds=1)  # Run one second later
-            job_id = f"{group_id}_{t['detail_id']}_{sequence}"
-            is_error_stop_detail = t['sd_is_error_stop']
-            is_manual = t['is_manual']
-            manual_id = None
-            if su.is_true(is_manual):
-                manual_id = t['manual_id']
+            str(detail.detail_id) for detail in tasks
+        ]
+    scheduled_job_ids: list[str] = []
+    try:
+        for detail in tasks:
+            run_time = datetime.datetime.now() + timedelta(seconds=1)
+            detail_id = str(detail.detail_id)
+            job_id = f"{group_id}_{detail_id}_{sequence}"
             scheduler.add_job(
                 func=execute_task,
                 id=job_id,
-                args=[t['detail_id'], group_id, sequence, t, is_error_stop_group, is_error_stop_detail, manual_id],
-                trigger='date',
+                args=[
+                    detail_id,
+                    group_id,
+                    sequence,
+                    _detail_task_data(detail),
+                    schedule_group.is_error_stop,
+                    detail.is_error_stop,
+                    None,
+                    None,
+                    str(status["context_id"]),
+                ],
+                trigger="date",
                 run_date=run_time,
-                replace_existing=True
+                replace_existing=True,
             )
-
+            scheduled_job_ids.append(job_id)
             Logger.debug(
-                f"[execute_next_task] Detail={t['detail_id']} scheduled at {run_time}")
-        else :
-            Logger.debug(f"[execute_next_task] Detail={t['detail_id']} status is {t['me_status']}")
-    Logger.debug(
-        f"[execute_next_task] Current Scheduler jobs: {scheduler.get_jobs()}")
-
-
-def execute_task(detail_id, group_id, sequence, task_data, is_error_stop_group, is_error_stop_detail, manual_id):
-    """
-    Execute an actual task.
-    After completing sequence/task handling, schedule the next sequence if needed.
-    """
-
-    global group_execution_status
-    global task_completion_status
-    global running_tasks
-
-    running_tasks[group_id] = True
-    next_task_run = True
-
-    Logger.debug(f"[execute_task] Task={task_data}")
-    Logger.debug(f"[execute_task] Start: Group={group_id}, Detail={detail_id}, Seq={sequence}")
-
-    # Update status for manual execution
-    if manual_id:
-        db_instance.execute_query(sqloader.load_sql(service_name, "update_manual_execution_status"), ['processing', manual_id])
-        Logger.debug(f"[execute_task] Manual ID={manual_id}")
-
-    # Execute task with exception handling
-    start_time = datetime.datetime.now()
-    result = -1  # Default to failure
-    msg = None
-
-    try:
-        result, msg = task.task_run(task_data)
-    except Exception as e:
-        # Handle exceptions
-        import traceback
-        msg = f"Unexpected error during task execution:\n{traceback.format_exc()}"
-        result = -1
-        Logger.error(f"[execute_task] Exception occurred: {msg}")
-
-    end_time = datetime.datetime.now()
-
-    exec_uuid = group_execution_status[group_id]['uuid']
-    log_group_id = group_id
-    if manual_id:
-        log_group_id = group_id.split('_')[1]
-
-    try:
-        param = [exec_uuid, log_group_id, detail_id, start_time, end_time, result, msg, get_environment_info(device_name)]
-    except:
-        Logger.warn("get_environment_info failed")
-        param = [exec_uuid, log_group_id, detail_id, start_time, end_time, result, msg, ""]
-    Logger.debug(f"param={param}")
-    db_instance.execute_query(sqloader.load_sql(service_name, "insert_execute_log"), param)
-
-
-    Logger.debug(f"[execute_task] result={result}, manual_id={manual_id}")
-
-    if result != 0:
-        Logger.debug(f"[execute_task] Entered error handling block")
-        if manual_id:
-            # Update status for manual execution
-            Logger.debug(f"[execute_task] Updating manual_id={manual_id} to failed")
-            db_instance.execute_query(sqloader.load_sql(service_name, "update_manual_execution_status"), ['failed', manual_id])
-            Logger.debug(f"[DEBUG] Successfully updated manual_id={manual_id} to failed")
-        if su.is_true(is_error_stop_group):
-            # Update status for manual execution
-            if manual_id:
-
-                db_instance.execute_query(sqloader.load_sql(service_name, "update_manual_execution_group_status"), ['failed', group_id])
-            else:
-                db_instance.execute_query(sqloader.load_sql(service_name, "update_schedule_group_status"), ['error', group_id])
-            next_task_run = False
-            scheduler.remove_job(f"{group_id}")
-        if su.is_true(is_error_stop_detail):
-            db_instance.execute_query(sqloader.load_sql(service_name, "update_schedule_detail_status"), ['error', group_id, detail_id])
-            exclude_task(group_id, detail_id)
-        Logger.error(msg)
-    else:
-        # Success path; replaced elif with else
-        if manual_id:
-            db_instance.execute_query(sqloader.load_sql(service_name, "update_manual_execution_status"), ['done', manual_id])
-
-    if next_task_run:
+                f"[execute_next_task] Detail={detail_id} scheduled at {run_time}"
+            )
+    except Exception:
+        for job_id in scheduled_job_ids:
+            try:
+                scheduler.remove_job(job_id)
+            except JobLookupError:
+                pass
+        for _ in range(reserved):
+            result_outbox.release_slot()
         with execution_lock:
-            # 1) Mark the current task as completed
-            task_completion_status[group_id][sequence].remove(detail_id)
-            Logger.info(
-                f"[execute_task] Done Task={detail_id}. Remaining in Seq {sequence}: {task_completion_status[group_id][sequence]}")
-
-            # Check whether the sequence is complete
-            sequence_finished = False
-            if not task_completion_status[group_id][sequence]:
-                Logger.debug(
-                    f"[execute_task] Seq {sequence} in Group={group_id} is complete.")
-                del task_completion_status[group_id][sequence]  # Delete sequence
-                sequence_finished = True
-
-            # 2) If the sequence is fully complete → Check and register the next sequence
-            next_sequence = sequence + 1
-            if sequence_finished and next_sequence in group_execution_status[group_id]:
-                Logger.debug(
-                    f"[execute_task] Preparing next sequence={next_sequence} for Group={group_id}")
-                # RLock prevents deadlock even if execute_next_task() is called again here
-                execute_next_task(group_id, next_sequence)
-
-            # 3) Finish when all sequences in the current group are gone
-            if not task_completion_status[group_id]:
-                Logger.debug(
-                    f"[execute_task] All tasks in Group={log_group_id} are complete.")
-                running_tasks[group_id] = False
-            #    scheduler.shutdown(wait=False)
-            #    sys.exit(0)
-    else:
-        running_tasks[group_id] = False
+            task_completion_status[group_id].pop(sequence, None)
+            status["stop_after_current_sequence"] = True
+        raise
+    return True
 
 
-def get_environment_info(device_name):
-    return jsonutil.json_to_string({
+def dispatch_manual(manual_id: int) -> bool:
+    """Claim one snapshot-listed manual run immediately before local dispatch."""
+    if (
+        operating_state_manager is None
+        or not operating_state_manager.execution_allowed()
+        or scheduler_adapter is None
+        or result_outbox is None
+    ):
+        if scheduler_adapter is not None:
+            scheduler_adapter.release_manual(manual_id)
+        return False
+
+    if scheduler_adapter.manual_inflight(manual_id):
+        return False
+    scheduler_adapter.mark_manual_attempted(manual_id)
+    with execution_lock:
+        manual = _find_manual(manual_id)
+        if manual is None or not manual.claimable or manual.status in {
+            "done", "failed", "cancelled", "claimed"
+        }:
+            scheduler_adapter.release_manual(manual_id)
+            return False
+        detail = _find_detail(manual.schedule_id, manual.detail_id)
+        schedule_group = _find_schedule(manual.schedule_id)
+        if detail is None or schedule_group is None:
+            scheduler_adapter.release_manual(manual_id)
+            return False
+
+    if not result_outbox.reserve_slot():
+        scheduler_adapter.release_manual(manual_id)
+        return False
+
+    try:
+        claim = api_client.claim_manual_execution(manual_id)
+    except ClientRejectedError as exc:
+        result_outbox.release_slot()
+        scheduler_adapter.release_manual(manual_id)
+        if exc.code not in {"already_claimed", "not_found"}:
+            _record_api_failure(exc)
+        return False
+    except TransientServerError:
+        result_outbox.release_slot()
+        scheduler_adapter.release_manual(manual_id)
+        return False
+    except ApiClientError as exc:
+        result_outbox.release_slot()
+        scheduler_adapter.release_manual(manual_id)
+        _record_api_failure(exc)
+        return False
+    except Exception:
+        result_outbox.release_slot()
+        scheduler_adapter.release_manual(manual_id)
+        return False
+
+    claim_token = claim.get("claim_token") if isinstance(claim, Mapping) else None
+    if not isinstance(claim_token, str) or not claim_token:
+        result_outbox.release_slot()
+        scheduler_adapter.release_manual(manual_id)
+        report_event_once(
+            "sync_error", "error", "Manual claim response was invalid.",
+            f"manual-claim-shape:{manual_id}",
+        )
+        return False
+
+    execution_grp_id = str(uuid.uuid4())
+    with execution_lock:
+        manual_execution_status[manual_id] = {
+            "execution_grp_id": execution_grp_id,
+            "schedule_id": manual.schedule_id,
+            "detail_id": str(manual.detail_id),
+            "claim_token": claim_token,
+        }
+    run_time = datetime.datetime.now() + timedelta(seconds=1)
+    kwargs = {
+        "func": execute_task,
+        "id": f"manual_task:{manual_id}:{execution_grp_id}",
+        "args": [
+            str(detail.detail_id),
+            manual.schedule_id,
+            1,
+            _detail_task_data(detail),
+            schedule_group.is_error_stop,
+            detail.is_error_stop,
+            manual_id,
+            claim_token,
+            execution_grp_id,
+        ],
+        "trigger": "date",
+        "run_date": run_time,
+        "replace_existing": False,
+    }
+    try:
+        scheduler.add_job(**kwargs)
+    except Exception:
+        execute_task(*kwargs["args"])
+    return True
+
+
+def execute_task(
+    detail_id: str,
+    group_id: int,
+    sequence: int,
+    task_data: dict,
+    is_error_stop_group: bool,
+    is_error_stop_detail: bool,
+    manual_id=None,
+    claim_token: str | None = None,
+    execution_grp_id: str | None = None,
+) -> None:
+    """Execute locally and enqueue a result; server ACK decides progression."""
+    del is_error_stop_group, is_error_stop_detail
+    if result_outbox is None:
+        raise RuntimeError("result outbox is not configured")
+    if manual_id is None:
+        running_tasks[group_id] = True
+
+    started_at = datetime.datetime.now(timezone.utc)
+    result = -1
+    message = None
+    try:
+        result, message = task.task_run(task_data)
+    except Exception:
+        message = "Unexpected error during task execution."
+        Logger.error(
+            f"[execute_task] unexpected failure Group={group_id}, Detail={detail_id}"
+        )
+    finished_at = datetime.datetime.now(timezone.utc)
+
+    if execution_grp_id is None:
+        with execution_lock:
+            status = group_execution_status.get(group_id)
+            if status is None:
+                raise RuntimeError("execution context is missing")
+            execution_grp_id = str(status["context_id"])
+    try:
+        environment = get_environment_info(device_name)
+    except Exception:
+        Logger.warn("[execute_task] environment collection failed")
+        environment = {}
+
+    result_outbox.enqueue(
+        ResultEnvelope(
+            execution_grp_id=str(execution_grp_id),
+            schedule_id=int(group_id),
+            detail_id=str(detail_id),
+            attempt=1,
+            manual_id=manual_id,
+            claim_token=claim_token,
+            started_at=started_at.isoformat().replace("+00:00", "Z"),
+            finished_at=finished_at.isoformat().replace("+00:00", "Z"),
+            result_code=int(result),
+            result_message=message,
+            environment_info=environment,
+            sequence=int(sequence),
+        )
+    )
+    if result != 0:
+        Logger.error(
+            f"[execute_task] task failed Group={group_id}, Detail={detail_id}, Code={result}"
+        )
+
+
+def handle_result_ack(
+    envelope: ResultEnvelope, transitions: tuple[dict, ...] | tuple
+) -> None:
+    """Apply server-owned transitions, then cross the sequence ACK barrier."""
+    if envelope.manual_id is not None:
+        with execution_lock:
+            manual_execution_status.pop(envelope.manual_id, None)
+        return
+
+    with execution_lock:
+        status = group_execution_status.get(envelope.schedule_id)
+        if status is None:
+            return
+        for transition in transitions:
+            target = transition.get("target")
+            if target == "schedule_detail":
+                exclude_task(envelope.schedule_id, str(transition.get("id", envelope.detail_id)))
+            elif target == "schedule_group":
+                status["stop_after_current_sequence"] = True
+                try:
+                    scheduler.remove_job(f"schedule:{envelope.schedule_id}")
+                except JobLookupError:
+                    pass
+    _finish_detail(
+        envelope.schedule_id, envelope.sequence, envelope.detail_id, True
+    )
+
+
+def handle_result_rejection(envelope: ResultEnvelope, code: str) -> None:
+    """Fail one execution context closed after a permanent A6 rejection."""
+    if envelope.manual_id is not None:
+        with execution_lock:
+            manual_execution_status.pop(envelope.manual_id, None)
+        return
+    with execution_lock:
+        status = group_execution_status.get(envelope.schedule_id)
+        if status is not None:
+            status["stop_after_current_sequence"] = True
+    _finish_detail(
+        envelope.schedule_id, envelope.sequence, envelope.detail_id, False
+    )
+
+
+def _finish_detail(group_id: int, sequence: int, detail_id: str, next_task_run: bool) -> None:
+    next_sequence = None
+    with execution_lock:
+        group_completion = task_completion_status.get(group_id)
+        if group_completion is None or sequence not in group_completion:
+            return
+        remaining = group_completion[sequence]
+        if detail_id in remaining:
+            remaining.remove(detail_id)
+        if not remaining:
+            del group_completion[sequence]
+            status = group_execution_status[group_id]
+            if next_task_run and not status["stop_after_current_sequence"]:
+                later = [value for value in status["sequences"] if value > sequence]
+                if later:
+                    next_sequence = min(later)
+        if next_sequence is None and not group_completion:
+            running_tasks[group_id] = False
+
+    if next_sequence is not None and not execute_next_task(group_id, next_sequence):
+        with execution_lock:
+            running_tasks[group_id] = False
+
+
+def _find_schedule(group_id: int) -> ScheduleGroup | None:
+    snapshot = get_current_snapshot()
+    if snapshot is None:
+        return None
+    return next(
+        (group for group in snapshot.schedules if group.schedule_id == group_id),
+        None,
+    )
+
+
+def _find_manual(manual_id: int) -> ManualExecution | None:
+    snapshot = get_current_snapshot()
+    if snapshot is None:
+        return None
+    return next((item for item in snapshot.manual_runs if item.manual_id == manual_id), None)
+
+
+def _find_detail(schedule_id: int, detail_id) -> ScheduleDetail | None:
+    schedule_group = _find_schedule(schedule_id)
+    if schedule_group is None:
+        return None
+    return next(
+        (detail for detail in schedule_group.details if str(detail.detail_id) == str(detail_id)),
+        None,
+    )
+
+
+def _detail_task_data(detail: ScheduleDetail) -> dict:
+    """Adapt the typed contract to task.task_run's legacy mapping boundary."""
+    return {
+        "detail_id": str(detail.detail_id),
+        "task_type": detail.task_type,
+        "command": detail.command,
+        "archive_type": detail.archive_type,
+        "source_path": detail.source_path,
+        "error_on_missing_source": detail.error_on_missing_source,
+        "destination_path": detail.destination_path,
+        "date_format": detail.date_format,
+        "target_date_format": detail.target_date_format,
+        "destination_date_format": detail.destination_date_format,
+        "house_keep_days": detail.house_keep_days,
+    }
+
+
+def get_environment_info(configured_device_name: str) -> dict[str, str]:
+    return {
         "host": socket.gethostname(),
         "ip": socket.gethostbyname(socket.gethostname()),
         "os": os.name,
         "user": getpass.getuser(),
-        "device_name": device_name
-    })
+        "device_name": configured_device_name,
+    }
 
-def exclude_task(group_id, exclude_detail_id):
-    global task_list
-    task_list[group_id]["details"] = [detail for detail in task_list[group_id]["details"] if detail["detail_id"] != exclude_detail_id]
-    Logger.warn(f"[exclude_task] Group={group_id}, Detail={exclude_detail_id} Task was excluded")
 
-def error_handle(msg):
-    start_time = datetime.datetime.now()
-    end_time = datetime.datetime.now()
+def exclude_task(group_id: int, exclude_detail_id: str) -> None:
+    """Exclude a failed detail only from this immutable execution context."""
+    with execution_lock:
+        status = group_execution_status.get(group_id)
+        if status is None:
+            return
+        status["sequences"] = {
+            sequence: tuple(
+                detail
+                for detail in details
+                if str(detail.detail_id) != str(exclude_detail_id)
+            )
+            for sequence, details in status["sequences"].items()
+        }
+    Logger.warn(
+        f"[exclude_task] Group={group_id}, Detail={exclude_detail_id} Task was excluded"
+    )
 
-    param = [-1, -1, -1, start_time, end_time, -1, msg, get_environment_info(device_name)]
-    Logger.debug(f"Error param={param}")
-    db_instance.execute_query(sqloader.load_sql(service_name, "insert_execute_log"), param)
 
-# Unused function
-def cleanup_stale_tasks(self, timeout_minutes=60):
-    """
-    Mark tasks stuck in processing beyond a threshold as failed
-    """
-    sql = """
-        UPDATE manual_execution
-        SET status = 'failed',
-            error_message = 'Task timed out',
-            completed_at = NOW()
-        WHERE status = 'processing'
-        AND started_at < DATE_SUB(NOW(), INTERVAL %s MINUTE)
-    """
-    with self.db_connection.cursor() as cursor:
-        cursor.execute(sql, (timeout_minutes,))
-        affected = cursor.rowcount
-        self.db_connection.commit()
-        Logger.info(f"Cleaned up {affected} stale tasks")
+def clear_event_cause(cause: str) -> None:
+    """Release a cause latch after recovery so a later recurrence is observable."""
+    with execution_lock:
+        _event_causes.discard(cause)
 
-# Unused function
-def retry_failed_task(self, task_id, max_retries=3):
-    """
-    Retry failed tasks
-    """
-    # Check the current retry count
-    with self.db_connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT retry_count FROM manual_execution WHERE id = %s",
-            (task_id,)
+
+def _handle_operating_transition(transition) -> None:
+    """Own network/scheduler side effects outside the state manager boundary."""
+    previous = getattr(transition.previous.state, "value", transition.previous.state)
+    current = getattr(transition.current.state, "value", transition.current.state)
+    if current == "HALTED":
+        if sync_coordinator is not None and scheduler_adapter is not None:
+            sync_coordinator.remove_all_managed(scheduler_adapter)
+        with execution_lock:
+            for status in group_execution_status.values():
+                status["stop_after_current_sequence"] = True
+    if previous == "HEALTHY" and current == "DEGRADED":
+        clear_event_cause("state:recovered")
+        report_event_once(
+            "degraded", "warning", "Agent entered degraded operation.", "state:degraded"
         )
-        result = cursor.fetchone()
+    elif previous == "DEGRADED" and current == "HEALTHY":
+        clear_event_cause("state:degraded")
+        report_event_once(
+            "recovered", "info", "Agent recovered healthy operation.", "state:recovered"
+        )
 
-        if result and result[0] < max_retries:
-            # Retry is available
-            cursor.execute("""
-                UPDATE manual_execution
-                SET status = 'pending',
-                    retry_count = retry_count + 1
-                WHERE id = %s
-            """, (task_id,))
-            self.db_connection.commit()
-            return True
-    return False
+
+def report_event_once(
+    event_type: str, severity: str, message: str, cause: str | None = None
+) -> None:
+    """Send one sanitized A7 event per cause; event delivery itself is not retried."""
+    global event_delivery_failures
+    if api_client is None:
+        return
+    key = cause or f"{event_type}:{message}"
+    with execution_lock:
+        # The outbox owns the high/low-watermark latch and deliberately reuses
+        # this cause after recovery below the low watermark.
+        if key != "outbox:backlog":
+            if key in _event_causes:
+                _event_suppressed_counts[key] = _event_suppressed_counts.get(key, 0) + 1
+                return
+            _event_causes.add(key)
+    try:
+        api_client.report_execution_event(
+            {
+                "event_type": event_type,
+                "severity": severity,
+                "occurred_at": datetime.datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "message": message,
+                "environment_info": get_environment_info(device_name),
+            }
+        )
+    except Exception:
+        event_delivery_failures += 1
+
+
+def _result_access_token() -> str:
+    if credential_manager is None:
+        raise AuthenticationError("credential manager is unavailable", code="invalid_token")
+    outcome = credential_manager.ensure_access_token()
+    if not outcome.ok:
+        reason = outcome.reason or "unavailable"
+        if reason in {"needs_enrollment", "credential_persist_failed", "device_inactive"}:
+            if operating_state_manager is not None:
+                operating_state_manager.credential_failed(reason)
+            raise AuthenticationError("result delivery credential unavailable", code="invalid_token")
+        raise TransientServerError("credential refresh temporarily unavailable", code="unavailable")
+    if operating_state_manager is not None:
+        operating_state_manager.credential_succeeded()
+    api_client.set_access_token(outcome.access_token)
+    return outcome.access_token
+
+
+def _record_api_failure(exc: ApiClientError) -> None:
+    if operating_state_manager is None:
+        return
+    if isinstance(exc, DeviceInactiveError):
+        operating_state_manager.device_status("inactive")
+    elif isinstance(exc, AuthenticationError):
+        operating_state_manager.credential_failed("needs_enrollment")
+    else:
+        operating_state_manager.snapshot_failed(exc.code)
+
+
+def error_handle(msg: str) -> None:
+    """Report agent-level failures without storing raw business values."""
+    del msg
+    Logger.error("[error_handle] agent operation failed")
+    report_event_once(
+        "startup_error", "error", "Agent operation failed.", "agent-operation-failed"
+    )

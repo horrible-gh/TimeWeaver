@@ -1,13 +1,12 @@
 # TimeWeaver Agent
 
-The `agent` directory contains the Python scheduler process for TimeWeaver. It connects to the TimeWeaver database, loads schedule definitions for the configured device, registers jobs with APScheduler, executes task details in sequence order, and records execution results.
+The `agent` directory contains TimeWeaver's Python scheduler process. It enrolls with the TimeWeaver server, receives device-scoped schedule snapshots through the agent API, registers jobs with APScheduler, executes task details in sequence order, and reports results through an in-memory outbox.
 
 ## Stack
 
 - Python 3
 - APScheduler
-- PyMySQL
-- sqloader
+- Requests
 - LogAssist
 - PyCryptodome
 
@@ -15,20 +14,21 @@ The `agent` directory contains the Python scheduler process for TimeWeaver. It c
 
 ```text
 agent/
-|-- timeweaver.py                 Process entry point
+|-- timeweaver.py                 Process entry point and API polling loops
 |-- configure.py                  Loads config files and initializes logging
 |-- requirements.txt              Python dependencies
-|-- install-service.sh            Linux systemd installer
 |-- conf/
-|   |-- server.sample.json        Logging and database configuration template
-|   |-- time_weaver.sample.json   Device and reschedule configuration template
+|   |-- server.sample.json        Logging configuration template
+|   |-- time_weaver.sample.json   Device and agent API configuration template
 |   `-- version.json              Agent version metadata
 |-- services/time_weaver/
-|   |-- app.py                    Scheduler, DB synchronization, execution logging
+|   |-- api_client.py             Agent API transport boundary
+|   |-- credential_manager.py     Enrollment and access-token lifecycle
+|   |-- sync_coordinator.py       Snapshot validation and reconciliation
+|   |-- scheduler_adapter.py      APScheduler reconciliation adapter
+|   |-- app.py                    Scheduling, execution, and result delivery
+|   |-- outbox.py                 In-memory result delivery queue
 |   `-- task.py                   Task implementations
-|-- res/time_weaver/sql/
-|   |-- migration/                Database migration SQL files
-|   `-- sqloader/                 SQLoader query definitions
 `-- util/                         Utility modules
 ```
 
@@ -54,7 +54,7 @@ Copy-Item conf\server.sample.json conf\server.json
 Copy-Item conf\time_weaver.sample.json conf\time_weaver.json
 ```
 
-Update `conf/server.json` with the database connection and logging settings. Update `conf/time_weaver.json` with the device name and schedule reload cron expression.
+Update `conf/server.json` with logging settings. Configure the device identity and server API options in `conf/time_weaver.json`. On first enrollment, provide the one-time token through the environment variable named by `api.enrollment_token_env` (default: `TIMEWEAVER_ENROLLMENT_TOKEN`).
 
 ## Run
 
@@ -67,45 +67,25 @@ python timeweaver.py
 On startup, the agent:
 
 1. Loads `conf/server.json`, `conf/time_weaver.json`, and `conf/version.json`.
-2. Initializes the database, SQLoader, and migrations.
-3. Validates that the configured device exists and is active.
-4. Loads matching schedule groups and details from the database.
-5. Registers jobs with APScheduler.
-6. Periodically reloads schedule definitions.
-
-## Linux Service
-
-`install-service.sh` can install the agent as a `systemd` service:
-
-```bash
-chmod +x install-service.sh
-./install-service.sh
-```
-
-The installer prompts for the install directory, optional mount dependency, and service user. After installation, use standard `systemctl` commands:
-
-```bash
-sudo systemctl enable timeweaver-agent
-sudo systemctl start timeweaver-agent
-sudo systemctl status timeweaver-agent
-journalctl -u timeweaver-agent -f
-```
+2. Loads or enrolls device credentials and obtains an access token.
+3. Sends a heartbeat and requests the device-scoped schedule snapshot.
+4. Validates the complete snapshot before reconciling APScheduler jobs.
+5. Polls heartbeat and snapshot channels independently with retry backoff.
+6. Executes eligible regular and claimed manual work, then delivers results through the API-backed outbox.
 
 ## Configuration Files
 
-`conf/server.json` contains:
-
-- Logger configuration.
-- TimeWeaver database connection.
-- Migration path.
-- SQLoader path.
+`conf/server.json` contains logger configuration only.
 
 `conf/time_weaver.json` contains:
 
-- `device`: the device name used to select schedules.
-- `reschedule`: cron fields used to reload schedules from the database.
+- `device`: the device name presented during enrollment.
+- `api.base_url`: the TimeWeaver server base URL.
+- `api.credential_path`: the local credential file path.
+- `api.enrollment_token_env`: the environment variable containing a one-time enrollment token.
+- API timeouts, polling intervals, retry policy, shutdown grace, and outbox capacity/watermarks.
 
-The configured device must exist in the `devices` table and have `active` status.
+The server owns device activation, schedule data, manual claims, execution state transitions, and persistent execution logs.
 
 ## Task Types
 
@@ -116,23 +96,17 @@ Task execution is implemented in `services/time_weaver/task.py`.
 - `archive`: creates a ZIP archive from a source directory.
 - `housekeep`: deletes files older than `house_keep_days`.
 
-Path fields can use `{date}` and are formatted with:
-
-- `date_format`
-- `target_date_format`
-- `destination_date_format`
-
-If a source path is missing, `error_on_missing_source` decides whether the task fails or is skipped.
+Path fields can use `{date}` and are formatted with `date_format`, `target_date_format`, and `destination_date_format`. If a source path is missing, `error_on_missing_source` decides whether the task fails or is skipped.
 
 ## Execution Flow
 
-- `services/time_weaver/app.py` loads schedule rows with SQLoader key `get_tasks_all`.
-- Schedule groups are registered as cron or date jobs.
-- Detail tasks are executed by sequence.
-- If a sequence has multiple details, they are scheduled together.
-- Results are written to `execution_log`.
-- Manual execution status is updated to `processing`, `done`, or `failed`.
-- Group or detail error-stop flags control whether subsequent tasks continue.
+- `timeweaver.py` maintains independent heartbeat and snapshot polling channels.
+- `sync_coordinator.py` validates snapshots and applies an all-or-nothing scheduler diff.
+- Schedule groups are registered as cron jobs; claimable manual runs are claimed through the server before dispatch.
+- Detail tasks execute by sequence, with details in the same sequence scheduled together.
+- Immutable results are queued in memory and sent through the server API in per-execution-group FIFO order.
+- Server acknowledgements and applied transitions determine whether the next sequence may continue.
+- Authentication or device revocation halts new work; transient communication failures retain the last valid snapshot.
 
 ## Logs
 

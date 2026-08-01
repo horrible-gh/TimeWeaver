@@ -5,7 +5,10 @@ import os
 import time
 from datetime import datetime
 import LogAssist.log as logger
-import util.string_util as strutil
+try:
+    from agent.util import string_util as strutil
+except ImportError:  # Script execution from the agent directory.
+    import util.string_util as strutil
 
 BASIC_DATE_FORMAT = '%Y%m%d'
 CHECKED_SOURCE = 1
@@ -15,7 +18,7 @@ def execute_process(command):
     err_msg = None
 
     try:
-        logger.debug(f"Executing command: {command}")
+        logger.debug("Executing command task")
 
         # Set environment variables for UTF-8 encoding on Windows
         env = os.environ.copy()
@@ -31,16 +34,14 @@ def execute_process(command):
             encoding='utf-8',
             errors='replace'
         )
-        logger.debug(f"result={result.stdout}")
+        logger.debug("Command task completed")
     except subprocess.CalledProcessError as e:
         err_msg = e.stderr if e.stderr else str(e)
-        logger.error(f"Error executing command: {command}")
-        logger.error(err_msg)
+        logger.error("Command task failed")
         result_code = -1
     except Exception as e:
         err_msg = str(e)
-        logger.error(f"Unexpected error executing command: {command}")
-        logger.error(err_msg)
+        logger.error("Command task failed unexpectedly")
         result_code = -1
     return result_code, err_msg
 
@@ -60,7 +61,7 @@ def house_keep(task_path, days):
 
         # Delete the file if its last-modified time is older than the cutoff
         if file_time < cutoff:
-            logger.info(f"Deleting {task_path}/{file}...")
+            logger.info("Deleting expired housekeeping item")
             os.remove(file_path)
 
 
@@ -100,7 +101,7 @@ def task_run(task: dict):
                                 try:
                                     zipf.write(filepath, arcname)
                                 except PermissionError as e:
-                                    logger.warn(f"Skipping locked file: {filepath}")
+                                    logger.warn("Skipping locked archive item")
                                     continue
                     logger.debug(f"File Archive Successful")
                 elif check_result == -1:
@@ -157,7 +158,7 @@ def task_run(task: dict):
 
     except Exception as e:
         msg = traceback.format_exc()
-        logger.error(f"Task failed with error:\n{msg}")
+        logger.error(f"Task failed: task_type={task.get('task_type', '')}")
         result = -1
 
     return result, msg
@@ -181,13 +182,13 @@ def check_paths(task: dict):
     source_path = source_path.format(
         date=datetime.now().strftime(target_date_format)
     )
-    logger.debug(f"After source_path={source_path}")
+    logger.debug("Source path resolved")
 
     destination_path = task.get("destination_path") or ""
     destination_path = destination_path.format(
         date=datetime.now().strftime(destination_date_format)
     )
-    logger.debug(f"destination_path={destination_path}")
+    logger.debug("Destination path resolved")
 
     return date_format, target_date_format, destination_date_format, source_path, destination_path
 
@@ -209,8 +210,8 @@ def check_source_path(task: dict, source_path, destination_path):
     if exist_source:
         return CHECKED_SOURCE
     elif error_on_missing_source:
-        logger.error(f"Source file or directory does not exist: {source_path}")
+        logger.error("Source file or directory does not exist")
         return -1
     else:
-        logger.info(f"Skip because file or directory is missing: {source_path}")
+        logger.info("Skip because source file or directory is missing")
         return 0
