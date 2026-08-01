@@ -4,9 +4,9 @@ TimeWeaver is split into three working projects:
 
 - `client`: Vue 3 dashboard and login UI.
 - `server`: FastAPI backend used by the dashboard and agent.
-- `agent`: Python scheduler agent that loads schedules from the TimeWeaver database and executes tasks on a registered device.
+- `agent`: Python scheduler agent that enrolls with the TimeWeaver server, receives device-scoped schedule snapshots, and executes tasks.
 
-The UI is used to manage devices, schedule groups, schedule details, manual executions, and execution history. The server exposes the authenticated API, initializes database access and migrations, and loads SQL resources for MySQL or SQLite. The agent runs on a target device, periodically reloads schedule definitions from the database, and executes command, copy, archive, and housekeeping tasks.
+The UI is used to manage devices, schedule groups, schedule details, manual executions, and execution history. The server exposes the authenticated API, owns database access and migrations, and loads SQL resources for MySQL or SQLite. The agent runs on a target device, synchronizes schedule snapshots through the server API, and executes command, copy, archive, and housekeeping tasks without database access.
 
 ## Quick Start (One-Step Setup)
 
@@ -29,8 +29,8 @@ chmod +x install.sh
 Run with no arguments for an **interactive install**: the installer asks which
 component to install and then **prompts for every config value that lands in
 `server/.env` (and the agent/client config)** — `ALLOWED_ORIGIN`, `CONTEXT`,
-`ACCESS_TOKEN_EXPIRE_MINUTES`, the database connection, the optional Redis
-endpoint, and so on. Each prompt shows the default in brackets; press Enter to
+`ACCESS_TOKEN_EXPIRE_MINUTES`, the server database connection, the optional Redis
+endpoint, the agent server URL, and so on. Each prompt shows the default in brackets; press Enter to
 accept it or type your own value. Whatever you decide at install time is written
 into the config, so **after the install there is nothing to copy or hand-edit.**
 `SECRET_KEY` is generated as a fresh cryptographic random value (never a
@@ -72,15 +72,17 @@ is copied to `backups/<timestamp>/` before being rewritten. (`--reconfigure` /
 # Windows: server with defaults (sqlite3, generated SECRET_KEY)
 .\install.ps1 -Component server -NonInteractive
 
-# Windows: agent pointed at a MySQL database
+# Windows: agent pointed at the TimeWeaver server API
 .\install.ps1 -Component agent -NonInteractive `
-    -DbHost db.example.com -DbUser tw -DbPassword secret -DbName tw -DeviceName floor-1-pc
+    -ServerUrl https://timeweaver.example.com/time_weaver -DeviceName floor-1-pc
+$env:TIMEWEAVER_ENROLLMENT_TOKEN = "<one-time token>"  # set only for first enrollment
 ```
 
 ```bash
-# Linux: agent pointed at a MySQL database
+# Linux: agent pointed at the TimeWeaver server API
 ./install.sh --component agent --non-interactive \
-    --db-host db.example.com --db-user tw --db-password secret --db-name tw --device-name floor-1-pc
+    --server-url https://timeweaver.example.com/time_weaver --device-name floor-1-pc
+export TIMEWEAVER_ENROLLMENT_TOKEN="<one-time token>"  # set only for first enrollment
 ```
 
 Run `./install.sh --help` (Linux) or `Get-Help .\install.ps1` (Windows) for the
@@ -109,13 +111,13 @@ sudo systemctl start timeweaver-server timeweaver-agent
 > install registers both the server and the agent); an agent-only install
 > registers just the agent.
 
-> The agent **registers its own device row automatically** on first run (created
-> as `active`, matching the schema default), so no manual database seeding is
-> needed. A device an operator has explicitly set to `inactive` is left as-is.
+> On first run, the agent uses a one-time enrollment token issued by an
+> administrator to register its device as active; no database seeding is needed.
+> A device an operator has explicitly set to `inactive` is left as-is.
 >
-> The agent connects to the shared TimeWeaver database by design (it runs on
-> remote target devices). The installer collects the connection details as
-> prompts/flags — there are still no files to hand-edit.
+> The agent connects only to the TimeWeaver server API. The installer writes the
+> server base URL from prompts/flags; provide `TIMEWEAVER_ENROLLMENT_TOKEN` in the
+> process or service environment for the first enrollment, never in a config file.
 
 ## Repository Layout
 
@@ -167,12 +169,12 @@ uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1 --reload
 
 ### agent
 
-The agent is a long-running Python process. On startup it initializes the database connection and migrations, validates its configured device, loads active schedules, and registers jobs with APScheduler.
+The agent is a long-running Python process. On startup it loads or enrolls device credentials, obtains an access token, sends a heartbeat, validates a device-scoped schedule snapshot, and reconciles APScheduler jobs.
 
 Useful commands:
 
 The installer generates `conf/server.json` and `conf/time_weaver.json` for you
-(prompting for the database connection and device name). The commands below are
+(prompting for the TimeWeaver server URL and device name). The commands below are
 only for manual/advanced workflows:
 
 ```powershell
@@ -215,11 +217,9 @@ asking. The tables list each value, its default, and the flag that overrides it
 | uvicorn bind host (written into `run-server.cmd` / start command) | `0.0.0.0` | `-ServerHost` / `--server-host` |
 | uvicorn bind port (written into `run-server.cmd` / start command) | `8000` | `-ServerPort` / `--server-port` |
 
-> **`all` install unifies the database.** The agent ships MySQL SQL only, while
-> the server supports both. If you choose an `all` install with a non-MySQL
-> server the installer warns that the agent would not share the server's data and
-> offers to switch the whole stack to a shared MySQL (DB connection asked once and
-> reused for both server and agent).
+> **The server owns the database.** Its SQLite/MySQL choice and credentials are
+> never copied into the agent configuration. An `all` install configures the
+> server database and the agent API URL independently.
 
 > **Redis is optional.** It is only a shared logout-blacklist store for
 > multi-worker / multi-host deployments. If no Redis is running, the server falls
@@ -230,7 +230,8 @@ asking. The tables list each value, its default, and the flag that overrides it
 
 | Value | Default | Override flag |
 |---|---|---|
-| DB connection (`host/port/user/password/database/schema`) | prompted (MySQL) | `-Db*` / `--db-*` |
+| `api.base_url` | `http://127.0.0.1:8000/time_weaver` | `-ServerUrl` / `--server-url` |
+| one-time enrollment token | supplied at first start through `TIMEWEAVER_ENROLLMENT_TOKEN`; not stored in config | process/service environment |
 | log level (`base`/`console`/`file_timed`) | `debug` | `-LogLevel` / `--log-level` |
 | `device` name | machine hostname | `-DeviceName` / `--device-name` |
 | `reschedule.year/month/day/hour` (poll cron) | `*` | `-RescheduleYear/-RescheduleMonth/-RescheduleDay/-RescheduleHour` / `--reschedule-year/--reschedule-month/--reschedule-day/--reschedule-hour` |
@@ -265,9 +266,9 @@ Task paths and commands can use `{date}` placeholders. Date formatting is contro
 
 ## Operational Notes
 
-- The agent auto-registers its configured device (as `active`) on first run; an operator can later set a device to `inactive` from the dashboard to pause it.
-- The agent records execution results in `execution_log`.
-- Schedule definitions are periodically reloaded according to `conf/time_weaver.json`.
+- The agent enrolls its configured device with a one-time token on first run; an operator can later set the device to `inactive` from the dashboard to pause it.
+- The server persists execution history reported by the agent API.
+- Device-scoped schedule snapshots are synchronized according to `conf/time_weaver.json`.
 - Logs are written according to `conf/server.json`; the sample configuration writes to `log/server.log`.
 
 ## Setup Scripts (Details)
@@ -321,15 +322,15 @@ Default endpoints:
 - MySQL: `127.0.0.1:3306`
 - Redis: `127.0.0.1:6379`
 
-Run the agent container after a matching active device exists in the TimeWeaver database:
+Run the agent container with a one-time enrollment token issued by the server. The agent registers its device automatically and stores only the resulting credential in its credential file:
 
 ```bash
-DEVICE_NAME=test docker compose --profile agent up --build agent
+TIMEWEAVER_ENROLLMENT_TOKEN="<one-time token>" DEVICE_NAME=test \
+  docker compose --profile agent up --build agent
 ```
 
 Useful Docker environment overrides:
 
-- `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD`
-- `SECRET_KEY`, `ALLOWED_ORIGIN`, `CONTEXT`, `SERVER_PORT`, `UI_PORT`
-- `API_SERVER_URL`
-- `DEVICE_NAME`, `RESCHEDULE_MINUTE`
+- Server database only: `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD`
+- Server/UI: `SECRET_KEY`, `ALLOWED_ORIGIN`, `CONTEXT`, `SERVER_PORT`, `UI_PORT`, `API_SERVER_URL`
+- Agent: `TIMEWEAVER_SERVER_URL`, `TIMEWEAVER_ENROLLMENT_TOKEN`, `DEVICE_NAME`, `RESCHEDULE_MINUTE`

@@ -23,6 +23,7 @@ param(
     [string]$RedisPort = "",
     [string]$RedisDb = "",
     # Agent config
+    [string]$ServerUrl = "",
     [string]$DeviceName = "",
     [string]$RescheduleYear = "",
     [string]$RescheduleMonth = "",
@@ -134,33 +135,6 @@ function Pick {
     return Ask $Prompt $seed
 }
 
-# Read the existing agent MySQL block (agent\conf\server.json) into a hashtable.
-# Empty values for missing keys; unfilled sample placeholders like "<DB_USER>"
-# are treated as empty so they never become a seed.
-function Read-AgentDbConfig {
-    param([string]$Path)
-    $map = @{ host = ""; port = ""; user = ""; password = ""; database = ""; schema = "" }
-    if (-not (Test-Path -LiteralPath $Path)) { return $map }
-    try {
-        $cfg = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-        $my = $cfg.databases.time_weaver.database.mysql
-        foreach ($k in @($map.Keys)) {
-            $v = [string]$my.$k
-            if ($v -like "<*>") { $v = "" }   # unfilled sample placeholder
-            $map[$k] = $v
-        }
-    } catch { }
-    return $map
-}
-
-# Seed for a shared-DB prompt: prefer server\.env, else fall back to the value
-# already in agent\conf\server.json. This stops an agent-only re-install (which
-# has no server\.env on this host) from resetting valid DB settings to defaults.
-function Get-DbSeed {
-    param([hashtable]$Env, [string]$EnvKey, [hashtable]$AgentDb, [string]$JsonKey)
-    if ($Env.ContainsKey($EnvKey) -and $Env[$EnvKey]) { return $Env[$EnvKey] }
-    return $AgentDb[$JsonKey]
-}
 
 # --- Component selection ------------------------------------------------------
 if ($Component -eq "") {
@@ -174,41 +148,28 @@ $DoServer = $Component -in @("all", "server")
 $DoAgent  = $Component -in @("all", "agent")
 $DoClient = $Component -in @("all", "client")
 
-# --- Shared database resolution ----------------------------------------------
-# The agent ships MySQL SQL only; the server supports both. Resolve the DB once
-# so an "all" install asks a single set of DB questions and the server + agent
-# end up pointing at the SAME database. If the agent is involved but the server
-# is on sqlite3, warn loudly (they would otherwise never share data).
+# --- Server database resolution -----------------------------------------------
+# Database selection and credentials belong to the server only. The agent is
+# configured independently with the server API base URL.
 $script:DbType = $DbType
 $script:My = @{ host = ""; port = ""; user = ""; password = ""; database = ""; schema = "" }
 
 function Resolve-SharedDb {
     $existingEnv = Read-EnvFile (Join-Path $RootDir "server\.env")
-    $existingAgentDb = Read-AgentDbConfig (Join-Path $RootDir "agent\conf\server.json")
 
     if ($DoServer) {
         $seedType = if ($existingEnv.ContainsKey("DB_TYPE") -and $existingEnv["DB_TYPE"]) { $existingEnv["DB_TYPE"] } else { "sqlite3" }
         $script:DbType = Pick $DbType "Server database type (sqlite3/mysql)" $seedType "sqlite3"
     }
 
-    if ($DoServer -and $DoAgent -and $script:DbType -ne "mysql") {
-        Write-Host ""
-        Write-Host "  [!] The agent works with MySQL ONLY, but the server DB is '$($script:DbType)'." -ForegroundColor Yellow
-        Write-Host "      With different databases the agent cannot see the server's data." -ForegroundColor Yellow
-        $switch = Ask "      Switch the whole stack to a shared MySQL? (Y/n)" "Y"
-        if ($switch -match '^(y|yes)$') { $script:DbType = "mysql" }
-        else { Write-Host "      Proceeding split: server on $($script:DbType), agent on its own MySQL." -ForegroundColor Yellow }
-        Write-Host ""
-    }
-
-    # Collect MySQL connection details once if anything needs MySQL.
-    if ($script:DbType -eq "mysql" -or $DoAgent) {
-        $script:My.host     = Pick $DbHost     "DB host"     (Get-DbSeed $existingEnv "DB_HOST"     $existingAgentDb "host")     "127.0.0.1"
-        $script:My.port     = Pick $DbPort     "DB port"     (Get-DbSeed $existingEnv "DB_PORT"     $existingAgentDb "port")     "3306"
-        $script:My.user     = Pick $DbUser     "DB user"     (Get-DbSeed $existingEnv "DB_USER"     $existingAgentDb "user")     "timeweaver"
-        $script:My.password = Pick $DbPassword "DB password" (Get-DbSeed $existingEnv "DB_PASSWORD" $existingAgentDb "password") ""
-        $script:My.database = Pick $DbName     "DB name"     (Get-DbSeed $existingEnv "DB_DATABASE" $existingAgentDb "database") "timeweaver"
-        $script:My.schema   = Pick $DbSchema   "DB schema (blank if none)" (Get-DbSeed $existingEnv "DB_SCHEMA" $existingAgentDb "schema") ""
+    # Collect MySQL connection details only when the server uses MySQL.
+    if ($DoServer -and $script:DbType -eq "mysql") {
+        $script:My.host     = Pick $DbHost     "DB host"     $(if ($existingEnv["DB_HOST"]) { $existingEnv["DB_HOST"] } else { "" }) "127.0.0.1"
+        $script:My.port     = Pick $DbPort     "DB port"     $(if ($existingEnv["DB_PORT"]) { $existingEnv["DB_PORT"] } else { "" }) "3306"
+        $script:My.user     = Pick $DbUser     "DB user"     $(if ($existingEnv["DB_USER"]) { $existingEnv["DB_USER"] } else { "" }) "timeweaver"
+        $script:My.password = Pick $DbPassword "DB password" $(if ($existingEnv["DB_PASSWORD"]) { $existingEnv["DB_PASSWORD"] } else { "" }) ""
+        $script:My.database = Pick $DbName     "DB name"     $(if ($existingEnv["DB_DATABASE"]) { $existingEnv["DB_DATABASE"] } else { "" }) "timeweaver"
+        $script:My.schema   = Pick $DbSchema   "DB schema (blank if none)" $(if ($existingEnv["DB_SCHEMA"]) { $existingEnv["DB_SCHEMA"] } else { "" }) ""
     }
 }
 
@@ -293,16 +254,11 @@ function Write-AgentConfig {
     $exSrv = $null
     if (Test-Path -LiteralPath $serverTarget) { $exSrv = Get-Content -LiteralPath $serverTarget -Raw | ConvertFrom-Json }
 
-    # The agent always talks to MySQL; reuse the shared DB resolved earlier.
-    $h  = $script:My.host
-    $p  = $script:My.port
-    $u  = $script:My.user
-    $pw = $script:My.password
-    $db = $script:My.database
-    $sc = $script:My.schema
-
     $exDev = if ($exTw) { [string]$exTw.device } else { "" }
     $dev = Pick $DeviceName "Agent device name" $exDev $env:COMPUTERNAME
+    $exServerUrl = if ($exTw -and $exTw.api) { [string]$exTw.api.base_url } else { "" }
+    $defaultServerUrl = "http://127.0.0.1:$($script:ServerPort)$($script:ServerCtx)"
+    $agentServerUrl = Pick $ServerUrl "TimeWeaver server base URL" $exServerUrl $defaultServerUrl
 
     $exLevel = if ($exSrv) { [string]$exSrv.log.base.level } else { "" }
     $level = Pick $LogLevel "Agent log level (debug/info/warning/error)" $exLevel "debug"
@@ -317,21 +273,20 @@ function Write-AgentConfig {
     $rs = Pick $RescheduleSecond "Reschedule cron - second" ($(if($exRe){[string]$exRe.second})) "0"
 
     $cfg = Get-Content -LiteralPath (Join-Path $RootDir "agent\conf\server.sample.json") -Raw | ConvertFrom-Json
-    $my = $cfg.databases.time_weaver.database.mysql
-    $my.host = $h; $my.port = [int]$p; $my.user = $u; $my.password = $pw; $my.database = $db; $my.schema = $sc
     $cfg.log.base.level = $level; $cfg.log.console.level = $level; $cfg.log.file_timed.level = $level
     Backup-IfExists $serverTarget
     ($cfg | ConvertTo-Json -Depth 30) | Set-Content -LiteralPath $serverTarget -Encoding ASCII
-    Write-Host "Wrote agent\conf\server.json (host=$h db=$db, log level=$level)."
+    Write-Host "Wrote agent\conf\server.json (log level=$level)."
 
     $tw = Get-Content -LiteralPath (Join-Path $RootDir "agent\conf\time_weaver.sample.json") -Raw | ConvertFrom-Json
     $tw.device = $dev
+    $tw.api.base_url = $agentServerUrl
     $tw.reschedule.year = $ry; $tw.reschedule.month = $rmo; $tw.reschedule.day = $rd
     $tw.reschedule.hour = $rh; $tw.reschedule.minute = $rmi; $tw.reschedule.second = $rs
     Backup-IfExists $twTarget
     ($tw | ConvertTo-Json -Depth 30) | Set-Content -LiteralPath $twTarget -Encoding ASCII
-    Write-Host "Wrote agent\conf\time_weaver.json (device=$dev, reschedule=$ry $rmo $rd $rh $rmi $rs)."
-    Write-Host "  The agent registers this device automatically on first run (no manual DB seeding)."
+    Write-Host "Wrote agent\conf\time_weaver.json (device=$dev, server=$agentServerUrl, reschedule=$ry $rmo $rd $rh $rmi $rs)."
+    Write-Host "  Before first start, set TIMEWEAVER_ENROLLMENT_TOKEN to a one-time token issued by the server."
 }
 
 function Write-ClientConfig {
@@ -453,6 +408,6 @@ if ($servicesInstalled) {
 } else {
     Write-Host "Start:"
     if ($DoServer) { Write-Host "  - run-server.cmd  (listens on $($script:ServerHost):$($script:ServerPort))" }
-    if ($DoAgent)  { Write-Host "  - run-agent.cmd  (needs the shared database reachable)" }
+    if ($DoAgent)  { Write-Host "  - run-agent.cmd  (needs the TimeWeaver server reachable)" }
     if ($DoClient) { Write-Host "  - serve client\dist, or 'npm run serve' for development" }
 }

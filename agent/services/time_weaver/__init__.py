@@ -1,2 +1,1 @@
-from . import app
-from . import task
+"""TimeWeaver agent services. Submodules are imported explicitly to avoid startup side effects."""

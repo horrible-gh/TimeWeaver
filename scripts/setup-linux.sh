@@ -28,6 +28,7 @@ SERVER_PORT="${SERVER_PORT:-}"
 REDIS_HOST="${REDIS_HOST:-}"
 REDIS_PORT="${REDIS_PORT:-}"
 REDIS_DB="${REDIS_DB:-}"
+SERVER_URL="${SERVER_URL:-}"
 DEVICE_NAME="${DEVICE_NAME:-}"
 RESCHEDULE_YEAR="${RESCHEDULE_YEAR:-}"
 RESCHEDULE_MONTH="${RESCHEDULE_MONTH:-}"
@@ -57,6 +58,7 @@ Config (optional; installer prompts interactively otherwise, sensible defaults a
   --server-host HOST                    uvicorn bind host (default 0.0.0.0)
   --server-port PORT                    uvicorn bind port (default 8000)
   --redis-host / --redis-port / --redis-db   Optional Redis blacklist store (defaults localhost:6379/0)
+  --server-url URL                      TimeWeaver server base URL for the agent
   --device-name NAME                    Agent device name (default: hostname)
   --reschedule-year / --reschedule-month / --reschedule-day
   --reschedule-hour / --reschedule-minute / --reschedule-second   Agent poll cron fields
@@ -97,6 +99,7 @@ while [[ $# -gt 0 ]]; do
     --redis-host) REDIS_HOST="${2:?}"; shift 2 ;;
     --redis-port) REDIS_PORT="${2:?}"; shift 2 ;;
     --redis-db) REDIS_DB="${2:?}"; shift 2 ;;
+    --server-url) SERVER_URL="${2:?}"; shift 2 ;;
     --device-name) DEVICE_NAME="${2:?}"; shift 2 ;;
     --reschedule-year) RESCHEDULE_YEAR="${2:?}"; shift 2 ;;
     --reschedule-month) RESCHEDULE_MONTH="${2:?}"; shift 2 ;;
@@ -150,34 +153,6 @@ env_get() {  # env_get KEY FILE -> echoes value or empty
   sed -n "s/^${key}=//p" "$file" | head -n1
 }
 
-# Read one field from the existing agent MySQL block (agent/conf/server.json).
-# Empty if the file/key is absent. Placeholder values from the sample config
-# (e.g. "<DB_USER>") are treated as absent so they never become a seed.
-agent_db_get() {  # agent_db_get KEY -> echoes value or empty
-  local key="$1" file="$ROOT_DIR/agent/conf/server.json"
-  [[ -f "$file" ]] || { echo ""; return; }
-  "$PYTHON_BIN" - "$file" "$key" <<'PY' 2>/dev/null || true
-import json, sys
-try:
-    my = json.load(open(sys.argv[1]))["databases"]["time_weaver"]["database"]["mysql"]
-    v = my.get(sys.argv[2], "")
-    v = "" if v is None else str(v)
-    if v.startswith("<") and v.endswith(">"):  # unfilled sample placeholder
-        v = ""
-    print(v)
-except Exception:
-    print("")
-PY
-}
-
-# Seed for a shared-DB prompt: prefer server/.env, else fall back to the value
-# already in agent/conf/server.json. This stops an agent-only re-install (which
-# has no server/.env on this host) from resetting valid DB settings to defaults.
-db_seed() {  # db_seed ENV_KEY JSON_KEY -> echoes seed value or empty
-  local v; v="$(env_get "$1" "$ENV_FILE")"
-  [[ -n "$v" ]] && { echo "$v"; return; }
-  agent_db_get "$2"
-}
 
 backup_if_exists() {
   local path="$1"
@@ -204,7 +179,7 @@ DO_SERVER=0; DO_AGENT=0; DO_CLIENT=0
 [[ "$COMPONENT" == "all" || "$COMPONENT" == "agent" ]] && DO_AGENT=1
 [[ "$COMPONENT" == "all" || "$COMPONENT" == "client" ]] && DO_CLIENT=1
 
-# --- Shared database resolution (server + agent point at the same DB) ---------
+# --- Server database resolution -----------------------------------------------
 ENV_FILE="$ROOT_DIR/server/.env"
 RESOLVED_DB_TYPE="$DB_TYPE"
 MY_HOST=""; MY_PORT=""; MY_USER=""; MY_PASSWORD=""; MY_DB=""; MY_SCHEMA=""
@@ -215,23 +190,13 @@ resolve_shared_db() {
     RESOLVED_DB_TYPE="$(pick "$DB_TYPE" "Server database type (sqlite3/mysql)" "$seed_type" "sqlite3")"
   fi
 
-  if [[ "$DO_SERVER" == "1" && "$DO_AGENT" == "1" && "$RESOLVED_DB_TYPE" != "mysql" ]]; then
-    echo ""
-    echo "  [!] The agent works with MySQL ONLY, but the server DB is '$RESOLVED_DB_TYPE'." >&2
-    echo "      With different databases the agent cannot see the server's data." >&2
-    local switch; switch="$(ask "      Switch the whole stack to a shared MySQL? (Y/n)" "Y")"
-    if [[ "$switch" =~ ^([Yy]|[Yy][Ee][Ss])$ ]]; then RESOLVED_DB_TYPE="mysql"
-    else echo "      Proceeding split: server on $RESOLVED_DB_TYPE, agent on its own MySQL." >&2; fi
-    echo ""
-  fi
-
-  if [[ "$RESOLVED_DB_TYPE" == "mysql" || "$DO_AGENT" == "1" ]]; then
-    MY_HOST="$(pick "$DB_HOST" "DB host" "$(db_seed DB_HOST host)" "127.0.0.1")"
-    MY_PORT="$(pick "$DB_PORT" "DB port" "$(db_seed DB_PORT port)" "3306")"
-    MY_USER="$(pick "$DB_USER" "DB user" "$(db_seed DB_USER user)" "timeweaver")"
-    MY_PASSWORD="$(pick "$DB_PASSWORD" "DB password" "$(db_seed DB_PASSWORD password)" "")"
-    MY_DB="$(pick "$DB_NAME" "DB name" "$(db_seed DB_DATABASE database)" "timeweaver")"
-    MY_SCHEMA="$(pick "$DB_SCHEMA" "DB schema (blank if none)" "$(db_seed DB_SCHEMA schema)" "")"
+  if [[ "$DO_SERVER" == "1" && "$RESOLVED_DB_TYPE" == "mysql" ]]; then
+    MY_HOST="$(pick "$DB_HOST" "DB host" "$(env_get DB_HOST "$ENV_FILE")" "127.0.0.1")"
+    MY_PORT="$(pick "$DB_PORT" "DB port" "$(env_get DB_PORT "$ENV_FILE")" "3306")"
+    MY_USER="$(pick "$DB_USER" "DB user" "$(env_get DB_USER "$ENV_FILE")" "timeweaver")"
+    MY_PASSWORD="$(pick "$DB_PASSWORD" "DB password" "$(env_get DB_PASSWORD "$ENV_FILE")" "")"
+    MY_DB="$(pick "$DB_NAME" "DB name" "$(env_get DB_DATABASE "$ENV_FILE")" "timeweaver")"
+    MY_SCHEMA="$(pick "$DB_SCHEMA" "DB schema (blank if none)" "$(env_get DB_SCHEMA "$ENV_FILE")" "")"
   fi
 }
 
@@ -304,12 +269,12 @@ write_agent_config() {
   local server_target="$ROOT_DIR/agent/conf/server.json"
   local tw_target="$ROOT_DIR/agent/conf/time_weaver.json"
 
-  # The agent always talks to MySQL; reuse the shared DB resolved earlier.
-  local h="$MY_HOST" p="$MY_PORT" u="$MY_USER" pw="$MY_PASSWORD" db="$MY_DB" sc="$MY_SCHEMA"
-
-  local ex_dev ex_level dev level
+  local ex_dev ex_level ex_url dev level server_url default_url
   ex_dev="$([[ -f "$tw_target" ]] && "$PYTHON_BIN" -c "import json;print(json.load(open('$tw_target')).get('device',''))" 2>/dev/null || true)"
   dev="$(pick "$DEVICE_NAME" "Agent device name" "$ex_dev" "$(hostname)")"
+  ex_url="$([[ -f "$tw_target" ]] && "$PYTHON_BIN" -c "import json;print(json.load(open('$tw_target')).get('api',{}).get('base_url',''))" 2>/dev/null || true)"
+  default_url="http://127.0.0.1:${RESOLVED_SERVER_PORT}${RESOLVED_SERVER_CTX}"
+  server_url="$(pick "$SERVER_URL" "TimeWeaver server base URL" "$ex_url" "$default_url")"
   ex_level="$([[ -f "$server_target" ]] && "$PYTHON_BIN" -c "import json;print(json.load(open('$server_target'))['log']['base']['level'])" 2>/dev/null || true)"
   level="$(pick "$LOG_LEVEL" "Agent log level (debug/info/warning/error)" "$ex_level" "debug")"
 
@@ -324,34 +289,26 @@ write_agent_config() {
   rs="$(pick "$RESCHEDULE_SECOND" "Reschedule cron - second" "$(ex_re second)" "0")"
 
   backup_if_exists "$server_target"
-  DB_HOST="$h" DB_PORT="$p" DB_USER="$u" DB_PASSWORD="$pw" DB_NAME="$db" DB_SCHEMA="$sc" LOG_LEVEL="$level" \
+  LOG_LEVEL="$level" \
   "$PYTHON_BIN" - "$ROOT_DIR/agent/conf/server.sample.json" "$server_target" <<'PY'
 import json, os, sys
 src, dst = sys.argv[1], sys.argv[2]
 cfg = json.load(open(src))
-my = cfg["databases"]["time_weaver"]["database"]["mysql"]
-my.update({
-    "host": os.environ["DB_HOST"],
-    "port": int(os.environ["DB_PORT"]),
-    "user": os.environ["DB_USER"],
-    "password": os.environ["DB_PASSWORD"],
-    "database": os.environ["DB_NAME"],
-    "schema": os.environ["DB_SCHEMA"],
-})
 level = os.environ["LOG_LEVEL"]
 for key in ("base", "console", "file_timed"):
     cfg["log"][key]["level"] = level
 json.dump(cfg, open(dst, "w"), indent=4)
 PY
-  echo "Wrote agent/conf/server.json (host=$h db=$db, log level=$level)."
+  echo "Wrote agent/conf/server.json (log level=$level)."
 
   backup_if_exists "$tw_target"
-  DEVICE_NAME="$dev" RE_YEAR="$ry" RE_MONTH="$rmo" RE_DAY="$rd" RE_HOUR="$rh" RE_MINUTE="$rmi" RE_SECOND="$rs" \
+  DEVICE_NAME="$dev" SERVER_URL="$server_url" RE_YEAR="$ry" RE_MONTH="$rmo" RE_DAY="$rd" RE_HOUR="$rh" RE_MINUTE="$rmi" RE_SECOND="$rs" \
   "$PYTHON_BIN" - "$ROOT_DIR/agent/conf/time_weaver.sample.json" "$tw_target" <<'PY'
 import json, os, sys
 src, dst = sys.argv[1], sys.argv[2]
 cfg = json.load(open(src))
 cfg["device"] = os.environ["DEVICE_NAME"]
+cfg["api"]["base_url"] = os.environ["SERVER_URL"]
 cfg["reschedule"].update({
     "year": os.environ["RE_YEAR"],
     "month": os.environ["RE_MONTH"],
@@ -362,8 +319,8 @@ cfg["reschedule"].update({
 })
 json.dump(cfg, open(dst, "w"), indent=4)
 PY
-  echo "Wrote agent/conf/time_weaver.json (device=$dev, reschedule=$ry $rmo $rd $rh $rmi $rs)."
-  echo "  The agent registers this device automatically on first run (no manual DB seeding)."
+  echo "Wrote agent/conf/time_weaver.json (device=$dev, server=$server_url, reschedule=$ry $rmo $rd $rh $rmi $rs)."
+  echo "  Before first start, set TIMEWEAVER_ENROLLMENT_TOKEN to a one-time token issued by the server."
 }
 
 write_client_config() {
@@ -503,6 +460,6 @@ if [[ "$SERVICES_INSTALLED" == "1" ]]; then
 else
   echo "Start:"
   [[ "$DO_SERVER" == "1" ]] && echo "  - cd \"$ROOT_DIR/server\" && . .venv/bin/activate && uvicorn app:app --host $RESOLVED_SERVER_HOST --port $RESOLVED_SERVER_PORT --workers 1"
-  [[ "$DO_AGENT" == "1" ]]  && echo "  - cd \"$ROOT_DIR/agent\" && . .venv/bin/activate && python timeweaver.py   (needs the shared database reachable)"
+  [[ "$DO_AGENT" == "1" ]]  && echo "  - cd \"$ROOT_DIR/agent\" && . .venv/bin/activate && python timeweaver.py   (needs the TimeWeaver server reachable)"
   [[ "$DO_CLIENT" == "1" ]] && echo "  - serve client/dist, or 'npm run serve' for development"
 fi
