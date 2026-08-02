@@ -1,0 +1,20 @@
+{
+    "log": {
+        "base": {
+            "name": "TimeWeaverServer",
+            "level": "debug"
+        },
+        "console": {
+            "level": "info",
+            "format": "%(asctime)s[%(levelname)s]%(message)s"
+        },
+        "file_timed": {
+            "level": "debug",
+            "format": "%(asctime)s[%(levelname)s]%(message)s",
+            "file_name": "log/server.log",
+            "when": "midnight",
+            "interval": 1,
+            "backup_count": 30
+        }
+    }
+}

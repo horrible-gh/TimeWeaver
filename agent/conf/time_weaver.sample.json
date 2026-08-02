@@ -1,8 +1,9 @@
 {
     "device": "test",
     "api": {
-        "base_url": "http://127.0.0.1:8080",
+        "base_url": "http://127.0.0.1:8000/time_weaver",
         "credential_path": "conf/agent_credential.json",
+        "status_path": "log/agent_status.json",
         "enrollment_token_env": "TIMEWEAVER_ENROLLMENT_TOKEN",
         "connect_timeout": 5,
         "read_timeout": 30,

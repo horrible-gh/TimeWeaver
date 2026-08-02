@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import time
 from typing import Any, Callable, Mapping, Protocol
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import requests
 
@@ -119,11 +119,18 @@ class AgentApiClient:
     ) -> None:
         if not base_url or not base_url.strip():
             raise ValueError("base_url is required")
+        parts = urlsplit(base_url.strip())
+        if parts.scheme not in ("http", "https"):
+            raise ValueError("base_url scheme must be http or https")
+        if not parts.netloc:
+            raise ValueError("base_url must include a host")
+        if parts.query or parts.fragment:
+            raise ValueError("base_url must not contain a query or fragment")
         if connect_timeout <= 0 or read_timeout <= 0:
             raise ValueError("timeouts must be positive")
         if retries < 0 or backoff < 0:
             raise ValueError("retries and backoff must be non-negative")
-        self._base_url = base_url.rstrip("/")
+        self._base_url = base_url.strip().rstrip("/")
         self._credential = credential
         self._agent_version = agent_version
         self._transport = transport or requests.Session()
@@ -133,6 +140,14 @@ class AgentApiClient:
         self._retries = retries
         self._backoff = backoff
         self._sleep = sleeper
+
+    @property
+    def endpoints(self) -> EndpointPaths:
+        return self._endpoints
+
+    def endpoint_url(self, path: str) -> str:
+        """Exact URL _request will hit for *path* (same join rule, no drift)."""
+        return f"{self._base_url}/{path.lstrip('/')}"
 
     def set_access_token(self, token: str | None) -> None:
         self._credential = token
@@ -304,7 +319,7 @@ class AgentApiClient:
             headers["X-TW-Schema-Version"] = self._schema_version
         if extra_headers:
             headers.update(extra_headers)
-        url = f"{self._base_url}/{path.lstrip('/')}"
+        url = self.endpoint_url(path)
 
         for attempt in range(self._retries + 1):
             try:

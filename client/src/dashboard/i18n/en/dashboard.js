@@ -38,6 +38,7 @@ export default {
     list_label_actions: "Actions",
     list_label_device: "Device",
     list_label_last_login_at: "Last Login",
+    list_label_last_heartbeat_at: "Last Heartbeat",
 
     label_active: "Active",
     label_inactive: "Inactive",

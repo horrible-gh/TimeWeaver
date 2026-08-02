@@ -15,7 +15,7 @@
         "remove_group": "DELETE FROM groups WHERE group_id = %s"
     },
     "devices": {
-        "get_devices": "SELECT device_id, device_name, status, version, last_login_at FROM devices WHERE group_id = %s AND device_id > 0",
+        "get_devices": "SELECT device_id, device_name, status, version, last_login_at, last_heartbeat_at, applied_revision FROM devices WHERE group_id = %s AND device_id > 0",
         "insert_device": "INSERT INTO devices(group_id, device_name, status, creator) VALUES(%s, %s, %s, %s)",
         "update_device": "UPDATE devices SET device_name = %s, status = %s, modifier = %s, modified_at = NOW() WHERE device_id = %s",
         "remove_device": "DELETE FROM devices WHERE device_id = %s"

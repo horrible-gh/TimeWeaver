@@ -14,7 +14,10 @@ import tempfile
 import threading
 from typing import Callable, Protocol
 
+import LogAssist.log as Logger
+
 from .api_client import ApiClientError
+from .log_gate import FailureLogGate
 from .models import AccessCredential, parse_datetime
 
 
@@ -156,8 +159,12 @@ class CredentialStore:
             os.chmod(path, CREDENTIAL_FILE_MODE)
             return
         principal = getpass.getuser()
+        # (M) = Modify: read + write + delete for the owner only. DELETE is
+        # required because atomic replacement renames the temp file via
+        # MoveFileExW, which needs DELETE on the source; a bare (R,W) grant
+        # makes every credential write fail with WinError 5 on Windows.
         completed = subprocess.run(
-            ["icacls", str(path), "/inheritance:r", "/grant:r", f"{principal}:(R,W)"],
+            ["icacls", str(path), "/inheritance:r", "/grant:r", f"{principal}:(M)"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -213,6 +220,7 @@ class CredentialManager:
         self.credential_lock = threading.Lock()
         self._access_token: str | None = None
         self._access_expires_at: datetime | None = None
+        self._refresh_log_gate = FailureLogGate()
 
     def ensure_access_token(
         self, min_validity: float | timedelta = ACCESS_REFRESH_LEAD
@@ -259,6 +267,8 @@ class CredentialManager:
 
             self._access_token = refreshed.access_token
             self._access_expires_at = refreshed.access_token_expires_at
+            if self._refresh_log_gate.success("refresh"):
+                Logger.info("[credential] access token refresh recovered")
             return CredentialOutcome(self._access_token, self._access_expires_at)
 
     def install_enrollment(self, credential: AccessCredential) -> CredentialOutcome:
@@ -297,6 +307,14 @@ class CredentialManager:
         return None
 
     def _handle_refresh_failure(self, exc: ApiClientError) -> CredentialOutcome:
+        # Log the protocol error code before it is collapsed into the narrow
+        # CredentialOutcome.reason set, so the original cause stays diagnosable.
+        should_log, count = self._refresh_log_gate.failure("refresh", exc.code)
+        if should_log:
+            message = f"[credential] access token refresh failed: code={exc.code}"
+            if count > 1:
+                message += f" (same failure persisted {count} times)"
+            Logger.warn(message)
         if exc.code in {"invalid_token", "token_expired"}:
             self._store.remove()
             self._clear_memory()

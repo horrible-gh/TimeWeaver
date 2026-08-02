@@ -39,6 +39,7 @@ export default {
     list_label_actions: "操作",
     list_label_device: "デバイス",
     list_label_last_login_at: "最後ログイン",
+    list_label_last_heartbeat_at: "最終ハートビート",
 
     label_active: "アクティブ",
     label_inactive: "非アクティブ",
