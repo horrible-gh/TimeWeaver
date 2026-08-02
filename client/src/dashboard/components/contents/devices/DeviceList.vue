@@ -16,7 +16,8 @@
           <th class="title3" @click="sort('status')">{{ $t('list_label_status') }} <span v-if="sortKey === 'status'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
           <th class="title4" @click="sort('version')">{{ $t('list_label_version') }} <span v-if="sortKey === 'version'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
           <th class="title5" @click="sort('last_login_at')">{{ $t('list_label_last_login_at') }} <span v-if="sortKey === 'last_login_at'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title6">{{ $t('list_label_actions') }}</th>
+          <th class="title6" @click="sort('last_heartbeat_at')">{{ $t('list_label_last_heartbeat_at') }} <span v-if="sortKey === 'last_heartbeat_at'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
+          <th class="title7">{{ $t('list_label_actions') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -26,6 +27,7 @@
           <td>{{ post.status }}</td>
           <td>{{ post.version }}</td>
           <td>{{ post.last_login_at }}</td>
+          <td>{{ post.last_heartbeat_at }}</td>
           <td>
             <div class="button-group">
               <button class="edit-button" @click="openEditDeviceModal(post)">
@@ -204,14 +206,18 @@ const changePage = (page) => {
 }
 
 .title4 {
-  width:20%
+  width:14%
 }
 
 .title5 {
-  width:20%
+  width:16%
 }
 
 .title6 {
+  width:16%
+}
+
+.title7 {
   width:20%
 }
 

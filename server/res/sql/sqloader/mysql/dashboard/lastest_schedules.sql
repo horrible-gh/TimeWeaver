@@ -70,8 +70,14 @@ SELECT
   d.device_name,
   sg.name AS sg_name,
   -- Group status: use 'disconnected'
+  -- Same liveness criteria and thresholds as dashboard/charts/devices.sql:
+  -- heartbeat-capable devices use last_heartbeat_at (UTC) + 5 MINUTE, devices
+  -- without any heartbeat keep last_login_at + 1 DAY. Keep both files in sync.
   CASE
-    WHEN d.last_login_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY) THEN 'disconnected'
+    WHEN d.last_heartbeat_at IS NOT NULL
+         AND COALESCE(d.last_heartbeat_at, d.last_login_at) <= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 MINUTE) THEN 'disconnected'
+    WHEN d.last_heartbeat_at IS NULL
+         AND COALESCE(d.last_heartbeat_at, d.last_login_at) <= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY) THEN 'disconnected'
     WHEN sg.status = 'error' OR etl.executed_tasks < tc.total_tasks THEN 'error'
     ELSE sg.status
   END AS group_status,

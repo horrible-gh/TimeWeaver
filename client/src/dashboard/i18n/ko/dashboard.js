@@ -38,6 +38,7 @@ export default {
     list_label_actions: "액션",
     list_label_device: "장치",
     list_label_last_login_at: "마지막 로그인",
+    list_label_last_heartbeat_at: "마지막 하트비트",
 
     label_active: "활성",
     label_inactive: "비활성",

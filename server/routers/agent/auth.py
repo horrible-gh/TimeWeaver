@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from services.agent.identity_service import (
@@ -24,6 +24,7 @@ def _verify_and_limit(service, token):
 
 
 async def verify_agent_token(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(agent_bearer),
     service: AgentIdentityService = Depends(get_identity_service),
 ) -> DeviceIdentity:
@@ -34,9 +35,12 @@ async def verify_agent_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
     try:
-        return await run_blocking(
+        principal = await run_blocking(
             _verify_and_limit, service, credentials.credentials
         )
+        # Expose the authenticated device to the request-log middleware.
+        request.state.device_id = principal.device_id
+        return principal
     except IdentityError as exc:
         raise HTTPException(
             status_code=exc.status_code,

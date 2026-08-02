@@ -1,3 +1,33 @@
+import json
+from pathlib import Path
+
+import LogAssist.log as Logger
+
+_SERVER_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_logging_config():
+    """Adopt conf/logging.json (or the packaged sample), like the agent does."""
+    candidates = [
+        Path("conf") / "logging.json",
+        _SERVER_ROOT / "conf" / "logging.json",
+        _SERVER_ROOT / "conf" / "logging.sample.json",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            try:
+                with candidate.open("r", encoding="utf-8") as handle:
+                    return json.load(handle).get("log")
+            except (OSError, ValueError):
+                continue
+    return None
+
+
+# Initialize logging before importing config: config.py logs database
+# migration failures through LogAssist, and LogAssist keeps whatever
+# configuration is active at the first emitted record.
+Logger.logger_init(_load_logging_config())
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -5,6 +35,7 @@ from fastapi.responses import JSONResponse
 
 from config import settings
 from services.agent.claim_sweeper import start_claim_sweeper, stop_claim_sweeper
+from util.agent_request_logging import register_agent_request_logging
 from util.safe_logging import safe_log
 from .agent import (
     enroll as agent_enroll,
@@ -24,14 +55,12 @@ from .dashboard import (
 )
 from .login import login, logout
 
-import LogAssist.log as Logger
 
-
-Logger.logger_init()
 ALLOWED_ORIGIN = [item.strip() for item in settings.ALLOWED_ORIGIN.split(",") if item.strip()]
 CONTEXT = settings.CONTEXT
 
 app = FastAPI()
+register_agent_request_logging(app)
 app.include_router(login.router, prefix=f"{CONTEXT}/login", tags=["Login"])
 app.include_router(logout.router, prefix=f"{CONTEXT}/logout", tags=["Logout"])
 app.include_router(charts.router, prefix=f"{CONTEXT}/dashboard/charts", tags=["Charts"])

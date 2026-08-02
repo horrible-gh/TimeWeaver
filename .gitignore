@@ -12,6 +12,10 @@ agent/conf/*
 !agent/conf/*.sample.json
 !agent/conf/version.json
 
+# Server local configuration
+server/conf/*
+!server/conf/*.sample.json
+
 # Client local configuration
 client/config.js
 
