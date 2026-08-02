@@ -59,12 +59,48 @@ def test_execution_history_keeps_soft_deleted_schedule_metadata():
 
 
 def test_migration_011_remains_fail_closed_and_null_safe():
+    """Only rows with no UUID identity left to restore may abort the startup."""
     sql = read(MIGRATION_DIR / "timeweaver_server_011.sql")
 
     assert "tw011_invalid_detail_run_scripts_diagnose_execution_log_orphans" in sql
+    assert "@tw_unrepairable_detail_count > 0" in sql
     assert "duplicated.detail_id <=> e.detail_id" in sql
     assert "OR d.detail_id IS NULL" in sql
     assert "uq_execution_log_idempotency" in sql
+
+    recount = sql[sql.index("SET @tw_unrepairable_detail_count"):]
+    recount = recount[: recount.index("SET @tw_invalid_detail_abort_sql")]
+    assert "OCTET_LENGTH(e.detail_id) <> 16" in recount
+    assert "OR d.detail_id IS NULL" in recount
+
+
+def test_migration_011_restores_orphan_details_as_tombstones():
+    """The pre-soft-delete orphans repair themselves instead of blocking boot."""
+    sql = read(MIGRATION_DIR / "timeweaver_server_011.sql")
+
+    assert "CREATE TEMPORARY TABLE tw_schedule_detail_restore" in sql
+    assert "schedule_detail_restore_log" in sql
+    assert "ALTER TABLE schedule_detail ADD COLUMN deleted_at DATETIME NULL" in sql
+
+    restore = sql[sql.index("'INSERT IGNORE INTO schedule_detail ("):]
+    restore = restore[: restore.index("PREPARE tw_restore_insert_stmt")]
+    # A restored row must be a tombstone, or a removed task would come back.
+    assert "deleted_at" in restore
+    assert "''inactive''" in restore
+
+    # Only a real 16-byte UUID can be restored; the rest still fail closed.
+    selection = sql[sql.index("CREATE TEMPORARY TABLE tw_schedule_detail_restore"):]
+    selection = selection[: selection.index("PREPARE tw_restore_temp_stmt")]
+    assert "OCTET_LENGTH(e.detail_id) = 16" in selection
+    assert "e.detail_id IS NOT NULL" in selection
+
+
+def test_migration_011_never_rewrites_execution_history():
+    sql = read(MIGRATION_DIR / "timeweaver_server_011.sql")
+
+    assert "DELETE FROM" not in sql.upper()
+    assert "TRUNCATE" not in sql.upper()
+    assert "SET e.detail_id" not in sql
 
 
 def test_orphan_diagnostic_is_read_only():
