@@ -203,7 +203,17 @@ def test_duplicate_preflight_repair_and_unique_retry(empty_database):
         connection.close()
 
 
-def test_unmapped_detail_is_quarantined_and_migration_fails(empty_database):
+INDEX_COLUMN_COUNT = """
+                SELECT COUNT(*) AS c
+                  FROM information_schema.statistics
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'execution_log'
+                   AND index_name = 'uq_execution_log_idempotency'
+"""
+
+
+def test_unmapped_detail_is_quarantined_and_restored_as_a_tombstone(empty_database):
+    """A pre-soft-delete orphan repairs itself so startup is never blocked."""
     run_server_migrator(empty_database)
     connection = connect(empty_database)
     group_id = uuid.uuid4().hex
@@ -225,14 +235,10 @@ def test_unmapped_detail_is_quarantined_and_migration_fails(empty_database):
             )
             execution_id = cursor.lastrowid
 
-        with pytest.raises(pymysql.MySQLError) as error:
-            apply_file(connection, EXECUTION_FILES[2])
-        assert (
-            "tw011_invalid_detail_run_scripts_diagnose_execution_log_orphans"
-            in str(error.value)
-        )
+        apply_file(connection, EXECUTION_FILES[2])
 
         with connection.cursor() as cursor:
+            # The execution row itself is never rewritten.
             cursor.execute(
                 """
                 SELECT HEX(detail_id) AS detail_hex
@@ -242,6 +248,8 @@ def test_unmapped_detail_is_quarantined_and_migration_fails(empty_database):
                 (execution_id,),
             )
             assert cursor.fetchone()["detail_hex"] == sentinel_hex
+
+            # The evidence of what was found is still committed up front.
             cursor.execute(
                 """
                 SELECT detail_id_hex, source_detail_data_type, quarantine_reason
@@ -254,15 +262,94 @@ def test_unmapped_detail_is_quarantined_and_migration_fails(empty_database):
             assert quarantined["detail_id_hex"] == sentinel_hex
             assert quarantined["source_detail_data_type"] == "binary"
             assert "schedule_detail UUID mapping" in quarantined["quarantine_reason"]
+
+            # The identity comes back as a tombstone, never as a live task.
             cursor.execute(
                 """
-                SELECT COUNT(*) AS c
-                  FROM information_schema.statistics
-                 WHERE table_schema = DATABASE()
-                   AND table_name = 'execution_log'
-                   AND index_name = 'uq_execution_log_idempotency'
-                """
+                SELECT schedule_id, status, deleted_at, creator
+                  FROM schedule_detail
+                 WHERE detail_id = UNHEX(%s)
+                """,
+                (sentinel_hex,),
             )
+            restored = cursor.fetchone()
+            assert restored["schedule_id"] == 12
+            assert restored["status"] == "inactive"
+            assert restored["deleted_at"] is not None
+            assert restored["creator"] == "timeweaver_server_011.sql"
+
+            cursor.execute(
+                """
+                SELECT schedule_id, execution_rows
+                  FROM schedule_detail_restore_log
+                 WHERE detail_id_hex = %s
+                """,
+                (sentinel_hex,),
+            )
+            audit = cursor.fetchone()
+            assert audit["schedule_id"] == 12
+            assert audit["execution_rows"] == 1
+
+            # The migration reached its goal instead of aborting.
+            cursor.execute(INDEX_COLUMN_COUNT)
+            assert cursor.fetchone()["c"] == 3
+
+        # Replaying 011 changes nothing.
+        apply_file(connection, EXECUTION_FILES[2])
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS c FROM schedule_detail_restore_log")
+            assert cursor.fetchone()["c"] == 1
+            cursor.execute("SELECT COUNT(*) AS c FROM schedule_detail")
+            assert cursor.fetchone()["c"] == 1
+    finally:
+        connection.close()
+
+
+def test_detail_id_without_a_uuid_identity_still_fails_closed(empty_database):
+    """No automatic rule can invent a UUID, so this case still aborts startup."""
+    run_server_migrator(empty_database)
+    connection = connect(empty_database)
+    group_id = uuid.uuid4().hex
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("ALTER TABLE execution_log DROP INDEX uq_execution_log_idempotency")
+            cursor.execute(
+                "ALTER TABLE execution_log MODIFY COLUMN detail_id VARCHAR(64) NOT NULL"
+            )
+            cursor.execute(
+                """
+                INSERT INTO execution_log
+                    (execution_grp_id, schedule_id, detail_id, attempt,
+                     start_time, result_code)
+                VALUES (UNHEX(%s), 12, '42', 1, UTC_TIMESTAMP(), 0)
+                """,
+                (group_id,),
+            )
+            execution_id = cursor.lastrowid
+
+        with pytest.raises(pymysql.MySQLError) as error:
+            apply_file(connection, EXECUTION_FILES[2])
+        assert (
+            "tw011_invalid_detail_run_scripts_diagnose_execution_log_orphans"
+            in str(error.value)
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT source_detail_data_type, quarantine_reason
+                  FROM execution_log_quarantine
+                 WHERE source_execution_id = %s
+                """,
+                (execution_id,),
+            )
+            quarantined = cursor.fetchone()
+            assert quarantined["source_detail_data_type"] == "varchar"
+            assert "legacy non-UUID detail_id" in quarantined["quarantine_reason"]
+            cursor.execute("SELECT COUNT(*) AS c FROM schedule_detail_restore_log")
+            assert cursor.fetchone()["c"] == 0
+            cursor.execute(INDEX_COLUMN_COUNT)
             assert cursor.fetchone()["c"] == 0
     finally:
         connection.close()

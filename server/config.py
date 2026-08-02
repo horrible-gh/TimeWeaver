@@ -30,24 +30,27 @@ _MIGRATION_FAILURE = re.compile(
 
 # timeweaver_server_011.sql aborts on purpose by selecting one of these
 # nonexistent columns so the raw MySQL 1054 error carries an operator hint.
-# Expand this JSON diagnostic with the full guidance so an unmanned or
-# unfamiliar operator does not mistake an intentional fail-closed guard for a
-# regression of the schedule_detail soft-delete fix (see
-# timeweaver.server.0004 TR0005 / T0004).
+# Since TR0009 the common orphan case repairs itself, so reaching one of these
+# markers now means something no automatic rule can fix. Expand the JSON
+# diagnostic with the full guidance so the operator sees what is actually wrong
+# instead of a bare "Unknown column" error (see timeweaver.server.0004 TR0009).
 _MIGRATION_ABORT_GUIDANCE = {
     "tw011_invalid_detail_run_scripts_diagnose_execution_log_orphans": (
-        "timeweaver_server_011.sql aborted on purpose: execution_log still has "
-        "rows whose detail_id does not map to any schedule_detail row. This is "
-        "expected for execution history created before schedule_detail "
-        "soft-delete was introduced -- that fix only stops *new* orphans from "
-        "being created, it does not repair old ones. Run "
-        "scripts/diagnose_execution_log_orphans.sql against this database, "
-        "review each row it lists from execution_log_quarantine, and resolve "
-        "every one by choosing (1) remap detail_id to another task, (2) restore "
-        "the tombstoned schedule_detail row, or (3) approve deleting the "
-        "quarantined row. The migration keeps failing on every startup until "
-        "all quarantined rows are resolved; this is intentional fail-closed "
-        "behavior, not a bug."
+        "timeweaver_server_011.sql aborted on purpose. It already repairs the "
+        "normal case by itself: an execution_log row whose detail_id lost its "
+        "schedule_detail row gets that row restored as a tombstone (audited in "
+        "schedule_detail_restore_log), so startup continues and no execution "
+        "history is changed or deleted. This abort means execution_log still "
+        "holds rows that no automatic rule can repair, because their detail_id "
+        "is not a 16-byte UUID at all -- typically a legacy execution_log."
+        "detail_id column that was never converted to BINARY(16), or NULL and "
+        "short values inside it. Run "
+        "scripts/diagnose_execution_log_orphans.sql against this database and "
+        "look at the source_detail_data_type and quarantine_reason columns of "
+        "the rows it lists from execution_log_quarantine, then fix the "
+        "execution_log.detail_id column type or approve remapping or deleting "
+        "those rows. The migration keeps failing on every startup until they "
+        "are gone; this is intentional fail-closed behavior, not a bug."
     ),
     "tw_migration_011_abort_duplicate_attempt_repair_failed": (
         "timeweaver_server_011.sql aborted on purpose: automatic repair could "

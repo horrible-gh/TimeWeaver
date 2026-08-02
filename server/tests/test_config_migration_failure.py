@@ -65,7 +65,7 @@ def test_migration_failure_is_structured_and_system_exit_is_preserved(monkeypatc
 
 
 def test_migration_011_invalid_detail_abort_carries_operator_guidance(monkeypatch):
-    """011's intentional poison-column abort must not read as an unexplained bug."""
+    """011 only aborts on rows it cannot repair, and must say so in the log."""
     original_config = sys.modules.pop("config", None)
     logged_errors = []
 
@@ -111,4 +111,5 @@ def test_migration_011_invalid_detail_abort_carries_operator_guidance(monkeypatc
     assert diagnostic["migration_file"] == "timeweaver_server_011.sql"
     assert "tw011_invalid_detail_run_scripts_diagnose_execution_log_orphans" in diagnostic["db_error"]
     assert "scripts/diagnose_execution_log_orphans.sql" in diagnostic["guidance"]
+    assert "schedule_detail_restore_log" in diagnostic["guidance"]
     assert "not a bug" in diagnostic["guidance"]
