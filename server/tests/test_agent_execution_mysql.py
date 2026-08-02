@@ -3,8 +3,6 @@ import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from pathlib import Path
-
 import pymysql
 import pytest
 from sqloader.mysql import MySqlWrapper
@@ -31,7 +29,6 @@ EXECUTION_FILES = tuple(
     MIGRATION_DIR / f"timeweaver_server_{number:03d}.sql"
     for number in range(9, 13)
 )
-REPAIR_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "renumber_execution_log_attempts.sql"
 DETAIL_ID = uuid.UUID("8f0d65c5-b6a4-4bb0-a2c5-f23672fc9b76")
 
 
@@ -100,11 +97,20 @@ def test_execution_schema_is_created_and_replay_is_noop(empty_database):
 def test_duplicate_preflight_repair_and_unique_retry(empty_database):
     run_server_migrator(empty_database)
     connection = connect(empty_database)
-    group_id = uuid.uuid4().hex
+    duplicate_group_id = uuid.uuid4().hex
+    untouched_group_id = uuid.uuid4().hex
     detail_id = DETAIL_ID.hex
     try:
         with connection.cursor() as cursor:
             cursor.execute("ALTER TABLE execution_log DROP INDEX uq_execution_log_idempotency")
+            cursor.execute(
+                """
+                INSERT INTO schedule_detail
+                    (detail_id, schedule_name, schedule_id)
+                VALUES (UNHEX(%s), 'migration-repair-detail', 12)
+                """,
+                (detail_id,),
+            )
             for result_code in (0, 1):
                 cursor.execute(
                     """
@@ -113,37 +119,145 @@ def test_duplicate_preflight_repair_and_unique_retry(empty_database):
                          start_time, result_code)
                     VALUES (UNHEX(%s), 12, UNHEX(%s), 1, UTC_TIMESTAMP(), %s)
                     """,
-                    (group_id, detail_id, result_code),
+                    (duplicate_group_id, detail_id, result_code),
                 )
             cursor.execute(
                 """
-                SELECT execution_grp_id, detail_id, COUNT(*) AS c
-                  FROM execution_log
-                 GROUP BY execution_grp_id, detail_id
-                HAVING c > 1
-                """
+                INSERT INTO execution_log
+                    (execution_grp_id, schedule_id, detail_id, attempt,
+                     start_time, result_code)
+                VALUES (UNHEX(%s), 12, UNHEX(%s), 7, UTC_TIMESTAMP(), 0)
+                """,
+                (untouched_group_id, detail_id),
             )
-            assert cursor.fetchone()["c"] == 2
 
-        with pytest.raises(pymysql.IntegrityError):
-            apply_file(connection, EXECUTION_FILES[2])
+        apply_file(connection, EXECUTION_FILES[2])
 
-        apply_file(connection, REPAIR_SCRIPT)
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT execution_grp_id, detail_id, attempt, COUNT(*) AS c
+                SELECT attempt
                   FROM execution_log
-                 GROUP BY execution_grp_id, detail_id, attempt
-                HAVING c > 1
-                """
-            )
-            assert cursor.fetchall() == ()
-            cursor.execute(
-                "SELECT attempt FROM execution_log ORDER BY execution_id"
+                 WHERE execution_grp_id = UNHEX(%s)
+                 ORDER BY execution_id
+                """,
+                (duplicate_group_id,),
             )
             assert [row["attempt"] for row in cursor.fetchall()] == [1, 2]
+            cursor.execute(
+                """
+                SELECT attempt
+                  FROM execution_log
+                 WHERE execution_grp_id = UNHEX(%s)
+                """,
+                (untouched_group_id,),
+            )
+            assert cursor.fetchone()["attempt"] == 7
+            cursor.execute(
+                """
+                SELECT old_attempt, new_attempt
+                  FROM execution_log_attempt_repair_log
+                 WHERE execution_grp_id = UNHEX(%s)
+                 ORDER BY source_execution_id
+                """,
+                (duplicate_group_id,),
+            )
+            assert [
+                (row["old_attempt"], row["new_attempt"])
+                for row in cursor.fetchall()
+            ] == [(1, 1), (1, 2)]
+            cursor.execute(
+                "SELECT COUNT(*) AS c FROM execution_log_attempt_repair_log"
+            )
+            repair_log_count = cursor.fetchone()["c"]
+            assert repair_log_count == 2
+            cursor.execute("SHOW CREATE TABLE execution_log")
+            schema_before_replay = cursor.fetchone()["Create Table"]
+
         apply_file(connection, EXECUTION_FILES[2])
+
+        with connection.cursor() as cursor:
+            cursor.execute("SHOW CREATE TABLE execution_log")
+            assert cursor.fetchone()["Create Table"] == schema_before_replay
+            cursor.execute(
+                "SELECT COUNT(*) AS c FROM execution_log_attempt_repair_log"
+            )
+            assert cursor.fetchone()["c"] == repair_log_count
+            cursor.execute(
+                """
+                SELECT attempt
+                  FROM execution_log
+                 WHERE execution_grp_id = UNHEX(%s)
+                 ORDER BY execution_id
+                """,
+                (duplicate_group_id,),
+            )
+            assert [row["attempt"] for row in cursor.fetchall()] == [1, 2]
+    finally:
+        connection.close()
+
+
+def test_unmapped_detail_is_quarantined_and_migration_fails(empty_database):
+    run_server_migrator(empty_database)
+    connection = connect(empty_database)
+    group_id = uuid.uuid4().hex
+    sentinel_hex = "2D31" + ("00" * 14)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("ALTER TABLE execution_log DROP INDEX uq_execution_log_idempotency")
+            cursor.execute(
+                """
+                INSERT INTO execution_log
+                    (execution_grp_id, schedule_id, detail_id, attempt,
+                     start_time, result_code)
+                VALUES (
+                    UNHEX(%s), 12, CAST('-1' AS BINARY(16)), 1,
+                    UTC_TIMESTAMP(), 0
+                )
+                """,
+                (group_id,),
+            )
+            execution_id = cursor.lastrowid
+
+        with pytest.raises(pymysql.MySQLError) as error:
+            apply_file(connection, EXECUTION_FILES[2])
+        assert (
+            "tw_migration_011_abort_invalid_detail_id_manual_repair_required"
+            in str(error.value)
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT HEX(detail_id) AS detail_hex
+                  FROM execution_log
+                 WHERE execution_id = %s
+                """,
+                (execution_id,),
+            )
+            assert cursor.fetchone()["detail_hex"] == sentinel_hex
+            cursor.execute(
+                """
+                SELECT detail_id_hex, source_detail_data_type, quarantine_reason
+                  FROM execution_log_quarantine
+                 WHERE source_execution_id = %s
+                """,
+                (execution_id,),
+            )
+            quarantined = cursor.fetchone()
+            assert quarantined["detail_id_hex"] == sentinel_hex
+            assert quarantined["source_detail_data_type"] == "binary"
+            assert "schedule_detail UUID mapping" in quarantined["quarantine_reason"]
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS c
+                  FROM information_schema.statistics
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'execution_log'
+                   AND index_name = 'uq_execution_log_idempotency'
+                """
+            )
+            assert cursor.fetchone()["c"] == 0
     finally:
         connection.close()
 
