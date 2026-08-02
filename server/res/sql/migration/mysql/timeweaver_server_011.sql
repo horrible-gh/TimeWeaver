@@ -118,7 +118,7 @@ DEALLOCATE PREPARE tw_quarantine_commit_stmt;
 
 SET @tw_invalid_detail_abort_sql = IF(
     @tw_invalid_detail_count > 0,
-    'SELECT tw_migration_011_abort_invalid_detail_id_manual_repair_required FROM execution_log LIMIT 1',
+    'SELECT tw011_invalid_detail_run_scripts_diagnose_execution_log_orphans FROM execution_log LIMIT 1',
     'SELECT 1'
 );
 PREPARE tw_invalid_detail_abort_stmt FROM @tw_invalid_detail_abort_sql;
@@ -151,7 +151,7 @@ SET @tw_repair_temp_sql = IF(
            HAVING COUNT(*) > COUNT(DISTINCT attempt)
        ) duplicated
          ON duplicated.execution_grp_id = e.execution_grp_id
-        AND duplicated.detail_id = e.detail_id',
+        AND duplicated.detail_id <=> e.detail_id',
     'SELECT 1'
 );
 PREPARE tw_repair_temp_stmt FROM @tw_repair_temp_sql;

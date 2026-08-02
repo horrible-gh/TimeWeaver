@@ -181,10 +181,11 @@ async def update_tasks(task: TaskUpdateRequest):
 async def remove_Task(task_id: str):
     query = sqloader.load_sql("time_weaver.json", "tasks.remove_task")
     def remove_rows():
-        result_task = db_instance.execute_query(query, {"task_id": task_id})
         detail_query = sqloader.load_sql("time_weaver.json", "tasks.remove_schedule_detail")
-        result_detail = db_instance.execute_query(detail_query, {"task_id": task_id})
-        return result_task & result_detail
+        with db_instance.begin_transaction() as txn:
+            result_task = txn.execute(query, {"task_id": task_id})
+            result_detail = txn.execute(detail_query, {"task_id": task_id})
+            return result_task and result_detail
 
     return await _db_call(remove_rows)
 

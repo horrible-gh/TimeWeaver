@@ -116,6 +116,7 @@ class AgentExecutionRepository:
                     SELECT me.detail_id, sd.schedule_id
                       FROM manual_execution me
                       JOIN schedule_detail sd ON sd.detail_id = me.detail_id
+                                             AND sd.deleted_at IS NULL
                      WHERE me.manual_id = %s
                     """,
                     (manual_id,),
@@ -137,6 +138,7 @@ class AgentExecutionRepository:
                     SELECT detail_id, schedule_id
                       FROM schedule_detail
                      WHERE detail_id = %s
+                       AND deleted_at IS NULL
                      FOR UPDATE
                     """,
                     (candidate["detail_id"],),

@@ -113,6 +113,7 @@ class AgentRuntimeRepository:
                   JOIN schedule_detail sd
                     ON sd.schedule_id = sg.schedule_id
                    AND sd.status = 'active'
+                   AND sd.deleted_at IS NULL
                   LEFT JOIN task_detail td
                     ON td.detail_id = sd.detail_id
                  WHERE sg.target_device = %s
@@ -129,6 +130,7 @@ class AgentRuntimeRepository:
                   JOIN schedule_detail sd
                     ON sd.schedule_id = sg.schedule_id
                    AND sd.status = 'active'
+                   AND sd.deleted_at IS NULL
                   JOIN manual_execution me
                     ON me.detail_id = sd.detail_id
                  WHERE sg.target_device = %s

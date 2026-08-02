@@ -10,7 +10,7 @@ WITH schedule_histories AS (
     FROM schedule_group sg
     JOIN schedule_detail sd
         ON sg.schedule_id = sd.schedule_id
-    JOIN task_detail td
+    LEFT JOIN task_detail td
         ON td.detail_id = sd.detail_id
 )
 SELECT

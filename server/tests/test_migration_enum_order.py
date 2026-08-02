@@ -138,3 +138,6 @@ class TestCleanupScriptIsNotAutoRun:
         sql = CLEANUP_SCRIPT.read_text(encoding="utf-8")
         delete_stmt = sql[sql.upper().find("DELETE SD FROM SCHEDULE_DETAIL") :]
         assert "td.detail_id IS NULL" in delete_stmt
+        assert "sd.deleted_at IS NULL" in delete_stmt
+        assert "NOT EXISTS" in delete_stmt
+        assert "execution_log" in delete_stmt

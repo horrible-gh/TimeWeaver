@@ -31,14 +31,14 @@
         "get_tasks": "tasks/get_tasks.sql",
         "insert_schedule_detail": "INSERT INTO schedule_detail (detail_id, schedule_name, schedule_id, year, month, day_of_week, day, hour, minute, second, is_error_stop, sequence, retry_count, status, creator) VALUES (UNHEX(REPLACE(%s, '-', '')), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         "insert_task": "INSERT INTO task_detail (detail_id, command, task_type, archive_type, source_path, error_on_missing_source, destination_path, date_format, target_date_format, destination_date_format, house_keep_days, creator) VALUES (UNHEX(REPLACE(%s, '-', '')), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        "update_schedule_detail": "UPDATE schedule_detail SET schedule_name=%s, schedule_id=%s, year=%s, month=%s, day_of_week=%s, day=%s, hour=%s, minute=%s, second=%s, is_error_stop=%s, sequence=%s, retry_count=%s, status=%s, modifier=%s, modified_at=NOW() WHERE detail_id=UNHEX(REPLACE(%s, '-', ''))",
+        "update_schedule_detail": "UPDATE schedule_detail SET schedule_name=%s, schedule_id=%s, year=%s, month=%s, day_of_week=%s, day=%s, hour=%s, minute=%s, second=%s, is_error_stop=%s, sequence=%s, retry_count=%s, status=%s, modifier=%s, modified_at=NOW() WHERE detail_id=UNHEX(REPLACE(%s, '-', '')) AND deleted_at IS NULL",
         "update_task": "UPDATE task_detail SET command=%s, task_type=%s, archive_type=%s, source_path=%s, error_on_missing_source=%s, destination_path=%s, date_format=%s, target_date_format=%s, destination_date_format=%s, house_keep_days=%s, modifier=%s, modified_at=NOW() WHERE detail_id=UNHEX(REPLACE(%s, '-', ''))",
-        "remove_schedule_detail": "DELETE FROM schedule_detail WHERE detail_id=UNHEX(REPLACE(%s, '-', ''))",
+        "remove_schedule_detail": "UPDATE schedule_detail SET deleted_at=NOW(), modified_at=NOW() WHERE detail_id=UNHEX(REPLACE(%s, '-', '')) AND deleted_at IS NULL",
         "remove_task": "DELETE FROM task_detail WHERE detail_id=UNHEX(REPLACE(%s, '-', ''))"
     },
     "manual_execution":  { 
         "insert_manual_execution": "manual_execution/insert_manual_execution.sql",
-        "get_manual_execution": "SELECT sg.name, sd.schedule_name, me.manual_id, me.is_immediate, me.schedule_datetime, me.status, CASE WHEN me.status in ('active','wait') THEN '1' ELSE '0' END AS edit_enable FROM manual_execution me JOIN schedule_detail sd ON sd.detail_id = me.detail_id JOIN schedule_group sg ON sg.schedule_id = sd.schedule_id ORDER BY me.manual_id DESC",
+        "get_manual_execution": "SELECT sg.name, sd.schedule_name, me.manual_id, me.is_immediate, me.schedule_datetime, me.status, CASE WHEN me.status in ('active','wait') THEN '1' ELSE '0' END AS edit_enable FROM manual_execution me JOIN schedule_detail sd ON sd.detail_id = me.detail_id JOIN schedule_group sg ON sg.schedule_id = sd.schedule_id WHERE sd.deleted_at IS NULL ORDER BY me.manual_id DESC",
         "update_manual_execution": "UPDATE manual_execution SET is_immediate = %s, schedule_datetime = %s, status = %s, modifier = %s, modified_at = NOW() WHERE manual_id = %s",
         "update_abandon_manual_execution": "UPDATE manual_execution SET status = %s, modifier = %s, modified_at = NOW() WHERE manual_id = %s"
     }

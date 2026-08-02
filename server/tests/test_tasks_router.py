@@ -15,6 +15,8 @@ INSERT_SCHEDULE_DETAIL = "INSERT INTO schedule_detail"
 INSERT_TASK = "INSERT INTO task_detail"
 UPDATE_SCHEDULE_DETAIL = "UPDATE schedule_detail"
 UPDATE_TASK = "UPDATE task_detail"
+REMOVE_TASK = "DELETE FROM task_detail"
+SOFT_DELETE_SCHEDULE_DETAIL = "UPDATE schedule_detail SET deleted_at=NOW()"
 
 
 def valid_insert_payload(**overrides):
@@ -221,3 +223,43 @@ class TestUpdateTaskTransaction:
         assert "%Y%m%d" in task_params
         assert "%Y%m" in task_params
         assert task_params.count(None) == 0
+
+
+class TestRemoveTaskTransaction:
+    def test_task_delete_and_detail_tombstone_commit_together(self, make_tasks_module):
+        tasks_module, db = make_tasks_module()
+        detail_id = valid_update_payload()["detail_id"]
+
+        asyncio.run(tasks_module.remove_Task(detail_id))
+
+        assert len(db.transactions) == 1
+        committed = statements(db.committed)
+        assert any(REMOVE_TASK in query for query in committed)
+        assert any(SOFT_DELETE_SCHEDULE_DETAIL in query for query in committed)
+        assert db.execute_query_calls == []
+
+    def test_soft_delete_preserves_execution_history_mapping(self, make_tasks_module):
+        tasks_module, db = make_tasks_module()
+        detail_id = valid_update_payload()["detail_id"]
+
+        asyncio.run(tasks_module.remove_Task(detail_id))
+
+        detail_query = next(
+            query for query in statements(db.committed)
+            if SOFT_DELETE_SCHEDULE_DETAIL in query
+        )
+        assert detail_query.startswith("UPDATE schedule_detail")
+        assert "deleted_at=NOW()" in detail_query
+        assert "DELETE FROM schedule_detail" not in detail_query
+
+    def test_failed_tombstone_rolls_back_task_delete(self, make_tasks_module):
+        tasks_module, db = make_tasks_module(fail_on=SOFT_DELETE_SCHEDULE_DETAIL)
+        detail_id = valid_update_payload()["detail_id"]
+
+        with pytest.raises(RuntimeError):
+            asyncio.run(tasks_module.remove_Task(detail_id))
+
+        assert db.committed == []
+        rolled_back = statements(db.rolled_back)
+        assert any(REMOVE_TASK in query for query in rolled_back)
+        assert any(SOFT_DELETE_SCHEDULE_DETAIL in query for query in rolled_back)
