@@ -28,6 +28,36 @@ _MIGRATION_FAILURE = re.compile(
     re.DOTALL,
 )
 
+# timeweaver_server_011.sql aborts on purpose by selecting one of these
+# nonexistent columns so the raw MySQL 1054 error carries an operator hint.
+# Expand this JSON diagnostic with the full guidance so an unmanned or
+# unfamiliar operator does not mistake an intentional fail-closed guard for a
+# regression of the schedule_detail soft-delete fix (see
+# timeweaver.server.0004 TR0005 / T0004).
+_MIGRATION_ABORT_GUIDANCE = {
+    "tw011_invalid_detail_run_scripts_diagnose_execution_log_orphans": (
+        "timeweaver_server_011.sql aborted on purpose: execution_log still has "
+        "rows whose detail_id does not map to any schedule_detail row. This is "
+        "expected for execution history created before schedule_detail "
+        "soft-delete was introduced -- that fix only stops *new* orphans from "
+        "being created, it does not repair old ones. Run "
+        "scripts/diagnose_execution_log_orphans.sql against this database, "
+        "review each row it lists from execution_log_quarantine, and resolve "
+        "every one by choosing (1) remap detail_id to another task, (2) restore "
+        "the tombstoned schedule_detail row, or (3) approve deleting the "
+        "quarantined row. The migration keeps failing on every startup until "
+        "all quarantined rows are resolved; this is intentional fail-closed "
+        "behavior, not a bug."
+    ),
+    "tw_migration_011_abort_duplicate_attempt_repair_failed": (
+        "timeweaver_server_011.sql aborted on purpose: automatic repair could "
+        "not make (execution_grp_id, detail_id, attempt) unique in "
+        "execution_log. Inspect execution_log_attempt_repair_log and the "
+        "remaining duplicate rows manually -- the migration will not guess "
+        "which duplicate row is authoritative."
+    ),
+}
+
 
 class _ForwardingCapture(io.StringIO):
     """Mirror sqloader stdout while retaining its migration exception text."""
@@ -72,6 +102,16 @@ def _database_init_with_diagnostics(config):
             "db_error": db_error,
             "exit_code": exc.code,
         }
+        guidance = next(
+            (
+                text
+                for marker, text in _MIGRATION_ABORT_GUIDANCE.items()
+                if marker in db_error
+            ),
+            None,
+        )
+        if guidance:
+            diagnostic["guidance"] = guidance
         logger.error(
             "[database-migration-failure] "
             + json.dumps(diagnostic, ensure_ascii=False, sort_keys=True)
