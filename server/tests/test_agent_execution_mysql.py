@@ -27,7 +27,7 @@ pytestmark = pytest.mark.skipif(
 )
 EXECUTION_FILES = tuple(
     MIGRATION_DIR / f"timeweaver_server_{number:03d}.sql"
-    for number in range(9, 13)
+    for number in range(9, 14)
 )
 DETAIL_ID = uuid.UUID("8f0d65c5-b6a4-4bb0-a2c5-f23672fc9b76")
 
@@ -56,6 +56,7 @@ def test_execution_schema_is_created_and_replay_is_noop(empty_database):
                    AND (
                        (table_name = 'manual_execution' AND column_name IN ('claim_token', 'claim_expires_at'))
                        OR (table_name = 'execution_log' AND column_name IN ('attempt', 'manual_id'))
+                       OR (table_name = 'schedule_detail' AND column_name = 'deleted_at')
                    )
                 """
             )
@@ -64,6 +65,7 @@ def test_execution_schema_is_created_and_replay_is_noop(empty_database):
             assert columns[("manual_execution", "claim_expires_at")]["data_type"] == "datetime"
             assert columns[("execution_log", "attempt")]["data_type"] == "int"
             assert columns[("execution_log", "manual_id")]["data_type"] == "int"
+            assert columns[("schedule_detail", "deleted_at")]["data_type"] == "datetime"
 
             cursor.execute(
                 "SHOW INDEX FROM execution_log WHERE Key_name = 'uq_execution_log_idempotency'"
@@ -79,6 +81,8 @@ def test_execution_schema_is_created_and_replay_is_noop(empty_database):
             before_manual = cursor.fetchone()["Create Table"]
             cursor.execute("SHOW CREATE TABLE execution_log")
             before_log = cursor.fetchone()["Create Table"]
+            cursor.execute("SHOW CREATE TABLE schedule_detail")
+            before_detail = cursor.fetchone()["Create Table"]
 
         for path in EXECUTION_FILES:
             apply_file(connection, path)
@@ -90,6 +94,8 @@ def test_execution_schema_is_created_and_replay_is_noop(empty_database):
             assert cursor.fetchone()["Create Table"] == before_manual
             cursor.execute("SHOW CREATE TABLE execution_log")
             assert cursor.fetchone()["Create Table"] == before_log
+            cursor.execute("SHOW CREATE TABLE schedule_detail")
+            assert cursor.fetchone()["Create Table"] == before_detail
     finally:
         connection.close()
 
@@ -222,7 +228,7 @@ def test_unmapped_detail_is_quarantined_and_migration_fails(empty_database):
         with pytest.raises(pymysql.MySQLError) as error:
             apply_file(connection, EXECUTION_FILES[2])
         assert (
-            "tw_migration_011_abort_invalid_detail_id_manual_repair_required"
+            "tw011_invalid_detail_run_scripts_diagnose_execution_log_orphans"
             in str(error.value)
         )
 
@@ -258,6 +264,67 @@ def test_unmapped_detail_is_quarantined_and_migration_fails(empty_database):
                 """
             )
             assert cursor.fetchone()["c"] == 0
+    finally:
+        connection.close()
+
+
+def test_soft_deleted_detail_remains_valid_for_migration_011(empty_database):
+    run_server_migrator(empty_database)
+    connection = connect(empty_database)
+    group_id = uuid.uuid4().hex
+    detail_id = uuid.uuid4().hex
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("ALTER TABLE execution_log DROP INDEX uq_execution_log_idempotency")
+            cursor.execute(
+                """
+                INSERT INTO schedule_detail
+                    (detail_id, schedule_name, schedule_id, deleted_at)
+                VALUES (UNHEX(%s), 'deleted-history-detail', 12, UTC_TIMESTAMP())
+                """,
+                (detail_id,),
+            )
+            cursor.execute(
+                """
+                INSERT INTO execution_log
+                    (execution_grp_id, schedule_id, detail_id, attempt,
+                     start_time, result_code)
+                VALUES (UNHEX(%s), 12, UNHEX(%s), 1, UTC_TIMESTAMP(), 0)
+                """,
+                (group_id, detail_id),
+            )
+
+        apply_file(connection, EXECUTION_FILES[2])
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT deleted_at
+                  FROM schedule_detail
+                 WHERE detail_id = UNHEX(%s)
+                """,
+                (detail_id,),
+            )
+            assert cursor.fetchone()["deleted_at"] is not None
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS c
+                  FROM execution_log_quarantine q
+                 WHERE q.detail_id = UNHEX(%s)
+                """,
+                (detail_id,),
+            )
+            assert cursor.fetchone()["c"] == 0
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS c
+                  FROM information_schema.statistics
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'execution_log'
+                   AND index_name = 'uq_execution_log_idempotency'
+                """
+            )
+            assert cursor.fetchone()["c"] == 3
     finally:
         connection.close()
 

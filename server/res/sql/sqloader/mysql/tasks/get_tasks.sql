@@ -52,6 +52,7 @@ LEFT JOIN task_detail td
     ON sd.detail_id = td.detail_id
 LEFT JOIN execution_log el
     ON el.detail_id = td.detail_id
+WHERE sd.deleted_at IS NULL
 ORDER BY
     sd.schedule_id
     , sd.sequence

@@ -52,7 +52,8 @@ task_counts AS (
     schedule_id,
     COUNT(*) AS total_tasks
   FROM schedule_detail
-  WHERE status <> 'inactive'
+  WHERE deleted_at IS NULL
+    AND status <> 'inactive'
   GROUP BY schedule_id
 )
 SELECT

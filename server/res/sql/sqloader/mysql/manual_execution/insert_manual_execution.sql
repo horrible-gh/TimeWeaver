@@ -14,3 +14,4 @@ WHERE (
     )
   AND sg.status not in ('inactive')
   AND sd.status not in ('inactive')
+  AND sd.deleted_at IS NULL

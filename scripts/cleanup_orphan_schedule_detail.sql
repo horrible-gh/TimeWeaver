@@ -8,6 +8,8 @@
 -- This is NOT an auto-migration on purpose: it deletes user-entered rows, and the
 -- migrator would run it unattended at server startup. Run it by hand, review the
 -- SELECT output first, and keep schedule_detail_orphan_bak until you are satisfied.
+-- Soft-delete tombstones and every row referenced by execution_log are excluded so
+-- this cleanup cannot recreate migration 011 invalid_detail_id failures.
 --
 -- Usage:
 --   mysql -u <user> -p <database> < scripts/cleanup_orphan_schedule_detail.sql
@@ -21,6 +23,12 @@ SELECT sd.schedule_id, sd.schedule_name, sd.created_at, sd.creator
 FROM schedule_detail sd
 LEFT JOIN task_detail td ON sd.detail_id = td.detail_id
 WHERE td.detail_id IS NULL
+  AND sd.deleted_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM execution_log el
+      WHERE el.detail_id = sd.detail_id
+  )
 ORDER BY sd.created_at;
 
 -- 2. Keep a copy.
@@ -29,9 +37,21 @@ CREATE TABLE IF NOT EXISTS schedule_detail_orphan_bak LIKE schedule_detail;
 INSERT INTO schedule_detail_orphan_bak
 SELECT sd.* FROM schedule_detail sd
 LEFT JOIN task_detail td ON sd.detail_id = td.detail_id
-WHERE td.detail_id IS NULL;
+WHERE td.detail_id IS NULL
+  AND sd.deleted_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM execution_log el
+      WHERE el.detail_id = sd.detail_id
+  );
 
 -- 3. Remove the orphans only after step 2 reports the expected row count.
 DELETE sd FROM schedule_detail sd
 LEFT JOIN task_detail td ON sd.detail_id = td.detail_id
-WHERE td.detail_id IS NULL;
+WHERE td.detail_id IS NULL
+  AND sd.deleted_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM execution_log el
+      WHERE el.detail_id = sd.detail_id
+  );
