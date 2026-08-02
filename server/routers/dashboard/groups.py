@@ -17,7 +17,7 @@ async def get_groups():
 async def insert_group(group: GroupInsertRequest):
     query = sqloader.load_sql("time_weaver.json", "groups.insert_group")
     group_data = group.model_dump()
-    data = {"group_name": group_data['group_name'], "creator": group_data['creator']}
+    data = (group_data['group_name'], group_data['creator'])
     return db_instance.execute_query(query, data)
 
 @router.put("/update_group", dependencies=[Depends(verify_token)])
@@ -25,15 +25,15 @@ async def update_groups(group: GroupUpdateRequest):
     query = sqloader.load_sql("time_weaver.json", "groups.update_group")
     group_data = group.model_dump()
     print(group_data)
-    data = {
-        "group_name": group_data['group_name'],
-        "status": group_data['status'],
-        "modifier": group_data['modifier'],
-        "group_id": group_data['group_id'],
-    }
+    data = (
+        group_data['group_name'],
+        group_data['status'],
+        group_data['modifier'],
+        group_data['group_id'],
+    )
     return db_instance.execute_query(query, data)
 
 @router.delete("/remove_group/{group_id}", dependencies=[Depends(verify_token)])
 async def remove_group(group_id: int):
     query = sqloader.load_sql("time_weaver.json", "groups.remove_group")
-    return db_instance.execute_query(query, {"group_id": group_id})
+    return db_instance.execute_query(query, (group_id,))
