@@ -34,7 +34,7 @@ async def execution_history(
 @router.get("/get_schedule_groups", dependencies=[Depends(verify_token)])
 async def get_schedule_groups(schedule: ScheduleGetRequest = Depends()):
     schedule_data = schedule.model_dump()
-    data = {"group_id": schedule_data['group_id']}
+    data = (schedule_data['group_id'],)
     return db_instance.fetch_all(sqloader.load_sql("time_weaver.json", "schedules.get_schedule_groups"), data)
 
 @router.post("/insert_schedule", dependencies=[Depends(verify_token)])
@@ -86,12 +86,12 @@ async def update_schedules(schedule: ScheduleUpdateRequest):
 @router.delete("/remove_schedule/{schedule_id}", dependencies=[Depends(verify_token)])
 async def remove_schedule(schedule_id: int):
     query = sqloader.load_sql("time_weaver.json", "schedules.remove_schedule")
-    return db_instance.execute_query(query, {"schedule_id": schedule_id})
+    return db_instance.execute_query(query, (schedule_id,))
 
 @router.get("/get_devices", dependencies=[Depends(verify_token)])
 async def get_devices(schedule: ScheduleGetRequest = Depends()):
     schedule_data = schedule.model_dump()
-    data = {"group_id": schedule_data['group_id']}
+    data = (schedule_data['group_id'],)
     return db_instance.fetch_all(sqloader.load_sql("time_weaver.json", "schedules.get_devices"), data)
 
 

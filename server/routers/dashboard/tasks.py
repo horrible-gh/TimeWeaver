@@ -36,16 +36,16 @@ def to_bool(value, default=True):
 
 @router.get("/get_tasks", dependencies=[Depends(verify_token)])
 async def get_Tasks(task: TaskGetRequest = Depends()):
-    task_data = task.model_dump()
-    #data = {"group_id": task_data['group_id']}
-    data = {}
-    return await _db_call(db_instance.fetch_all, sqloader.load_sql("time_weaver.json", "tasks.get_tasks"), data)
+    return await _db_call(
+        db_instance.fetch_all,
+        sqloader.load_sql("time_weaver.json", "tasks.get_tasks"),
+    )
 
 
 @router.get("/get_schedule_groups", dependencies=[Depends(verify_token)])
 async def get_schedule_groups(schedule: ScheduleGetRequest = Depends()):
     schedule_data = schedule.model_dump()
-    data = {"group_id": schedule_data['group_id']}
+    data = (schedule_data['group_id'],)
     return await _db_call(db_instance.fetch_all, sqloader.load_sql("time_weaver.json", "schedules.get_schedule_groups"), data)
 
 
@@ -183,8 +183,8 @@ async def remove_Task(task_id: str):
     def remove_rows():
         detail_query = sqloader.load_sql("time_weaver.json", "tasks.remove_schedule_detail")
         with db_instance.begin_transaction() as txn:
-            result_task = txn.execute(query, {"task_id": task_id})
-            result_detail = txn.execute(detail_query, {"task_id": task_id})
+            result_task = txn.execute(query, (task_id,))
+            result_detail = txn.execute(detail_query, (task_id,))
             return result_task and result_detail
 
     return await _db_call(remove_rows)
