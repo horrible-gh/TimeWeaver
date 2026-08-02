@@ -1,6 +1,12 @@
+import io
+import json
 import os
+import re
+import sys
+from contextlib import redirect_stdout
 from enum import Enum
 
+import LogAssist.log as logger
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from schema_guard import ensure_critical_schema
@@ -16,6 +22,61 @@ class DBType(str, Enum):
 
 _DEFAULT_BLOCKING_WORKERS = max(4, min(32, 4 * (os.cpu_count() or 1)))
 _EXAMPLE_SECRET = "change-me-for-production"
+_MIGRATION_FAILURE = re.compile(
+    r"Database Migration Failed\.Failed to apply migration "
+    r"(?P<migration_file>[^:\r\n]+):\s*(?P<db_error>.+)",
+    re.DOTALL,
+)
+
+
+class _ForwardingCapture(io.StringIO):
+    """Mirror sqloader stdout while retaining its migration exception text."""
+
+    def __init__(self, forward):
+        super().__init__()
+        self.forward = forward
+
+    def write(self, value):
+        self.forward.write(value)
+        return super().write(value)
+
+    def flush(self):
+        self.forward.flush()
+        return super().flush()
+
+
+def _database_init_with_diagnostics(config):
+    """Log sqloader's swallowed migration exception, then preserve fail-closed exit."""
+
+    captured = _ForwardingCapture(sys.stdout)
+    try:
+        with redirect_stdout(captured):
+            return database_init(config)
+    except SystemExit as exc:
+        output = captured.getvalue()
+        match = _MIGRATION_FAILURE.search(output)
+        if match:
+            migration_file = match.group("migration_file").strip()
+            db_error = match.group("db_error").strip()
+        else:
+            migration_file = None
+            lines = [line.strip() for line in output.splitlines() if line.strip()]
+            db_error = lines[-1] if lines else f"sqloader exited with code {exc.code}"
+
+        db_type = config.get("type")
+        db_config = config.get(db_type, {}) if db_type else {}
+        diagnostic = {
+            "event": "database_migration_failed",
+            "database": db_config.get("database") or db_config.get("db_name"),
+            "migration_file": migration_file,
+            "db_error": db_error,
+            "exit_code": exc.code,
+        }
+        logger.error(
+            "[database-migration-failure] "
+            + json.dumps(diagnostic, ensure_ascii=False, sort_keys=True)
+        )
+        raise
 
 
 class Settings(BaseSettings):
@@ -123,7 +184,9 @@ class DatabaseSetting:
         self.instance_init()
 
     def instance_init(self):
-        self.db_instance, self.sqloader, self.migrator = database_init(self.config)
+        self.db_instance, self.sqloader, self.migrator = (
+            _database_init_with_diagnostics(self.config)
+        )
         if settings.DB_TYPE.value == DBType.MYSQL:
             ensure_critical_schema(self.db_instance)
 
