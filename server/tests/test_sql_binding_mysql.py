@@ -30,6 +30,12 @@ def test_devices_group_id_five_and_multi_placeholder_insert_are_valid(
     module, _ = make_router_module("devices")
     module.db_instance = wrapper
     try:
+        # insert_device now checks group_id against groups (NR0007), so the
+        # target group has to exist before the insert can bind against it.
+        wrapper.execute_query(
+            "INSERT INTO groups (group_id, group_name) VALUES (%s, %s)",
+            (5, "binding-test-group"),
+        )
         asyncio.run(module.insert_device(DeviceInsertRequest(
             group_id=5,
             device_name="binding-contract-device",

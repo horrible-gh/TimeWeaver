@@ -40,8 +40,20 @@ async def get_schedule_groups(schedule: ScheduleGetRequest = Depends()):
 
 @router.post("/insert_schedule", dependencies=[Depends(verify_token)])
 async def insert_schedule(schedule: ScheduleInsertRequest):
-    query = sqloader.load_sql("time_weaver.json", "schedules.insert_schedule")
     schedule_data = schedule.model_dump()
+    group = db_instance.fetch_one(
+        sqloader.load_sql("time_weaver.json", "groups.get_group"),
+        (schedule_data["group_id"],),
+    )
+    if not group:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "group_not_found",
+                "message": "group_id does not reference an existing group",
+            },
+        )
+    query = sqloader.load_sql("time_weaver.json", "schedules.insert_schedule")
     data = (
         schedule_data["group_id"],
         schedule_data["name"],

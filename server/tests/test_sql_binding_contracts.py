@@ -57,7 +57,17 @@ def test_groups_bind_all_three_calls_in_sql_order(make_router_module):
     assert [params for _, params in db.execute_query_calls] == [
         ("operators", "creator-5"),
         ("operators-2", "active", "modifier-5", 5),
-        (5,),
+    ]
+    # remove_group now reassigns every referencing table to group 0 and
+    # deletes the group in one transaction (NR0007) instead of a bare
+    # autocommitting DELETE.
+    assert len(db.transactions) == 1
+    assert [(q.split(None, 1)[0], params) for q, params in db.transactions[0].pending] == [
+        ("UPDATE", (5,)),
+        ("UPDATE", (5,)),
+        ("UPDATE", (5,)),
+        ("UPDATE", (5,)),
+        ("DELETE", (5,)),
     ]
 
 

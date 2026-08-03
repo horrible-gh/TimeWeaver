@@ -25,19 +25,49 @@ PREPARE tw_device_name_index_stmt FROM @tw_device_name_index_sql;
 EXECUTE tw_device_name_index_stmt;
 DEALLOCATE PREPARE tw_device_name_index_stmt;
 
+-- Orphaned group_id values -- rows whose group_id has no matching row in
+-- groups -- would make every ADD CONSTRAINT ... FOREIGN KEY below fail with
+-- MySQL 1452. That can happen even without a bad migration: see NR0007
+-- (timeweaver.server.0007.0007-NR) -- insert_device/insert_schedule accepted
+-- a group_id without checking it existed, and remove_group deleted a group
+-- without checking whether devices/users/agent_enrollment_token/
+-- schedule_group still pointed at it. Reassign whatever is left over to the
+-- reserved group 0 ("Unknown", inserted by groups_002.sql, which always runs
+-- before this file) so the FK below always succeeds instead of failing
+-- closed on every startup.
+UPDATE devices d
+    LEFT JOIN groups g ON g.group_id = d.group_id
+    SET d.group_id = 0
+    WHERE g.group_id IS NULL;
+
 ALTER TABLE devices
     ADD CONSTRAINT uq_devices_group_device_name UNIQUE (group_id, device_name),
     ADD CONSTRAINT fk_devices_group
         FOREIGN KEY (group_id) REFERENCES groups(group_id);
+
+UPDATE users u
+    LEFT JOIN groups g ON g.group_id = u.group_id
+    SET u.group_id = 0
+    WHERE g.group_id IS NULL;
 
 ALTER TABLE users
     MODIFY COLUMN group_id INT NOT NULL DEFAULT 0,
     ADD CONSTRAINT fk_users_group
         FOREIGN KEY (group_id) REFERENCES groups(group_id);
 
+UPDATE agent_enrollment_token t
+    LEFT JOIN groups g ON g.group_id = t.group_id
+    SET t.group_id = 0
+    WHERE g.group_id IS NULL;
+
 ALTER TABLE agent_enrollment_token
     ADD CONSTRAINT fk_agent_enrollment_token_group
         FOREIGN KEY (group_id) REFERENCES groups(group_id);
+
+UPDATE schedule_group s
+    LEFT JOIN groups g ON g.group_id = s.group_id
+    SET s.group_id = 0
+    WHERE g.group_id IS NULL;
 
 ALTER TABLE schedule_group
     ADD CONSTRAINT fk_schedule_group_group

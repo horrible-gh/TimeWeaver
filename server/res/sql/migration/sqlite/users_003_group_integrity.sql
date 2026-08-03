@@ -37,6 +37,16 @@ CREATE TABLE devices_group_integrity (
     CONSTRAINT uq_devices_group_device_name UNIQUE (group_id, device_name),
     CONSTRAINT fk_devices_group FOREIGN KEY (group_id) REFERENCES groups(group_id)
 );
+-- foreign_keys is OFF for this whole rebuild, so copying a row with no
+-- matching groups row would not raise here the way MySQL's ADD CONSTRAINT
+-- does -- it would silently create a devices row that violates the FK
+-- added below (see NR0007, timeweaver.server.0007.0007-NR, section 3).
+-- Reassign orphans to the reserved group 0 ("Unknown") before copying so
+-- the rebuilt table never starts out already violating its own constraint.
+UPDATE devices
+   SET group_id = 0
+ WHERE group_id NOT IN (SELECT group_id FROM groups);
+
 INSERT INTO devices_group_integrity
 SELECT group_id, device_id, device_name, status, version, creator, created_at,
        modifier, modified_at, last_login_at, last_heartbeat_at, applied_revision
@@ -68,6 +78,10 @@ CREATE TABLE agent_enrollment_token_group_integrity (
     CONSTRAINT fk_agent_enrollment_token_group
         FOREIGN KEY (group_id) REFERENCES groups(group_id)
 );
+UPDATE agent_enrollment_token
+   SET group_id = 0
+ WHERE group_id NOT IN (SELECT group_id FROM groups);
+
 INSERT INTO agent_enrollment_token_group_integrity
 SELECT enrollment_id, token_hash, device_name, group_id, created_at, expires_at,
        used_at, used_by_device_id, revoked_at
@@ -117,6 +131,10 @@ CREATE TABLE schedule_group_group_integrity (
     CONSTRAINT fk_schedule_group_group
         FOREIGN KEY (group_id) REFERENCES groups(group_id)
 );
+UPDATE schedule_group
+   SET group_id = 0
+ WHERE group_id NOT IN (SELECT group_id FROM groups);
+
 INSERT INTO schedule_group_group_integrity
 SELECT group_id, schedule_id, name, year, month, day_of_week, day, hour, minute,
        second, is_error_stop, status, target_device, creator, created_at,
@@ -135,6 +153,10 @@ CREATE TABLE users_group_integrity (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_users_group FOREIGN KEY (group_id) REFERENCES groups(group_id)
 );
+UPDATE users
+   SET group_id = 0
+ WHERE group_id IS NULL OR group_id NOT IN (SELECT group_id FROM groups);
+
 INSERT INTO users_group_integrity
 SELECT group_id, user_id, name, password, email, role, created_at FROM users;
 DROP TABLE users;
