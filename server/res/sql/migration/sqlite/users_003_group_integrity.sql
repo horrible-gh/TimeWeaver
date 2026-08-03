@@ -5,6 +5,16 @@
 PRAGMA foreign_keys = OFF;
 BEGIN TRANSACTION;
 
+-- groups_002.sql normally creates the reserved group 0 ("Unknown"), but it
+-- is recorded in the migrations table once applied and will not run again.
+-- If an old, unguarded remove_group (before T0008's fix) already deleted
+-- group 0 on this database, every orphan reassignment below would still
+-- point at a group_id that does not exist (see NR0007, section 3, for why
+-- foreign_keys=OFF lets that happen silently instead of raising). Recreate
+-- it idempotently so this migration does not depend on groups_002.sql's
+-- effects still being present.
+INSERT OR IGNORE INTO groups(group_id, group_name) VALUES (0, 'Unknown');
+
 CREATE TABLE IF NOT EXISTS devices (
     group_id INTEGER NOT NULL DEFAULT 0,
     device_id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -31,10 +31,21 @@ DEALLOCATE PREPARE tw_device_name_index_stmt;
 -- (timeweaver.server.0007.0007-NR) -- insert_device/insert_schedule accepted
 -- a group_id without checking it existed, and remove_group deleted a group
 -- without checking whether devices/users/agent_enrollment_token/
--- schedule_group still pointed at it. Reassign whatever is left over to the
--- reserved group 0 ("Unknown", inserted by groups_002.sql, which always runs
--- before this file) so the FK below always succeeds instead of failing
--- closed on every startup.
+-- schedule_group still pointed at it -- including group 0 itself, on any
+-- database where an old, unguarded remove_group already deleted it before
+-- this migration and T0008's remove_group fix existed. Reassign whatever
+-- is left over to the reserved group 0 ("Unknown"). groups_002.sql
+-- normally creates group 0, but it is recorded in the migrations table
+-- once applied and will not run again, so if group 0 was later deleted it
+-- stays missing and every ADD CONSTRAINT below would keep failing with
+-- 1452 against group 0 itself, the same failure this migration exists to
+-- prevent. Recreate it idempotently so this migration does not depend on
+-- groups_002.sql's effects still being present.
+SET @tw_previous_sql_mode = @@SESSION.sql_mode;
+SET SESSION sql_mode = CONCAT_WS(',', NULLIF(@tw_previous_sql_mode, ''), 'NO_AUTO_VALUE_ON_ZERO');
+INSERT IGNORE INTO groups(group_id, group_name) VALUES (0, 'Unknown');
+SET SESSION sql_mode = @tw_previous_sql_mode;
+
 UPDATE devices d
     LEFT JOIN groups g ON g.group_id = d.group_id
     SET d.group_id = 0
