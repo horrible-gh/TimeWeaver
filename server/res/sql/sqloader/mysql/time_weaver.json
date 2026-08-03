@@ -11,9 +11,14 @@
     "get_execution_logs": "dashboard/execution_logs.sql",
     "groups": {
         "get_groups": "SELECT group_id, group_name, status FROM groups WHERE group_id > 0",
+        "get_group": "SELECT group_id, status FROM groups WHERE group_id = %s",
         "insert_group": "INSERT INTO groups(group_name, creator) VALUES(%s, %s)",
         "update_group": "UPDATE groups SET group_name = %s, status = %s, modifier = %s, modified_at = NOW() WHERE group_id = %s",
-        "remove_group": "DELETE FROM groups WHERE group_id = %s"
+        "remove_group": "DELETE FROM groups WHERE group_id = %s",
+        "reassign_devices_group": "UPDATE devices SET group_id = 0 WHERE group_id = %s",
+        "reassign_users_group": "UPDATE users SET group_id = 0 WHERE group_id = %s",
+        "reassign_agent_enrollment_token_group": "UPDATE agent_enrollment_token SET group_id = 0 WHERE group_id = %s",
+        "reassign_schedule_group_group": "UPDATE schedule_group SET group_id = 0 WHERE group_id = %s"
     },
     "devices": {
         "get_devices": "SELECT group_id, device_id, device_name, status, version, last_login_at, last_heartbeat_at, applied_revision FROM devices WHERE group_id = %s AND device_id > 0",

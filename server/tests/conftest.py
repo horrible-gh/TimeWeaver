@@ -100,6 +100,10 @@ class FakeDbInstance:
         self.fetch_one_calls = []
         self.user_group_id = 5
         self.transactions = []
+        # group_id values that groups.get_group should report as missing, so
+        # tests can simulate insert_device/insert_schedule's group-existence
+        # guard (NR0007) without every other test having to stub a group row.
+        self.missing_group_ids = set()
 
     def execute_query(self, query, params):
         _validate_positional_binding(query, params)
@@ -111,8 +115,14 @@ class FakeDbInstance:
         _validate_positional_binding(query, params)
         call = (query,) if params is _NO_PARAMS else (query, params)
         self.fetch_one_calls.append(call)
-        if " from users " in " ".join(query.lower().split()):
+        normalized = " ".join(query.lower().split())
+        if " from users " in normalized:
             return {"group_id": self.user_group_id}
+        if " from groups " in normalized:
+            group_id = params[0] if params is not _NO_PARAMS else None
+            if group_id in self.missing_group_ids:
+                return None
+            return {"group_id": group_id, "status": "active"}
         return {}
 
     def fetch_all(self, query, params=_NO_PARAMS):

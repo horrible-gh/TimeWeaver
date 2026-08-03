@@ -32,8 +32,20 @@ async def get_devices(
 
 @router.post("/insert_device", dependencies=[Depends(verify_token)])
 async def insert_device(device: DeviceInsertRequest):
-    query = sqloader.load_sql("time_weaver.json", "devices.insert_device")
     device_data = device.model_dump()
+    group = db_instance.fetch_one(
+        sqloader.load_sql("time_weaver.json", "groups.get_group"),
+        (device_data["group_id"],),
+    )
+    if not group:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "group_not_found",
+                "message": "group_id does not reference an existing group",
+            },
+        )
+    query = sqloader.load_sql("time_weaver.json", "devices.insert_device")
     data = (
         device_data["group_id"],
         device_data["device_name"],
