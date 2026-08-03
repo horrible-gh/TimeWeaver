@@ -125,8 +125,8 @@ a {
 .app-body {
   height: 100%;
   display: grid;
-  grid-template-columns: minmax(-webkit-min-content, 175px) minmax(-webkit-max-content, 1fr) minmax(-webkit-min-content, 400px);
-  grid-template-columns: minmax(min-content, 175px) minmax(max-content, 1fr) minmax(min-content, 400px);
+  grid-template-columns: minmax(-webkit-min-content, 175px) minmax(0, 1fr);
+  grid-template-columns: minmax(min-content, 175px) minmax(0, 1fr);
   -moz-column-gap: 4rem;
        column-gap: 4rem;
   padding-top: 2.5rem;

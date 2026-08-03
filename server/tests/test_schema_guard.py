@@ -5,6 +5,8 @@ process boots against a database that has not recorded the filename yet.
 These tests pin down: detection of the narrowed enum, the repair being a
 pure widening, and the guard staying quiet when the schema is healthy.
 """
+from contextlib import contextmanager
+
 import pytest
 
 from schema_guard import CRITICAL_ENUMS, ensure_critical_schema, parse_enum_members
@@ -13,16 +15,24 @@ from schema_guard import CRITICAL_ENUMS, ensure_critical_schema, parse_enum_memb
 class GuardDb:
     """fetch_all serves canned COLUMN_TYPE strings; execute records repairs."""
 
-    def __init__(self, column_types, fail_execute=False, fail_fetch=False):
-        # column_types: {(table, column): "enum('a','b')" or None for absent}
+    def __init__(
+        self,
+        column_types,
+        fail_execute=False,
+        fail_fetch=False,
+        hidden_group={"group_id": 0, "group_name": "Unknown"},
+    ):
         self.column_types = column_types
         self.fail_execute = fail_execute
         self.fail_fetch = fail_fetch
+        self.hidden_group = hidden_group
         self.executed = []
 
     def fetch_all(self, query, params=None):
         if self.fail_fetch:
             raise RuntimeError("simulated inspect failure")
+        if "FROM groups" in query:
+            return [self.hidden_group] if self.hidden_group else []
         column_type = self.column_types.get(tuple(params))
         if column_type is None:
             return []
@@ -33,6 +43,22 @@ class GuardDb:
             raise RuntimeError("simulated ALTER failure")
         self.executed.append((query, commit))
         return {"rowcount": 0}
+
+    @contextmanager
+    def begin_transaction(self):
+        db = self
+
+        class Txn:
+            def fetch_one(self, _query):
+                return {"sql_mode": "STRICT_TRANS_TABLES"}
+
+            def execute(self, query, params=None):
+                if db.fail_execute:
+                    raise RuntimeError("simulated hidden-group repair failure")
+                db.executed.append((query, True))
+                return 1
+
+        yield Txn()
 
 
 HEALTHY = {
@@ -88,6 +114,14 @@ def test_missing_table_is_left_to_the_migrator():
     db = GuardDb({})
     assert ensure_critical_schema(db) == []
     assert db.executed == []
+
+
+def test_missing_hidden_group_is_restored_with_zero_preserving_session_mode():
+    db = GuardDb(HEALTHY, hidden_group=None)
+    assert ensure_critical_schema(db) == ["groups.0"]
+    statements = [query for query, _ in db.executed]
+    assert any("NO_AUTO_VALUE_ON_ZERO" in query for query in statements)
+    assert any("VALUES (0, 'Unknown')" in query for query in statements)
 
 
 def test_failed_repair_is_reported_not_raised():

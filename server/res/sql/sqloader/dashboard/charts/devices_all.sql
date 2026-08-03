@@ -19,8 +19,7 @@ device_status_conv AS (
         END AS status,
         device_id
     FROM devices
-    WHERE group_id = %s
-      AND device_id > 0
+    WHERE device_id > 0
 ),
 device_status_count AS (
     SELECT status, COUNT(*) cnt

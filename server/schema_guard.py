@@ -1,19 +1,7 @@
-"""Startup guard for the enum columns that task saves depend on (B0001).
+"""Startup guards for schema invariants that dashboard and task saves depend on."""
 
-``timeweaver_server_004.sql`` restores the enum members that an older
-CREATE TABLE replayed over, but a migration only runs when the server
-process boots against that database. If the process is never restarted,
-runs from a checkout that lacks the file, or the ``migrations`` table
-already lists the filename without the ALTER being in effect, the column
-stays narrow and every task save fails with
-``(1265, "Data truncated for column 'archive_type' at row 1")``.
-
-This guard re-checks the live schema on every boot and re-applies the
-widening when members are missing. The repair is non-destructive: adding
-members to an enum never rewrites or deletes row data, and re-running it
-after the migration converges on the same definition.
-"""
 import LogAssist.log as logger
+
 
 # (table, column, required members, repair statement). Repair statements
 # must stay in sync with timeweaver_server_004.sql and must only widen.
@@ -36,7 +24,7 @@ CRITICAL_ENUMS = [
 
 
 def parse_enum_members(column_type):
-    """Parse ``enum('a','b')`` into ``{'a', 'b'}``; None for non-enum types."""
+    """Parse an enum definition into its members; return None for non-enums."""
     if isinstance(column_type, bytes):
         column_type = column_type.decode("utf-8", errors="replace")
     if not isinstance(column_type, str):
@@ -52,8 +40,46 @@ def parse_enum_members(column_type):
     return members
 
 
+def ensure_hidden_group(db_instance):
+    """Ensure MariaDB contains the canonical hidden group (0, Unknown)."""
+    try:
+        rows = db_instance.fetch_all(
+            "SELECT group_id, group_name FROM groups WHERE group_id = %s",
+            (0,),
+        )
+    except Exception as exc:
+        logger.error(f"[schema-guard] could not inspect hidden group 0: {exc}")
+        return []
+
+    if rows and rows[0].get("group_name") == "Unknown":
+        return []
+
+    try:
+        with db_instance.begin_transaction() as txn:
+            mode_row = txn.fetch_one("SELECT @@SESSION.sql_mode AS sql_mode")
+            previous_mode = (mode_row or {}).get("sql_mode", "")
+            txn.execute(
+                "SET SESSION sql_mode = CONCAT_WS(',', "
+                "NULLIF(@@SESSION.sql_mode, ''), 'NO_AUTO_VALUE_ON_ZERO')"
+            )
+            txn.execute(
+                "INSERT INTO groups(group_id, group_name) VALUES (0, 'Unknown') "
+                "ON DUPLICATE KEY UPDATE group_name = VALUES(group_name)"
+            )
+            txn.execute("SET SESSION sql_mode = %s", (previous_mode,))
+    except Exception as exc:
+        logger.error(
+            "[schema-guard] FAILED to restore hidden group 0: "
+            f"{exc}. Run groups_002.sql against the server database manually."
+        )
+        return []
+
+    logger.info("[schema-guard] restored hidden group groups.0")
+    return ["groups.0"]
+
+
 def ensure_critical_schema(db_instance):
-    """Verify and repair CRITICAL_ENUMS; returns repaired 'table.column' names."""
+    """Verify and repair critical enums and the canonical hidden group."""
     repaired = []
     for table, column, required, repair_sql in CRITICAL_ENUMS:
         try:
@@ -67,25 +93,24 @@ def ensure_critical_schema(db_instance):
             logger.error(f"[schema-guard] could not inspect {table}.{column}: {exc}")
             continue
         if not rows:
-            # The migrator owns table creation; a missing table is its problem.
             continue
         members = parse_enum_members(rows[0].get("column_type"))
         if members is None or required.issubset(members):
             continue
         missing = sorted(required - members)
         logger.error(
-            f"[schema-guard] {table}.{column} is missing enum members {missing}"
-            " (B0001 symptom: task saves fail with error 1265)."
-            " Re-applying the widening from timeweaver_server_004.sql"
+            f"[schema-guard] {table}.{column} is missing enum members {missing}. "
+            "Re-applying the widening from timeweaver_server_004.sql"
         )
         try:
             db_instance.execute(repair_sql, None, commit=True)
         except Exception as exc:
             logger.error(
-                f"[schema-guard] FAILED to repair {table}.{column}: {exc}."
-                f" Run this against the server database manually: {repair_sql}"
+                f"[schema-guard] FAILED to repair {table}.{column}: {exc}. "
+                f"Run this against the server database manually: {repair_sql}"
             )
             continue
         repaired.append(f"{table}.{column}")
         logger.info(f"[schema-guard] repaired {table}.{column}")
+    repaired.extend(ensure_hidden_group(db_instance))
     return repaired

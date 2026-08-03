@@ -97,6 +97,8 @@ class FakeDbInstance:
         self.rolled_back = []
         self.execute_query_calls = []
         self.fetch_all_calls = []
+        self.fetch_one_calls = []
+        self.user_group_id = 5
         self.transactions = []
 
     def execute_query(self, query, params):
@@ -104,6 +106,14 @@ class FakeDbInstance:
         self.execute_query_calls.append((query, params))
         self.committed.append((query, params))
         return {"rowcount": 1}
+
+    def fetch_one(self, query, params=_NO_PARAMS):
+        _validate_positional_binding(query, params)
+        call = (query,) if params is _NO_PARAMS else (query, params)
+        self.fetch_one_calls.append(call)
+        if " from users " in " ".join(query.lower().split()):
+            return {"group_id": self.user_group_id}
+        return {}
 
     def fetch_all(self, query, params=_NO_PARAMS):
         _validate_positional_binding(query, params)

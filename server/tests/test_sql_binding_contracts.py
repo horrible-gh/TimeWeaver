@@ -3,6 +3,7 @@ import asyncio
 
 import pymysql
 import pytest
+from fastapi import HTTPException
 from sqloader import SQLoader
 
 from conftest import FakeDbInstance, SQLOADER_JSON
@@ -24,7 +25,7 @@ def test_validating_fake_rejects_dict_for_unnamed_placeholder():
 def test_devices_bind_all_four_calls_in_sql_order(make_router_module):
     module, db = make_router_module("devices")
 
-    rows = asyncio.run(module.get_devices(DeviceGetRequest(group_id=5)))
+    rows = asyncio.run(module.get_devices(DeviceGetRequest(group_id=999), user_id="admin"))
     asyncio.run(module.insert_device(DeviceInsertRequest(
         group_id=5, device_name="edge-5", status="active", creator="creator-5"
     )))
@@ -85,7 +86,7 @@ def test_schedule_binds_all_three_corrected_calls(make_router_module):
 
     asyncio.run(module.get_schedule_groups(request))
     asyncio.run(module.remove_schedule(41))
-    asyncio.run(module.get_devices(request))
+    asyncio.run(module.get_devices(request, user_id="admin"))
 
     assert [call[1] for call in db.fetch_all_calls] == [(5,), (5,)]
     assert [params for _, params in db.execute_query_calls] == [(41,)]
@@ -132,3 +133,38 @@ def test_pymysql_mogrify_accepts_corrected_device_bindings():
     assert "group_id = 5" in get_sql
     assert "{'group_id': '5'}" not in get_sql
     assert "VALUES(5, 'edge-5', 'active', 'creator-5')" in insert_sql
+
+
+def test_hidden_group_bypasses_device_and_chart_group_filters(make_router_module):
+    devices_module, devices_db = make_router_module("devices")
+    devices_db.user_group_id = 0
+    asyncio.run(
+        devices_module.get_devices(DeviceGetRequest(group_id=777), user_id="admin")
+    )
+    assert len(devices_db.fetch_all_calls[-1]) == 1
+    assert "group_id = %s" not in devices_db.fetch_all_calls[-1][0]
+
+    charts_module, charts_db = make_router_module("charts")
+    charts_db.user_group_id = 0
+    asyncio.run(charts_module.devices(user_id="admin"))
+    assert len(charts_db.fetch_one_calls[-1]) == 1
+    assert "group_id = %s" not in charts_db.fetch_one_calls[-1][0]
+
+
+def test_duplicate_device_name_is_mapped_to_conflict(make_router_module):
+    module, db = make_router_module("devices")
+
+    def duplicate(_query, _params):
+        raise pymysql.err.IntegrityError(1062, "duplicate")
+
+    db.execute_query = duplicate
+    request = DeviceUpdateRequest(
+        device_id=17,
+        device_name="already-used",
+        status="active",
+        modifier="admin",
+    )
+    with pytest.raises(HTTPException) as raised:
+        asyncio.run(module.update_devices(request))
+    assert raised.value.status_code == 409
+    assert raised.value.detail["code"] == "device_name_conflict"

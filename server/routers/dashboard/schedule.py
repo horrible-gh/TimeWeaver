@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from config import settings, db
 from schemas.schedules import ScheduleInsertRequest, ScheduleUpdateRequest, ScheduleGetRequest  # ✅ Import
+from routers.dashboard.device_scope import requester_group_id
 from routers.login.auth import verify_token
 import LogAssist.log as logger
 from datetime import datetime, timedelta
@@ -88,11 +89,20 @@ async def remove_schedule(schedule_id: int):
     query = sqloader.load_sql("time_weaver.json", "schedules.remove_schedule")
     return db_instance.execute_query(query, (schedule_id,))
 
-@router.get("/get_devices", dependencies=[Depends(verify_token)])
-async def get_devices(schedule: ScheduleGetRequest = Depends()):
-    schedule_data = schedule.model_dump()
-    data = (schedule_data['group_id'],)
-    return db_instance.fetch_all(sqloader.load_sql("time_weaver.json", "schedules.get_devices"), data)
+@router.get("/get_devices")
+async def get_devices(
+    schedule: ScheduleGetRequest = Depends(),
+    user_id: str = Depends(verify_token),
+):
+    group_id = requester_group_id(db_instance, sqloader, user_id)
+    if group_id == 0:
+        return db_instance.fetch_all(
+            sqloader.load_sql("time_weaver.json", "schedules.get_all_devices")
+        )
+    return db_instance.fetch_all(
+        sqloader.load_sql("time_weaver.json", "schedules.get_devices"),
+        (group_id,),
+    )
 
 
 @router.post("/insert_manual_schedule", dependencies=[Depends(verify_token)])

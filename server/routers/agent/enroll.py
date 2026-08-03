@@ -23,10 +23,9 @@ def _envelope(data):
 
 
 def _raise_identity(exc):
-    raise HTTPException(
-        status_code=exc.status_code,
-        detail={"code": exc.code, "message": exc.message},
-    ) from exc
+    detail = {"code": exc.code, "message": exc.message}
+    detail.update(exc.details)
+    raise HTTPException(status_code=exc.status_code, detail=detail) from exc
 
 
 def _raise_common(exc):

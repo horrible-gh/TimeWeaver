@@ -4,9 +4,10 @@ from datetime import datetime, timedelta
 
 
 class IdentityRepositoryError(Exception):
-    def __init__(self, code: str):
+    def __init__(self, code: str, details: dict | None = None):
         super().__init__(code)
         self.code = code
+        self.details = details or {}
 
 
 @dataclass(frozen=True)
@@ -129,12 +130,20 @@ class AgentIdentityRepository:
                 or token_row["used_at"] is not None
                 or token_row["revoked_at"] is not None
                 or token_row["expires_at"] <= now
-                or (
-                    token_row["device_name"] is not None
-                    and token_row["device_name"] != requested_device_name
-                )
             ):
                 raise IdentityRepositoryError("enrollment_token_invalid")
+            if (
+                token_row["device_name"] is not None
+                and token_row["device_name"] != requested_device_name
+            ):
+                raise IdentityRepositoryError(
+                    "enrollment_token_invalid",
+                    {
+                        "reason": "device_name_mismatch",
+                        "expected_device_name": token_row["device_name"],
+                        "actual_device_name": requested_device_name,
+                    },
+                )
 
             group = txn.fetch_one(
                 "SELECT status FROM groups WHERE group_id = %s FOR UPDATE",
@@ -147,16 +156,14 @@ class AgentIdentityRepository:
                 """
                 SELECT device_id, device_name, group_id, status
                   FROM devices
-                 WHERE device_name = %s
+                 WHERE device_name = %s AND group_id = %s
                  FOR UPDATE
                 """,
-                (requested_device_name,),
+                (requested_device_name, token_row["group_id"]),
             )
             if device:
                 if device["status"] != "active":
                     raise IdentityRepositoryError("device_inactive")
-                if device["group_id"] != token_row["group_id"]:
-                    raise IdentityRepositoryError("enrollment_token_invalid")
                 txn.execute(
                     """
                     UPDATE devices
