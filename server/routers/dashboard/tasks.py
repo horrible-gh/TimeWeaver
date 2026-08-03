@@ -3,6 +3,7 @@ from config import settings, db
 from schemas.tasks import TaskInsertRequest, TaskUpdateRequest, TaskGetRequest, ScheduleGetRequest  # ✅ Import
 from routers.login.auth import verify_token
 from services.blocking import BlockingQueueFull, RETRY_AFTER, run_blocking
+from services.task_contract import normalize_task_row
 import LogAssist.log as logger
 import uuid
 
@@ -34,6 +35,22 @@ def to_bool(value, default=True):
         return value != 0
     return str(value).strip().lower() not in ("0", "false", "no", "")
 
+
+def _normalize_task_row(row: dict) -> dict:
+    normalized = normalize_task_row(row)
+    if (
+        normalized.get("task_type") == "archive"
+        and normalized.get("archive_type") != "zip"
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_archive_type",
+                "message": "archive_type must be zip for archive tasks",
+            },
+        )
+    return normalized
+
 @router.get("/get_tasks", dependencies=[Depends(verify_token)])
 async def get_Tasks(task: TaskGetRequest = Depends()):
     return await _db_call(
@@ -51,7 +68,7 @@ async def get_schedule_groups(schedule: ScheduleGetRequest = Depends()):
 
 @router.post("/insert_task", dependencies=[Depends(verify_token)])
 async def insert_task(task: TaskInsertRequest):
-    row = task.model_dump()
+    row = _normalize_task_row(task.model_dump())
     detail_id = uuid.uuid4()
 
     detail_query = sqloader.load_sql("time_weaver.json", "tasks.insert_schedule_detail")
@@ -101,7 +118,7 @@ async def insert_task(task: TaskInsertRequest):
 
 @router.put("/update_task", dependencies=[Depends(verify_token)])
 async def update_tasks(task: TaskUpdateRequest):
-    row = task.model_dump()
+    row = _normalize_task_row(task.model_dump())
     detail_query = sqloader.load_sql("time_weaver.json", "tasks.update_schedule_detail")
     schedule_detail_data = {
         "schedule_name": row.get("task_name"),
