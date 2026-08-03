@@ -101,6 +101,7 @@ import { getRequest } from "@api";
 import { ref, computed, onMounted } from 'vue';
 import BoardPagination from '../../misc/BoardPagination.vue';
 import ModalComponent from "../../misc/ModalComponent.vue"; // ✅ Import modal component
+import { parseServerTime } from "@/dashboard/utils/deviceStatus";
 
 const posts = ref([]); // ✅ Initial value is an empty array
 const isLoading = ref(true);
@@ -168,8 +169,8 @@ const showSchedule = (task_type, command, source_path, destination_path) => {
 
 // ✅ Date conversion function
 const formatDate = (dateString) => {
-  if (!dateString) return "-";
-  const date = new Date(dateString);
+  const date = parseServerTime(dateString);
+  if (!date) return "-";
   return date.toLocaleString("ja-JP", {
     year: "numeric",
     month: "2-digit",

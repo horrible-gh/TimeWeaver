@@ -121,6 +121,7 @@ import { getRequest, putRequest } from "@api";
 import BoardPagination from '../../misc/BoardPagination.vue';
 import ModalComponent from "../../misc/ModalComponent.vue";
 import { useI18n } from "vue-i18n";
+import { parseServerTime } from "@/dashboard/utils/deviceStatus";
 const { t } = useI18n();
 
 const posts = ref([]);
@@ -163,8 +164,8 @@ onMounted(fetchPosts);
 
 // 날짜 변환 함수
 const formatDate = (dateString) => {
-  if (!dateString) return "-";
-  const date = new Date(dateString);
+  const date = parseServerTime(dateString);
+  if (!date) return "-";
   return date.toLocaleString("ja-JP", {
     year: "numeric",
     month: "2-digit",
@@ -182,9 +183,9 @@ const openEditModal = (post) => {
   });
   
   // datetime-local 형식으로 변환
-  if (post.schedule_datetime) {
-    const date = new Date(post.schedule_datetime);
-    formControl.value.schedule_datetime = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+  const parsedDatetime = parseServerTime(post.schedule_datetime);
+  if (parsedDatetime) {
+    formControl.value.schedule_datetime = new Date(parsedDatetime.getTime() - parsedDatetime.getTimezoneOffset() * 60000)
       .toISOString()
       .slice(0, 16);
   }

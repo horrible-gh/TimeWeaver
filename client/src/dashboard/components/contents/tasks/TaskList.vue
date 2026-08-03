@@ -54,7 +54,7 @@
           <td>{{ post.schedule_group_name }}</td>
           <td>{{ post.task_name }}</td>
           <td>{{ post.status }}</td>
-          <td>{{ post.lastest_start_time }}</td>
+          <td>{{ formatDate(post.lastest_start_time) }}</td>
           <td>
             <div class="button-group">
               <button class="edit-button" @click="openEditModal(post)">
@@ -236,6 +236,7 @@ import { getRequest, postRequest, putRequest, deleteRequest, useSort } from "@ap
 import ModalComponent from "../../misc/ModalComponent.vue"; // ✅ 공통 모달 컴포넌트
 import BoardPagination from "../../misc/BoardPagination.vue";
 import { useI18n } from "vue-i18n";
+import { parseServerTime } from "@/dashboard/utils/deviceStatus";
 const { t } = useI18n(); // ✅ i18n 함수 가져오기
 
 const posts = ref([]); // ✅ 초기값 빈 배열
@@ -288,6 +289,20 @@ const fetchTasks = async () => {
 };
 
 onMounted(fetchTasks);
+
+// ✅ 날짜 변환 함수
+const formatDate = (dateString) => {
+  const date = parseServerTime(dateString);
+  if (!date) return "-";
+  return date.toLocaleString("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+};
 
 // ✅ 유저 ID를 저장할 반응형 변수
 const userId = ref("");
