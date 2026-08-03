@@ -169,6 +169,31 @@ def test_unexpected_exception_logs_type_and_message_without_contract_change(
     )
 
 
+class InvalidSnapshotClient:
+    def set_access_token(self, token):
+        self.token = token
+
+    def get_schedule_snapshot(self, *args, **kwargs):
+        return {
+            "envelope": {"schema_version": "0"},
+            "etag": 'W/"invalid"',
+        }
+
+
+def test_snapshot_validation_reason_is_published_in_status(
+    tmp_path, captured_logs, monkeypatch
+):
+    status_path = tmp_path / "agent_status.json"
+    monkeypatch.setattr(tw.service, "report_event_once", lambda *args: None)
+    runtime = make_runtime(InvalidSnapshotClient(), status_path=status_path)
+
+    assert runtime.snapshot_once() is False
+
+    payload = json.loads(status_path.read_text(encoding="utf-8"))
+    assert payload["channels"]["snapshot"]["last_reason"] == "schema_version mismatch"
+    assert "snapshot:sync_error" in payload["reasons"]
+
+
 # --- T6: status file lifecycle ---
 
 class FlakyHeartbeatClient:

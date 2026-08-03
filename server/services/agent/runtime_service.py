@@ -12,6 +12,7 @@ from repositories.agent_runtime import (
 )
 from schemas.agent_runtime import HeartbeatRequest
 from services.agent.identity_service import DeviceIdentity
+from services.task_contract import normalize_task_row
 
 
 SCHEMA_VERSION = "1"
@@ -176,22 +177,24 @@ class AgentRuntimeService:
                     "sequence": sequence,
                     "exec_sequence": dense_rank[schedule_id],
                     "retry_count": int(row.get("retry_count") or 0),
-                    "task": {
-                        "task_type": row["task_type"],
-                        "command": row.get("command"),
-                        "archive_type": row.get("archive_type"),
-                        "source_path": row.get("source_path"),
-                        "error_on_missing_source": bool(
-                            row.get("error_on_missing_source")
-                        ),
-                        "destination_path": row.get("destination_path"),
-                        "date_format": row.get("date_format"),
-                        "target_date_format": row.get("target_date_format"),
-                        "destination_date_format": row.get(
-                            "destination_date_format"
-                        ),
-                        "house_keep_days": row.get("house_keep_days"),
-                    },
+                    "task": normalize_task_row(
+                        {
+                            "task_type": row["task_type"],
+                            "command": row.get("command"),
+                            "archive_type": row.get("archive_type"),
+                            "source_path": row.get("source_path"),
+                            "error_on_missing_source": bool(
+                                row.get("error_on_missing_source")
+                            ),
+                            "destination_path": row.get("destination_path"),
+                            "date_format": row.get("date_format"),
+                            "target_date_format": row.get("target_date_format"),
+                            "destination_date_format": row.get(
+                                "destination_date_format"
+                            ),
+                            "house_keep_days": row.get("house_keep_days"),
+                        }
+                    ),
                 }
             )
 

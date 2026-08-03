@@ -122,6 +122,77 @@ class TestSchemaCarriesDateFormats:
         assert row["archive_type"] == "null"
 
 
+class TestTaskContractNormalization:
+    @pytest.mark.parametrize(
+        "payload,expected",
+        [
+            (
+                {
+                    "task_type": "command", "command": "echo ok",
+                    "archive_type": "null", "source_path": "",
+                    "destination_path": "/ignored", "house_keep_days": 10,
+                },
+                {
+                    "command": "echo ok", "archive_type": None,
+                    "source_path": None, "destination_path": None,
+                    "house_keep_days": None,
+                },
+            ),
+            (
+                {
+                    "task_type": "copy", "command": "null",
+                    "archive_type": "zip", "source_path": "/source",
+                    "destination_path": "/destination", "house_keep_days": 5,
+                },
+                {
+                    "command": None, "archive_type": None,
+                    "source_path": "/source", "destination_path": "/destination",
+                    "house_keep_days": None,
+                },
+            ),
+            (
+                {
+                    "task_type": "archive", "command": "ignored",
+                    "archive_type": "zip", "source_path": "/source",
+                    "destination_path": "/destination", "house_keep_days": 5,
+                },
+                {
+                    "command": None, "archive_type": "zip",
+                    "source_path": "/source", "destination_path": "/destination",
+                    "house_keep_days": None,
+                },
+            ),
+            (
+                {
+                    "task_type": "housekeep", "command": "",
+                    "archive_type": "null", "source_path": "/ignored",
+                    "destination_path": "/destination", "house_keep_days": 30,
+                },
+                {
+                    "command": None, "archive_type": None,
+                    "source_path": None, "destination_path": "/destination",
+                    "house_keep_days": 30,
+                },
+            ),
+        ],
+    )
+    def test_normalizes_all_task_types(self, make_tasks_module, payload, expected):
+        tasks_module, _ = make_tasks_module()
+        normalized = tasks_module._normalize_task_row(payload)
+        for field, value in expected.items():
+            assert normalized[field] == value
+
+    @pytest.mark.parametrize("archive_type", [None, "", "null", "tar"])
+    def test_archive_requires_zip(self, make_tasks_module, archive_type):
+        tasks_module, _ = make_tasks_module()
+        with pytest.raises(tasks_module.HTTPException) as exc:
+            tasks_module._normalize_task_row(
+                {"task_type": "archive", "archive_type": archive_type}
+            )
+        assert exc.value.status_code == 422
+        assert exc.value.detail["code"] == "invalid_archive_type"
+
+
 class TestInsertTaskTransaction:
     def test_both_rows_commit_together(self, make_tasks_module):
         tasks_module, db = make_tasks_module()
@@ -163,6 +234,21 @@ class TestInsertTaskTransaction:
         schedule_params = find(db.committed, INSERT_SCHEDULE_DETAIL)
         task_params = find(db.committed, INSERT_TASK)
         assert schedule_params[0] == task_params[0]
+
+    def test_command_sentinel_and_forbidden_fields_are_stored_as_null(
+        self, make_tasks_module
+    ):
+        tasks_module, db = make_tasks_module()
+
+        asyncio.run(
+            tasks_module.insert_task(TaskInsertRequest(**valid_insert_payload()))
+        )
+
+        task_params = find(db.committed, INSERT_TASK)
+        assert task_params[3] is None
+        assert task_params[4] is None
+        assert task_params[6] is None
+        assert task_params[10] is None
 
     def test_error_on_missing_source_no_is_stored_false(self, make_tasks_module):
         tasks_module, db = make_tasks_module()
@@ -220,9 +306,8 @@ class TestUpdateTaskTransaction:
         asyncio.run(tasks_module.update_tasks(TaskUpdateRequest(**valid_update_payload())))
 
         task_params = find(db.committed, UPDATE_TASK)
-        assert "%Y%m%d" in task_params
-        assert "%Y%m" in task_params
-        assert task_params.count(None) == 0
+        assert task_params[7] == "%Y%m%d"
+        assert task_params[8] == "%Y%m"
 
 
 class TestRemoveTaskTransaction:

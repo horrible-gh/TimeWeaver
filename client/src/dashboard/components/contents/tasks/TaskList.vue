@@ -110,10 +110,10 @@
             </select>
           </div>
 
-          <div class="form-field">
+          <div v-if="formControl.task_type === 'archive'" class="form-field">
             <label>{{ $t('task_archive_type') }}</label>
             <select v-model="formControl.archive_type">
-              <option value="null">{{ $t('task_archive_type_null') }}</option>
+              <option value="">{{ $t('task_archive_type_null') }}</option>
               <option value="zip">{{ $t('task_archive_type_zip') }}</option>
             </select>
           </div>
@@ -304,7 +304,7 @@ const openAddScheduleModal = () => {
   Object.assign(formControl.value, {
     schedule_name: "",
     status: "active",
-    archive_type: "null",
+    archive_type: null,
     task_type: "command",
     error_on_missing_source: "1",
     creator: userId.value || "Guest",  // ✅ 수정

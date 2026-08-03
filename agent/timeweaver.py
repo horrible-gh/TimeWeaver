@@ -348,8 +348,9 @@ class AgentRuntime:
             self._snapshot_recovered()
             self._channel_succeeded("snapshot")
             return True
-        except SnapshotValidationError:
+        except SnapshotValidationError as exc:
             cause = _snapshot_failure_key(response)
+            reason = str(exc)
             self._snapshot_failure_cause = cause
             service.report_event_once(
                 "sync_error",
@@ -358,9 +359,9 @@ class AgentRuntime:
                 cause,
             )
             self.state_manager.snapshot_failed("sync_error")
-            self._note_failure_reason("snapshot", "sync_error")
+            self._note_failure_reason("snapshot", reason)
             self._channel_failed("snapshot")
-            self._log_channel_failure("snapshot", "sync_error")
+            self._log_channel_failure("snapshot", reason)
         except ApiClientError as exc:
             self._record_failure("snapshot", exc.code)
             self._channel_failed("snapshot", exc.retry_after)
