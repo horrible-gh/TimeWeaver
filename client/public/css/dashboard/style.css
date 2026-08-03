@@ -473,32 +473,6 @@ a {
   transform: translateY(-50%);
 }
 
-.dropdown-field {
-  display: flex;
-  flex-grow: 1;
-  position: relative;
-}
-.dropdown-field select {
-  width: 100%;
-  padding-top: 0.5rem;
-  padding-bottom: 0.5rem;
-  border: 0;
-  border-bottom: 1px solid var(--c-gray-600);
-  background-color: transparent;
-  padding-right: 1.5rem;
-  -webkit-appearance: none;
-     -moz-appearance: none;
-          appearance: none;
-  color: var(--c-text-tertiary);
-  width: 100%;
-}
-.dropdown-field i {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
 .flat-button {
   border-radius: 6px;
   background-color: var(--c-gray-700);
@@ -722,96 +696,6 @@ a {
     width: 100%;
     justify-content: flex-start;
   }
-}
-
-.device-groups {
-    padding-top: 0.5vw;
-    color: white;
-}
-
-.payment-section > h2 {
-  font-size: 1.5rem;
-}
-
-.payment-section-header {
-  display: flex;
-  align-items: center;
-  margin-top: 1rem;
-}
-.payment-section-header p {
-  color: var(--c-text-tertiary);
-  font-size: 0.875rem;
-}
-.payment-section-header div {
-  padding-left: 1rem;
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-}
-.payment-section-header div > * + * {
-  margin-left: 0.5rem;
-}
-
-.card-button {
-  font-size: 1.75vw;
-  display: flex;
-  width: 50px;
-  height: 34px;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  background-color: transparent;
-  transition: 0.25s ease;
-  border-radius: 4px;
-  border: 2px solid var(--c-gray-600);
-  color: var(--c-text-primary);
-  cursor: pointer;
-}
-.card-button.mastercard svg {
-  max-height: 15px;
-}
-.card-button:focus, .card-button:hover, .card-button.active {
-  color: var(--c-gray-800);
-  background-color: var(--c-white);
-  border-color: var(--c-white);
-}
-
-.faq {
-  margin-top: 1.5rem;
-  display: flex;
-  flex-direction: column;
-}
-.faq p {
-  color: var(--c-text-tertiary);
-  font-size: 0.875rem;
-}
-.faq div {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  padding-bottom: 0.75rem;
-  border-top: 1px solid var(--c-gray-600);
-  border-bottom: 1px solid var(--c-gray-600);
-  font-size: 0.875rem;
-  display: flex;
-  align-items: center;
-}
-.faq div label {
-  padding-right: 1rem;
-  margin-right: 1rem;
-  border-right: 1px solid var(--c-gray-600);
-}
-.faq div input {
-  border: 0;
-  background-color: transparent;
-  padding: 0.25em 0;
-  width: 100%;
-  color: #bbbbbb;
-}
-
-.payment-section-footer {
-  display: flex;
-  align-items: center;
-  margin-top: 1.5rem;
 }
 
 .save-button {
