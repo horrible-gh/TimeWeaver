@@ -1,43 +1,71 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from config import settings, db
-from schemas.devices import DeviceInsertRequest, DeviceUpdateRequest, DeviceGetRequest  # ✅ Import
+from fastapi import APIRouter, Depends, HTTPException
+from pymysql.err import IntegrityError
+
+from config import db
+from routers.dashboard.device_scope import requester_group_id
 from routers.login.auth import verify_token
+from schemas.devices import DeviceGetRequest, DeviceInsertRequest, DeviceUpdateRequest
+
 
 db_instance = db.db_instance
 sqloader = db.sqloader
-
 router = APIRouter()
 
-@router.get("/get_devices", dependencies=[Depends(verify_token)])
-async def get_devices(device: DeviceGetRequest = Depends()):
-    device_data = device.model_dump()
-    data = (device_data['group_id'],)
-    return db_instance.fetch_all(sqloader.load_sql("time_weaver.json", "devices.get_devices"), data)
+
+@router.get("/get_devices")
+async def get_devices(
+    device: DeviceGetRequest = Depends(),
+    user_id: str = Depends(verify_token),
+):
+    # device.group_id remains accepted for API compatibility, but it never
+    # controls visibility. Scope comes from the authenticated user.
+    group_id = requester_group_id(db_instance, sqloader, user_id)
+    if group_id == 0:
+        return db_instance.fetch_all(
+            sqloader.load_sql("time_weaver.json", "devices.get_all_devices")
+        )
+    return db_instance.fetch_all(
+        sqloader.load_sql("time_weaver.json", "devices.get_devices"),
+        (group_id,),
+    )
+
 
 @router.post("/insert_device", dependencies=[Depends(verify_token)])
 async def insert_device(device: DeviceInsertRequest):
     query = sqloader.load_sql("time_weaver.json", "devices.insert_device")
     device_data = device.model_dump()
     data = (
-        device_data['group_id'],
-        device_data['device_name'],
-        device_data['status'],
-        device_data['creator'],
+        device_data["group_id"],
+        device_data["device_name"],
+        device_data["status"],
+        device_data["creator"],
     )
     return db_instance.execute_query(query, data)
+
 
 @router.put("/update_device", dependencies=[Depends(verify_token)])
 async def update_devices(device: DeviceUpdateRequest):
     query = sqloader.load_sql("time_weaver.json", "devices.update_device")
     device_data = device.model_dump()
-    print(device_data)
     data = (
-        device_data['device_name'],
-        device_data['status'],
-        device_data['modifier'],
-        device_data['device_id'],
+        device_data["device_name"],
+        device_data["status"],
+        device_data["modifier"],
+        device_data["device_id"],
     )
-    return db_instance.execute_query(query, data)
+    try:
+        return db_instance.execute_query(query, data)
+    except IntegrityError as exc:
+        if exc.args and exc.args[0] == 1062:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "device_name_conflict",
+                    "message": "Device name is already used in this group",
+                },
+            ) from exc
+        raise
+
 
 @router.delete("/remove_device/{device_id}", dependencies=[Depends(verify_token)])
 async def remove_device(device_id: int):

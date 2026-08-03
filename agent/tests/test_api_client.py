@@ -81,6 +81,20 @@ def test_error_code_drives_classification(status, code, error_type):
     assert caught.value.code == code
 
 
+def test_fastapi_detail_reports_enrollment_name_mismatch():
+    detail = {
+        "code": "enrollment_token_invalid",
+        "reason": "device_name_mismatch",
+        "expected_device_name": "token-device",
+        "actual_device_name": "agent-device",
+    }
+    transport = MockTransport(MockResponse(status_code=403, payload={"detail": detail}))
+    with pytest.raises(EnrollmentTokenInvalidError) as caught:
+        client(transport).enroll("enrollment", "agent-device")
+    assert "token: token-device / agent: agent-device" in str(caught.value)
+    assert caught.value.details == detail
+
+
 def test_error_code_wins_over_http_status():
     transport = MockTransport(MockResponse(status_code=400, payload=error_envelope("device_inactive")))
     with pytest.raises(DeviceInactiveError):

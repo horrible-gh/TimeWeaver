@@ -15,10 +15,18 @@ from .models import AccessCredential, ModelValidationError
 class ApiClientError(RuntimeError):
     """Base API error with a protocol error code and no secret-bearing payload."""
 
-    def __init__(self, message: str, *, code: str, retry_after: float | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        retry_after: float | None = None,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.retry_after = retry_after
+        self.details = dict(details or {})
 
 
 class CommunicationError(ApiClientError):
@@ -343,13 +351,13 @@ class AgentApiClient:
                     return envelope, response.headers
                 return envelope["data"]
 
-            code, retry_after = self._decode_error(response)
+            code, retry_after, details = self._decode_error(response)
             retryable = code in {"rate_limited", "server_error", "unavailable"}
             if retryable and attempt < self._retries:
                 delay = retry_after if retry_after is not None else self._backoff * (2**attempt)
                 self._sleep(delay)
                 continue
-            self._raise_protocol_error(code, retry_after)
+            self._raise_protocol_error(code, retry_after, details)
 
         raise CommunicationError("server communication failed", code="unavailable")
 
@@ -371,30 +379,50 @@ class AgentApiClient:
             raise MalformedResponseError("response envelope is missing server_time")
         return payload
 
-    def _decode_error(self, response: Response) -> tuple[str, float | None]:
+    def _decode_error(
+        self, response: Response
+    ) -> tuple[str, float | None, Mapping[str, Any]]:
         fallback = self._fallback_error_code(response.status_code)
         retry_after = self._retry_after(response.headers)
         try:
             payload = response.json()
         except (TypeError, ValueError):
-            return fallback, retry_after
+            return fallback, retry_after, {}
         if not isinstance(payload, Mapping):
-            return fallback, retry_after
+            return fallback, retry_after, {}
         error = payload.get("error")
+        if not isinstance(error, Mapping):
+            error = payload.get("detail")
         if not isinstance(error, Mapping) or not isinstance(error.get("code"), str):
-            return fallback, retry_after
+            return fallback, retry_after, {}
         body_retry = error.get("retry_after")
         if retry_after is None and isinstance(body_retry, (int, float)) and not isinstance(body_retry, bool):
             retry_after = max(float(body_retry), 0.0)
-        return error["code"], retry_after
+        return error["code"], retry_after, error
 
-    def _raise_protocol_error(self, code: str, retry_after: float | None) -> None:
+    def _raise_protocol_error(
+        self,
+        code: str,
+        retry_after: float | None,
+        details: Mapping[str, Any],
+    ) -> None:
         if code in {"invalid_token", "token_expired"}:
             raise AuthenticationError("agent token rejected", code=code)
         if code in {"device_inactive", "device_revoked"}:
             raise DeviceInactiveError("device is not active", code=code)
         if code == "enrollment_token_invalid":
-            raise EnrollmentTokenInvalidError("enrollment token rejected", code=code)
+            if details.get("reason") == "device_name_mismatch":
+                expected = details.get("expected_device_name", "")
+                actual = details.get("actual_device_name", "")
+                raise EnrollmentTokenInvalidError(
+                    f"enrollment device name mismatch "
+                    f"(token: {expected} / agent: {actual})",
+                    code=code,
+                    details=details,
+                )
+            raise EnrollmentTokenInvalidError(
+                "enrollment token rejected", code=code, details=details
+            )
         if code == "schema_mismatch":
             raise SchemaMismatchError("contract schema mismatch", code=code)
         if code == "rate_limited":

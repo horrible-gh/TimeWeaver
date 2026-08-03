@@ -21,11 +21,18 @@ REFRESH_TTL_DAYS = 90
 
 
 class IdentityError(Exception):
-    def __init__(self, status_code: int, code: str, message: str):
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        details: dict | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
+        self.details = details or {}
 
 
 @dataclass(frozen=True)
@@ -237,7 +244,7 @@ class AgentIdentityService:
             "not_found": (404, "Enrollment token not found"),
         }
         status, message = mapping.get(exc.code, (503, "Identity storage unavailable"))
-        raise IdentityError(status, exc.code, message) from exc
+        raise IdentityError(status, exc.code, message, exc.details) from exc
 
 
 def get_identity_service() -> AgentIdentityService:

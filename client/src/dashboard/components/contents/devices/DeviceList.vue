@@ -1,50 +1,97 @@
 <template>
-  <div class="board-container">
-    <h2>{{ $t('sub_devices') }}</h2>
+  <section class="board-container device-board">
+    <div class="section-heading">
+      <div>
+        <h2>{{ $t('devices_tab_status') }}</h2>
+        <p>{{ $t('devices_page_desc') }}</p>
+      </div>
+      <div class="top-actions">
+        <div>
+          <button class="add-button" @click="openAddDeviceModal">
+            <i class="ph ph-plus"></i> {{ $t('btn_add_device_manual') }}
+          </button>
+          <small>{{ $t('hint_add_device_manual') }}</small>
+        </div>
+        <div v-if="showEnrollment">
+          <button class="enroll-button" @click="$emit('open-enrollment')">
+            <i class="ph ph-key"></i> {{ $t('btn_enroll_agent') }}
+          </button>
+          <small>{{ $t('hint_enroll_agent') }}</small>
+        </div>
+      </div>
+    </div>
 
-    <!-- ✅ Add device button -->
-    <button class="add-button" @click="openAddDeviceModal">
-      <i class="ph ph-plus"></i> {{ $t('btn_add') }}
-    </button>
+    <div class="list-controls">
+      <input v-model="rawSearch" type="search" :placeholder="$t('msg_search_device_name')" />
+      <label>
+        <span>{{ $t('label_filter_status') }}</span>
+        <select v-model="statusFilter">
+          <option value="all">{{ $t('select_box_all') }}</option>
+          <option value="online">{{ $t('device_state_online') }}</option>
+          <option value="attention">{{ $t('device_state_attention') }}</option>
+          <option value="offline">{{ $t('device_state_offline') }}</option>
+        </select>
+      </label>
+      <button class="ghost-button" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
+      <button class="ghost-button" @click="$emit('refresh')">{{ $t('btn_refresh') }}</button>
+    </div>
 
-    <!-- ✅ Device list -->
-    <table v-if="paginatedPosts.length > 0" class="board-table">
-      <thead>
-        <tr>
-          <th class="title1" @click="sort('device_id')">ID <span v-if="sortKey === 'device_id'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title2" @click="sort('device_name')">{{ $t('list_label_device') }} <span v-if="sortKey === 'device_name'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title3" @click="sort('status')">{{ $t('list_label_status') }} <span v-if="sortKey === 'status'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title4" @click="sort('version')">{{ $t('list_label_version') }} <span v-if="sortKey === 'version'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title5" @click="sort('last_login_at')">{{ $t('list_label_last_login_at') }} <span v-if="sortKey === 'last_login_at'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title6" @click="sort('last_heartbeat_at')">{{ $t('list_label_last_heartbeat_at') }} <span v-if="sortKey === 'last_heartbeat_at'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title7">{{ $t('list_label_actions') }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="post in paginatedPosts" :key="post.device_id">
-          <td>{{ post.device_id }}</td>
-          <td>{{ post.device_name }}</td>
-          <td>{{ post.status }}</td>
-          <td>{{ post.version }}</td>
-          <td>{{ post.last_login_at }}</td>
-          <td>{{ post.last_heartbeat_at }}</td>
-          <td>
-            <div class="button-group">
-              <button class="edit-button" @click="openEditDeviceModal(post)">
-                <i class="ph ph-pencil-simple"></i> {{ $t('btn_edit') }}
-              </button>
-              <button class="delete-button" @click="deleteDevice(post.device_id)">
-                <i class="ph ph-trash"></i> {{ $t('btn_remove') }}
-              </button>
-            </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-if="loading" class="empty-state">{{ $t('msg_loading') }}</div>
+    <div v-else-if="error" class="empty-state error-state">
+      <p>{{ $t('msg_list_load_failed') }}</p>
+      <button class="ghost-button" @click="$emit('refresh')">{{ $t('btn_retry') }}</button>
+    </div>
+    <div v-else-if="devices.length === 0" class="empty-state">
+      <p>{{ $t('msg_no_devices') }}</p>
+      <p>{{ $t('msg_no_devices_hint') }}</p>
+      <button v-if="showEnrollment" class="enroll-button" @click="$emit('open-enrollment')">{{ $t('btn_enroll_agent') }}</button>
+    </div>
+    <div v-else-if="view.totalCount === 0" class="empty-state">
+      <p>{{ $t('msg_no_filtered_devices') }}</p>
+      <button class="ghost-button" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
+    </div>
 
-    <BoardPagination v-if="paginatedPosts.length > 0" :total="posts.length" :perPage="perPage" @page-changed="changePage" />
+    <div v-else class="table-scroll">
+      <table class="board-table device-table">
+        <thead>
+          <tr>
+            <th class="title-device" @click="sort('device_name')">{{ $t('list_label_device') }} {{ sortMark('device_name') }}</th>
+            <th class="title-status" @click="sort('status')">{{ $t('list_label_status') }} {{ sortMark('status') }}</th>
+            <th class="title-group">{{ $t('list_label_group') }}</th>
+            <th class="title-version" @click="sort('version')">{{ $t('list_label_version') }} {{ sortMark('version') }}</th>
+            <th class="title-login" @click="sort('last_login_at')">{{ $t('list_label_last_login_at') }} {{ sortMark('last_login_at') }}</th>
+            <th class="title-heartbeat" @click="sort('last_heartbeat_at')">{{ $t('list_label_last_heartbeat_at') }} {{ sortMark('last_heartbeat_at') }}</th>
+            <th class="title-actions">{{ $t('list_label_actions') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="device in view.rows" :key="device.device_id" :class="{ highlighted: String(device.device_id) === String(highlightDeviceId) }" :style="{ '--highlight-duration': NEW_DEVICE_HIGHLIGHT_MS + 'ms' }">
+            <td :data-label="$t('list_label_device')" class="device-name">{{ device.device_name }}</td>
+            <td :data-label="$t('list_label_status')">
+              <span class="state-badge" :class="'state-' + state(device)">{{ $t('device_state_' + state(device)) }}</span>
+              <small class="state-reason">{{ reasonText(device) }}</small>
+            </td>
+            <td :data-label="$t('list_label_group')" class="optional-mobile">{{ groupName || userGroupId }}</td>
+            <td :data-label="$t('list_label_version')" class="optional-mobile">{{ device.version || '—' }}</td>
+            <td :data-label="$t('list_label_last_login_at')" class="optional-mobile" :title="device.last_login_at || ''">{{ relative(device.last_login_at) }}</td>
+            <td :data-label="$t('list_label_last_heartbeat_at')" :title="device.last_heartbeat_at || ''">{{ relative(device.last_heartbeat_at) }}</td>
+            <td :data-label="$t('list_label_actions')">
+              <div class="button-group">
+                <button class="edit-button" @click="openEditDeviceModal(device)">{{ $t('btn_edit') }}</button>
+                <button class="delete-button" @click="removeDevice(device.device_id)">{{ $t('btn_remove') }}</button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <BoardPagination
+        :key="paginationKey"
+        :total="view.totalCount"
+        :perPage="DEVICE_PAGE_SIZE"
+        @page-changed="currentPage = $event"
+      />
+    </div>
 
-    <!-- ✅ Use shared modal -->
     <ModalComponent
       :isOpen="isModalOpen"
       :title="isEditMode ? $t('list_label_device') + ' ' + $t('btn_edit') : $t('list_label_device') + ' ' + $t('btn_add')"
@@ -54,171 +101,176 @@
     >
       <div class="modal-form">
         <label>{{ $t('list_label_device') }}</label>
-        <input type="text" v-model="formdevice.device_name" :placeholder="$t('msg_enter_device_name')" />
-
+        <input v-model="deviceForm.device_name" type="text" :placeholder="$t('msg_enter_device_name')" />
         <label>{{ $t('list_label_status') }}</label>
-        <select v-model="formdevice.status">
+        <select v-model="deviceForm.status">
           <option value="active">{{ $t('label_active') }}</option>
           <option value="inactive">{{ $t('label_inactive') }}</option>
         </select>
-
-        <input type="hidden" v-model="formdevice.creator" />
-        <input type="hidden" v-model="formdevice.modifier" />
+        <p v-if="actionError" class="inline-error">{{ $t(actionError) }}</p>
       </div>
     </ModalComponent>
-
-  </div>
+  </section>
 </template>
 
-
-
 <script setup>
+import { computed, defineEmits, defineProps, onUnmounted, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { ref, computed, onMounted } from "vue";
-import { getRequest, postRequest, putRequest, deleteRequest, useSort } from "@api";
-import ModalComponent from "../../misc/ModalComponent.vue"; // ✅ Shared modal component
-import BoardPagination from "../../misc/BoardPagination.vue";
+import { deleteRequest, postRequest, putRequest } from "@api";
+import BoardPagination from "@/dashboard/components/misc/BoardPagination.vue";
+import ModalComponent from "@/dashboard/components/misc/ModalComponent.vue";
+import { DEVICE_PAGE_SIZE, NEW_DEVICE_HIGHLIGHT_MS, SEARCH_DEBOUNCE_MS } from "@/dashboard/constants/enrollment";
+import { computeLiveness, livenessReason, relativeTime, visibleDevices } from "@/dashboard/utils/deviceStatus";
 
-const { t } = useI18n(); // ✅ Get i18n function
+const props = defineProps({
+  devices: { type: Array, default: () => [] },
+  loading: Boolean,
+  error: { type: [Boolean, Object], default: false },
+  groupName: { type: [String, Number], default: "" },
+  highlightDeviceId: { type: [String, Number], default: null },
+  now: { type: [Date, Number], default: () => new Date() },
+  showEnrollment: Boolean,
+});
+const emit = defineEmits(["refresh", "saved", "removed", "open-enrollment"]);
+const { t } = useI18n();
 
-const posts = ref([]); // ✅ Initial value is an empty array
-const { sortKey, sortOrder, sort } = useSort(posts);
-const isLoading = ref(true);
+let user = {};
+try { user = JSON.parse(localStorage.getItem("user") || "{}"); } catch (error) { user = {}; }
+const userGroupId = user.group_id == null ? "" : user.group_id;
+const rawSearch = ref("");
+const search = ref("");
+const statusFilter = ref("all");
+const sortKey = ref("device_name");
+const sortDir = ref("asc");
 const currentPage = ref(1);
-const perPage = ref(7);
+let searchTimer = null;
 
-// const searchdevice = ref("");
-// const selectedStatus = ref("");
+watch(rawSearch, (value) => {
+  window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => { search.value = value; }, SEARCH_DEBOUNCE_MS);
+});
+watch([search, statusFilter], () => { currentPage.value = 1; });
+onUnmounted(() => window.clearTimeout(searchTimer));
 
-// ✅ Modal state
-const user = JSON.parse(localStorage.getItem("user") || "{}"); // ✅ Convert safely
-const user_id = user.user_id; // ✅ Now usable
+const view = computed(() => visibleDevices(props.devices, {
+  search: search.value,
+  status: statusFilter.value,
+  sortKey: sortKey.value,
+  sortDir: sortDir.value,
+  page: currentPage.value,
+  pageSize: DEVICE_PAGE_SIZE,
+  now: props.now,
+}));
+const paginationKey = computed(() => `${search.value}:${statusFilter.value}`);
+
+function sort(key) {
+  if (sortKey.value === key) sortDir.value = sortDir.value === "asc" ? "desc" : "asc";
+  else { sortKey.value = key; sortDir.value = "asc"; }
+}
+function sortMark(key) {
+  if (sortKey.value !== key) return "";
+  return sortDir.value === "asc" ? "▲" : "▼";
+}
+function state(device) { return computeLiveness(device, props.now); }
+function reasonText(device) {
+  const reason = livenessReason(device, props.now);
+  return reason ? t(`device_reason_${reason}`) : t("device_state_online");
+}
+function relative(value) {
+  const result = relativeTime(value, props.now);
+  return t(result.key, { n: result.n });
+}
+function resetFilters() {
+  rawSearch.value = "";
+  search.value = "";
+  statusFilter.value = "all";
+  currentPage.value = 1;
+}
+
 const isModalOpen = ref(false);
 const isEditMode = ref(false);
-const formdevice = ref({ group_id : 0, device_name: "", status: "active",  creator: user_id });
+const actionError = ref(null);
+const deviceForm = reactive({ group_id: user.group_id, device_name: "", status: "active", creator: user.user_id, modifier: user.user_id });
 
-// ✅ Fetch group list
-const fetchDevices = async () => {
-  try {
-    const user = JSON.parse(localStorage.getItem("user") || "{}"); // ✅ Convert safely
-    const group_id = user.group_id;
-
-    console.log("📌 group_id value:", group_id); // ✅ Check group_id value for debugging
-
-    if (!group_id && group_id != 0) {
-      console.error("🚨 group_id is undefined or null.");
-      return;
-    }
-
-    const response = await getRequest("/dashboard/devices/get_devices", { group_id }); // ✅ Pass key-value format
-    posts.value = response || [];
-  } catch (error) {
-    console.error("Failed to fetch data:", error);
-  } finally {
-    isLoading.value = false;
-  }
-};
-
-
-onMounted(fetchDevices);
-
-// ✅ Open add group modal
-const openAddDeviceModal = () => {
+function openAddDeviceModal() {
   isEditMode.value = false;
-  Object.assign(formdevice.value, {
-    device_name: "",
-    status: "active",
-    creator: user_id,
-    modifier: user_id
-  });
+  actionError.value = false;
+  Object.assign(deviceForm, { group_id: user.group_id, device_name: "", status: "active", creator: user.user_id, modifier: user.user_id });
   isModalOpen.value = true;
-};
-
-// ✅ Open edit group modal
-const openEditDeviceModal = (device) => {
+}
+function openEditDeviceModal(device) {
   isEditMode.value = true;
-  Object.assign(formdevice.value, device, {
-    modifier: user_id,
-    creator: device.creator || user_id // Keep existing creator
-  });
+  actionError.value = false;
+  Object.assign(deviceForm, device, { modifier: user.user_id, creator: device.creator || user.user_id });
   isModalOpen.value = true;
-};
-
-// ✅ Save group, add or update
-const saveDevice = async () => {
+}
+function closeModal() { isModalOpen.value = false; }
+async function saveDevice() {
+  actionError.value = null;
   try {
-    // ✅ Check request data for debugging
-    console.log("Payload:", JSON.stringify(formdevice.value, null, 2));
-    if (isEditMode.value) {
-      await putRequest(`/dashboard/devices/update_device`, formdevice.value, "json");
-    } else {
-      await postRequest(`/dashboard/devices/insert_device`, formdevice.value, "json");
-    }
-    await fetchDevices();
+    if (isEditMode.value) await putRequest("/dashboard/devices/update_device", deviceForm, "json");
+    else await postRequest("/dashboard/devices/insert_device", deviceForm, "json");
     closeModal();
+    emit("saved");
   } catch (error) {
-    console.error("Failed to save group:", error);
+    const detail = error && error.response && error.response.data
+      ? error.response.data.detail
+      : null;
+    actionError.value = error && error.response && error.response.status === 409
+      && detail && detail.code === "device_name_conflict"
+      ? "msg_device_name_conflict"
+      : "msg_save_failed";
   }
-};
-
-
-// ✅ Delete group
-const deleteDevice = async (deviceId) => {
-  if (confirm(t('msg_delete_device_name'))) {
-    try {
-      await deleteRequest(`/dashboard/devices/remove_device/${deviceId}`);
-      await fetchDevices();
-    } catch (error) {
-      console.error("Delete group failure:", error);
-    }
+}
+async function removeDevice(deviceId) {
+  if (!window.confirm(t("msg_delete_device_name"))) return;
+  try {
+    await deleteRequest(`/dashboard/devices/remove_device/${deviceId}`);
+    emit("removed");
+  } catch (error) {
+    actionError.value = "msg_save_failed";
   }
-};
-
-// ✅ Close modal
-const closeModal = () => {
-  isModalOpen.value = false;
-};
-
-// ✅ Pagination
-const paginatedPosts = computed(() => {
-  const start = (currentPage.value - 1) * perPage.value;
-  return posts.value.slice(start, start + perPage.value);
-});
-const changePage = (page) => {
-  currentPage.value = page;
-};
-
+}
 </script>
 
-
 <style scoped>
-
-.title1 {
-  width:5%
+.device-board { margin-top: 18px; }
+.section-heading, .top-actions, .list-controls, .button-group { display: flex; align-items: center; gap: 12px; }
+.section-heading { justify-content: space-between; align-items: flex-start; }
+.section-heading p, .top-actions small { color: #9eb1c5; }
+.top-actions > div { display: flex; flex-direction: column; align-items: flex-start; max-width: 220px; }
+.enroll-button, .ghost-button { border: 1px solid #3f91d4; border-radius: 6px; padding: 9px 14px; color: #fff; background: #0b5f9e; cursor: pointer; }
+.ghost-button { background: transparent; }
+.list-controls { margin: 20px 0 14px; flex-wrap: wrap; }
+.list-controls input, .list-controls select { min-height: 38px; padding: 8px 10px; border-radius: 6px; border: 1px solid #54708b; background: #071b30; color: #fff; }
+.list-controls label { display: flex; align-items: center; gap: 8px; }
+.table-scroll { overflow-x: auto; }
+.device-table { min-width: 900px; table-layout: fixed; }
+.device-table th { cursor: pointer; }
+.title-device { width: 20%; } .title-status { width: 14%; } .title-group { width: 12%; }
+.title-version { width: 10%; } .title-login { width: 15%; } .title-heartbeat { width: 15%; } .title-actions { width: 14%; }
+.state-badge { display: inline-block; border-radius: 999px; padding: 3px 8px; font-weight: 700; }
+.state-online { color: #6ee7b7; background: rgba(16, 185, 129, .14); }
+.state-attention { color: #fcd34d; background: rgba(245, 158, 11, .14); }
+.state-offline { color: #fda4af; background: rgba(244, 63, 94, .14); }
+.state-reason { display: block; margin-top: 4px; color: #c2cfdd; }
+.highlighted { animation: new-device var(--highlight-duration) ease-out; }
+.empty-state { padding: 32px; text-align: center; border: 1px dashed #54708b; border-radius: 10px; }
+.error-state, .inline-error { color: #fda4af; }
+.modal-form { display: grid; gap: 10px; }
+@keyframes new-device { from { background: rgba(44, 187, 255, .32); } to { background: transparent; } }
+@media (max-width: 1200px) {
+  .section-heading { flex-direction: column; }
 }
-
-.title2 {
-  width:16%
+@media (max-width: 767px) {
+  .top-actions { flex-direction: column; align-items: stretch; width: 100%; }
+  .table-scroll { overflow: visible; }
+  .device-table { min-width: 0; }
+  .device-table thead { display: none; }
+  .device-table, .device-table tbody, .device-table tr, .device-table td { display: block; width: 100%; }
+  .device-table tr { margin-bottom: 12px; padding: 14px; border: 1px solid #38536f; border-radius: 10px; }
+  .device-table td { display: flex; justify-content: space-between; padding: 7px 0; border: 0; }
+  .device-table td::before { content: attr(data-label); color: #9eb1c5; margin-right: 10px; }
+  .device-table td.optional-mobile { display: none; }
 }
-
-.title3 {
-  width:12%
-}
-
-.title4 {
-  width:14%
-}
-
-.title5 {
-  width:16%
-}
-
-.title6 {
-  width:16%
-}
-
-.title7 {
-  width:20%
-}
-
 </style>

@@ -96,15 +96,25 @@ class MemoryIdentityRepository:
             or row["used_at"] is not None
             or row["revoked_at"] is not None
             or row["expires_at"] <= now
-            or (
-                row["device_name"] is not None
-                and row["device_name"] != requested_device_name
-            )
         ):
             raise IdentityRepositoryError("enrollment_token_invalid")
+        if row["device_name"] is not None and row["device_name"] != requested_device_name:
+            raise IdentityRepositoryError(
+                "enrollment_token_invalid",
+                {
+                    "reason": "device_name_mismatch",
+                    "expected_device_name": row["device_name"],
+                    "actual_device_name": requested_device_name,
+                },
+            )
 
         device = next(
-            (item for item in self.devices.values() if item["device_name"] == requested_device_name),
+            (
+                item
+                for item in self.devices.values()
+                if item["device_name"] == requested_device_name
+                and item["group_id"] == row["group_id"]
+            ),
             None,
         )
         if device is None:
@@ -319,6 +329,10 @@ def test_enrollment_is_one_time_and_bound_to_device_name(identity_app):
         },
     )
     assert wrong_name.status_code == 403
+    mismatch = wrong_name.json()["detail"]
+    assert mismatch["reason"] == "device_name_mismatch"
+    assert mismatch["expected_device_name"] == "batch-02"
+    assert mismatch["actual_device_name"] == "batch-other"
 
     first = client.post(
         "/agent/v1/enroll",

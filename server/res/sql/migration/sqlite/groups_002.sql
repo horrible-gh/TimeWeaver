@@ -1,1 +1,1 @@
-INSERT INTO groups(group_id,group_name) VALUES (0, 'Unkonwn');
+INSERT INTO groups(group_id, group_name) VALUES (0, 'Unknown');

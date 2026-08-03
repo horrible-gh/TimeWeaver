@@ -3,6 +3,7 @@
     "get_user": "SELECT group_id, user_id, name from users WHERE user_id = %s",
     "charts": {
         "get_chart_devices": "dashboard/charts/devices.sql",
+        "get_chart_devices_all": "dashboard/charts/devices_all.sql",
         "get_chart_schedules": "dashboard/charts/schedules.sql",
         "get_chart_tasks": "dashboard/charts/tasks.sql"
     },
@@ -15,7 +16,8 @@
         "remove_group": "DELETE FROM groups WHERE group_id = %s"
     },
     "devices": {
-        "get_devices": "SELECT device_id, device_name, status, version, last_login_at, last_heartbeat_at, applied_revision FROM devices WHERE group_id = %s AND device_id > 0",
+        "get_devices": "SELECT group_id, device_id, device_name, status, version, last_login_at, last_heartbeat_at, applied_revision FROM devices WHERE group_id = %s AND device_id > 0",
+        "get_all_devices": "SELECT group_id, device_id, device_name, status, version, last_login_at, last_heartbeat_at, applied_revision FROM devices WHERE device_id > 0",
         "insert_device": "INSERT INTO devices(group_id, device_name, status, creator) VALUES(%s, %s, %s, %s)",
         "update_device": "UPDATE devices SET device_name = %s, status = %s, modifier = %s, modified_at = NOW() WHERE device_id = %s",
         "remove_device": "DELETE FROM devices WHERE device_id = %s"
@@ -25,7 +27,8 @@
         "insert_schedule": "INSERT INTO schedule_group(group_id,name,year,month,day_of_week,day,hour,minute,second,is_error_stop,status,target_device,creator) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         "update_schedule": "UPDATE schedule_group SET group_id = %s, name = %s, year = %s, month = %s, day_of_week = %s, day = %s, hour = %s, minute = %s, second = %s, is_error_stop = %s, status = %s, target_device = %s, modifier = %s, modified_at = NOW() WHERE schedule_id = %s;",
         "remove_schedule": "DELETE FROM schedule_group WHERE schedule_id = %s",
-        "get_devices": "SELECT device_id, device_name FROM devices WHERE group_id = %s AND device_id >= 0"
+        "get_devices": "SELECT device_id, device_name FROM devices WHERE group_id = %s AND device_id > 0",
+        "get_all_devices": "SELECT device_id, device_name FROM devices WHERE device_id > 0"
     },
     "tasks": {
         "get_tasks": "tasks/get_tasks.sql",
