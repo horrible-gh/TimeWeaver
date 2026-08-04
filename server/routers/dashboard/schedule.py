@@ -4,7 +4,7 @@ from schemas.schedules import ScheduleInsertRequest, ScheduleUpdateRequest, Sche
 from routers.dashboard.device_scope import requester_group_id
 from routers.login.auth import verify_token
 import LogAssist.log as logger
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 db_instance = db.db_instance
@@ -17,16 +17,17 @@ async def execution_history(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None
 ):
-    # Default: last month
+    # Default: last month. execution_log.start_time is stored as naive UTC
+    # (see NR0003), so every branch here normalizes to naive UTC before binding.
     if not end_date:
-        end_date_dt = datetime.now()
+        end_date_dt = datetime.now(timezone.utc).replace(tzinfo=None)
     else:
-        end_date_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        end_date_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00')).astimezone(timezone.utc).replace(tzinfo=None)
 
     if not start_date:
         start_date_dt = end_date_dt - timedelta(days=30)
     else:
-        start_date_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        start_date_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00')).astimezone(timezone.utc).replace(tzinfo=None)
 
     # Separate SQL loading and parameter binding
     sql = sqloader.load_sql("time_weaver.json", "get_execution_logs")

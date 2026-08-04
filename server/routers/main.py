@@ -28,7 +28,10 @@ def _load_logging_config():
 # configuration is active at the first emitted record.
 Logger.logger_init(_load_logging_config())
 
+from datetime import datetime, timezone
+
 from fastapi import FastAPI, Request
+from fastapi.encoders import ENCODERS_BY_TYPE
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -58,6 +61,19 @@ from .login import login, logout
 
 ALLOWED_ORIGIN = [item.strip() for item in settings.ALLOWED_ORIGIN.split(",") if item.strip()]
 CONTEXT = settings.CONTEXT
+
+
+def _encode_datetime_as_utc(value: datetime) -> str:
+    """All naive datetimes read back from MySQL are UTC (see NR0003); mark
+    them explicitly so clients stop having to guess the timezone."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat().replace("+00:00", "Z")
+
+
+ENCODERS_BY_TYPE[datetime] = _encode_datetime_as_utc
 
 app = FastAPI()
 register_agent_request_logging(app)

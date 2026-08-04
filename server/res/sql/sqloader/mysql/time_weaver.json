@@ -12,8 +12,8 @@
     "groups": {
         "get_groups": "SELECT group_id, group_name, status FROM groups WHERE group_id > 0",
         "get_group": "SELECT group_id, status FROM groups WHERE group_id = %s",
-        "insert_group": "INSERT INTO groups(group_name, creator) VALUES(%s, %s)",
-        "update_group": "UPDATE groups SET group_name = %s, status = %s, modifier = %s, modified_at = NOW() WHERE group_id = %s",
+        "insert_group": "INSERT INTO groups(group_name, creator, created_at) VALUES(%s, %s, UTC_TIMESTAMP())",
+        "update_group": "UPDATE groups SET group_name = %s, status = %s, modifier = %s, modified_at = UTC_TIMESTAMP() WHERE group_id = %s",
         "remove_group": "DELETE FROM groups WHERE group_id = %s",
         "reassign_devices_group": "UPDATE devices SET group_id = 0 WHERE group_id = %s",
         "reassign_users_group": "UPDATE users SET group_id = 0 WHERE group_id = %s",
@@ -23,31 +23,31 @@
     "devices": {
         "get_devices": "SELECT group_id, device_id, device_name, status, version, last_login_at, last_heartbeat_at, applied_revision FROM devices WHERE group_id = %s AND device_id > 0",
         "get_all_devices": "SELECT group_id, device_id, device_name, status, version, last_login_at, last_heartbeat_at, applied_revision FROM devices WHERE device_id > 0",
-        "insert_device": "INSERT INTO devices(group_id, device_name, status, creator) VALUES(%s, %s, %s, %s)",
-        "update_device": "UPDATE devices SET device_name = %s, status = %s, modifier = %s, modified_at = NOW() WHERE device_id = %s",
+        "insert_device": "INSERT INTO devices(group_id, device_name, status, creator, created_at) VALUES(%s, %s, %s, %s, UTC_TIMESTAMP())",
+        "update_device": "UPDATE devices SET device_name = %s, status = %s, modifier = %s, modified_at = UTC_TIMESTAMP() WHERE device_id = %s",
         "remove_device": "DELETE FROM devices WHERE device_id = %s"
     },
     "schedules": {
         "get_schedule_groups": "SELECT sg.group_id, sg.schedule_id, sg.name, sg.year, sg.month, sg.day_of_week, sg.day, sg.hour, sg.minute, sg.second, sg.is_error_stop, sg.status, sg.target_device, d.device_name FROM schedule_group sg JOIN devices d ON d.device_id = sg.target_device WHERE sg.group_id = %s AND sg.schedule_id > 0 ",
-        "insert_schedule": "INSERT INTO schedule_group(group_id,name,year,month,day_of_week,day,hour,minute,second,is_error_stop,status,target_device,creator) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        "update_schedule": "UPDATE schedule_group SET group_id = %s, name = %s, year = %s, month = %s, day_of_week = %s, day = %s, hour = %s, minute = %s, second = %s, is_error_stop = %s, status = %s, target_device = %s, modifier = %s, modified_at = NOW() WHERE schedule_id = %s;",
+        "insert_schedule": "INSERT INTO schedule_group(group_id,name,year,month,day_of_week,day,hour,minute,second,is_error_stop,status,target_device,creator,created_at) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
+        "update_schedule": "UPDATE schedule_group SET group_id = %s, name = %s, year = %s, month = %s, day_of_week = %s, day = %s, hour = %s, minute = %s, second = %s, is_error_stop = %s, status = %s, target_device = %s, modifier = %s, modified_at = UTC_TIMESTAMP() WHERE schedule_id = %s;",
         "remove_schedule": "DELETE FROM schedule_group WHERE schedule_id = %s",
         "get_devices": "SELECT device_id, device_name FROM devices WHERE group_id = %s AND device_id > 0",
         "get_all_devices": "SELECT device_id, device_name FROM devices WHERE device_id > 0"
     },
     "tasks": {
         "get_tasks": "tasks/get_tasks.sql",
-        "insert_schedule_detail": "INSERT INTO schedule_detail (detail_id, schedule_name, schedule_id, year, month, day_of_week, day, hour, minute, second, is_error_stop, sequence, retry_count, status, creator) VALUES (UNHEX(REPLACE(%s, '-', '')), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        "insert_task": "INSERT INTO task_detail (detail_id, command, task_type, archive_type, source_path, error_on_missing_source, destination_path, date_format, target_date_format, destination_date_format, house_keep_days, creator) VALUES (UNHEX(REPLACE(%s, '-', '')), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        "update_schedule_detail": "UPDATE schedule_detail SET schedule_name=%s, schedule_id=%s, year=%s, month=%s, day_of_week=%s, day=%s, hour=%s, minute=%s, second=%s, is_error_stop=%s, sequence=%s, retry_count=%s, status=%s, modifier=%s, modified_at=NOW() WHERE detail_id=UNHEX(REPLACE(%s, '-', '')) AND deleted_at IS NULL",
-        "update_task": "UPDATE task_detail SET command=%s, task_type=%s, archive_type=%s, source_path=%s, error_on_missing_source=%s, destination_path=%s, date_format=%s, target_date_format=%s, destination_date_format=%s, house_keep_days=%s, modifier=%s, modified_at=NOW() WHERE detail_id=UNHEX(REPLACE(%s, '-', ''))",
-        "remove_schedule_detail": "UPDATE schedule_detail SET deleted_at=NOW(), modified_at=NOW() WHERE detail_id=UNHEX(REPLACE(%s, '-', '')) AND deleted_at IS NULL",
+        "insert_schedule_detail": "INSERT INTO schedule_detail (detail_id, schedule_name, schedule_id, year, month, day_of_week, day, hour, minute, second, is_error_stop, sequence, retry_count, status, creator, created_at) VALUES (UNHEX(REPLACE(%s, '-', '')), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
+        "insert_task": "INSERT INTO task_detail (detail_id, command, task_type, archive_type, source_path, error_on_missing_source, destination_path, date_format, target_date_format, destination_date_format, house_keep_days, creator, created_at) VALUES (UNHEX(REPLACE(%s, '-', '')), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
+        "update_schedule_detail": "UPDATE schedule_detail SET schedule_name=%s, schedule_id=%s, year=%s, month=%s, day_of_week=%s, day=%s, hour=%s, minute=%s, second=%s, is_error_stop=%s, sequence=%s, retry_count=%s, status=%s, modifier=%s, modified_at=UTC_TIMESTAMP() WHERE detail_id=UNHEX(REPLACE(%s, '-', '')) AND deleted_at IS NULL",
+        "update_task": "UPDATE task_detail SET command=%s, task_type=%s, archive_type=%s, source_path=%s, error_on_missing_source=%s, destination_path=%s, date_format=%s, target_date_format=%s, destination_date_format=%s, house_keep_days=%s, modifier=%s, modified_at=UTC_TIMESTAMP() WHERE detail_id=UNHEX(REPLACE(%s, '-', ''))",
+        "remove_schedule_detail": "UPDATE schedule_detail SET deleted_at=UTC_TIMESTAMP(), modified_at=UTC_TIMESTAMP() WHERE detail_id=UNHEX(REPLACE(%s, '-', '')) AND deleted_at IS NULL",
         "remove_task": "DELETE FROM task_detail WHERE detail_id=UNHEX(REPLACE(%s, '-', ''))"
     },
     "manual_execution":  { 
         "insert_manual_execution": "manual_execution/insert_manual_execution.sql",
         "get_manual_execution": "SELECT sg.name, sd.schedule_name, me.manual_id, me.is_immediate, me.schedule_datetime, me.status, CASE WHEN me.status in ('active','wait') THEN '1' ELSE '0' END AS edit_enable FROM manual_execution me JOIN schedule_detail sd ON sd.detail_id = me.detail_id JOIN schedule_group sg ON sg.schedule_id = sd.schedule_id WHERE sd.deleted_at IS NULL ORDER BY me.manual_id DESC",
-        "update_manual_execution": "UPDATE manual_execution SET is_immediate = %s, schedule_datetime = %s, status = %s, modifier = %s, modified_at = NOW() WHERE manual_id = %s",
-        "update_abandon_manual_execution": "UPDATE manual_execution SET status = %s, modifier = %s, modified_at = NOW() WHERE manual_id = %s"
+        "update_manual_execution": "UPDATE manual_execution SET is_immediate = %s, schedule_datetime = %s, status = %s, modifier = %s, modified_at = UTC_TIMESTAMP() WHERE manual_id = %s",
+        "update_abandon_manual_execution": "UPDATE manual_execution SET status = %s, modifier = %s, modified_at = UTC_TIMESTAMP() WHERE manual_id = %s"
     }
 }

@@ -5,8 +5,6 @@ import {
   STALE_THRESHOLD_LOGIN_SEC,
 } from "@/dashboard/constants/enrollment";
 
-const HAS_TIMEZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
-
 export function parseServerTime(text) {
   if (text == null || String(text).trim() === "") return null;
   if (text instanceof Date) {
@@ -16,9 +14,10 @@ export function parseServerTime(text) {
     const parsedNumber = new Date(text);
     return Number.isNaN(parsedNumber.getTime()) ? null : parsedNumber;
   }
-  const source = String(text).trim();
-  const normalized = HAS_TIMEZONE.test(source) ? source : `${source}Z`;
-  const parsed = new Date(normalized);
+  // The API always serializes datetimes as tz-aware UTC (trailing Z) now
+  // that the server unifies every stored timestamp on UTC (see NR0003), so
+  // there is no longer a timezone to guess here.
+  const parsed = new Date(String(text).trim());
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 

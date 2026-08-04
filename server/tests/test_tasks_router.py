@@ -16,7 +16,7 @@ INSERT_TASK = "INSERT INTO task_detail"
 UPDATE_SCHEDULE_DETAIL = "UPDATE schedule_detail"
 UPDATE_TASK = "UPDATE task_detail"
 REMOVE_TASK = "DELETE FROM task_detail"
-SOFT_DELETE_SCHEDULE_DETAIL = "UPDATE schedule_detail SET deleted_at=NOW()"
+SOFT_DELETE_SCHEDULE_DETAIL = "UPDATE schedule_detail SET deleted_at=UTC_TIMESTAMP()"
 
 
 def valid_insert_payload(**overrides):
@@ -334,7 +334,7 @@ class TestRemoveTaskTransaction:
             if SOFT_DELETE_SCHEDULE_DETAIL in query
         )
         assert detail_query.startswith("UPDATE schedule_detail")
-        assert "deleted_at=NOW()" in detail_query
+        assert "deleted_at=UTC_TIMESTAMP()" in detail_query
         assert "DELETE FROM schedule_detail" not in detail_query
 
     def test_failed_tombstone_rolls_back_task_delete(self, make_tasks_module):

@@ -11,14 +11,14 @@ execution_logs AS (
            MAX(CASE WHEN el.result_code != 0 THEN 1 ELSE 0 END) AS has_error,
            MIN(CASE WHEN el.result_code = 0 THEN 1 ELSE 0 END) AS all_success
     FROM execution_log el
-    WHERE el.start_time >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+    WHERE el.start_time >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)
     GROUP BY el.schedule_id
 ),
 schedule_final_status AS (
     SELECT
         sg.schedule_id,
         CASE
-            WHEN d.last_login_at <= DATE_SUB(NOW(), INTERVAL 1 DAY)
+            WHEN d.last_login_at <= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)
                 OR sg.group_status = 'inactive'
                 THEN 'inactive'
             WHEN el.has_error = 1 THEN 'error'  -- error when any execution log has an error

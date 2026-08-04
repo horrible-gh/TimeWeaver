@@ -142,7 +142,7 @@ def test_pymysql_mogrify_accepts_corrected_device_bindings():
 
     assert "group_id = 5" in get_sql
     assert "{'group_id': '5'}" not in get_sql
-    assert "VALUES(5, 'edge-5', 'active', 'creator-5')" in insert_sql
+    assert "VALUES(5, 'edge-5', 'active', 'creator-5', UTC_TIMESTAMP())" in insert_sql
 
 
 def test_hidden_group_bypasses_device_and_chart_group_filters(make_router_module):

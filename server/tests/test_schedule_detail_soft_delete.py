@@ -34,7 +34,7 @@ def test_active_mysql_queries_exclude_schedule_detail_tombstones():
         assert "deleted_at IS NULL" in read(path), path
 
     sqloader = json.loads(read(SQL_ROOT / "time_weaver.json"))
-    assert "deleted_at=NOW()" in sqloader["tasks"]["remove_schedule_detail"]
+    assert "deleted_at=UTC_TIMESTAMP()" in sqloader["tasks"]["remove_schedule_detail"]
     assert "DELETE FROM schedule_detail" not in sqloader["tasks"]["remove_schedule_detail"]
     assert "deleted_at IS NULL" in sqloader["tasks"]["update_schedule_detail"]
     assert "deleted_at IS NULL" in sqloader["manual_execution"]["get_manual_execution"]
