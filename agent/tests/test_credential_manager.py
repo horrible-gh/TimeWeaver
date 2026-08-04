@@ -111,6 +111,40 @@ def test_transient_error_preserves_refresh_file(tmp_path):
     assert path.exists()
 
 
+def test_transient_read_failure_preserves_credential_and_does_not_enroll(tmp_path):
+    path = tmp_path / "credential.json"
+    store = CredentialStore(path)
+    store.write(stored())
+
+    def fail_verify(_path):
+        raise PermissionError("simulated ACL mismatch between writer and reader accounts")
+
+    store._verify_owner_only = fail_verify
+    transport = MockTransport()
+    api = AgentApiClient("https://timeweaver.invalid", transport=transport, retries=0)
+    manager = CredentialManager(api, path, store=store, now=lambda: NOW)
+
+    result = manager.ensure_access_token(60)
+    assert result.reason == "transient"
+    assert path.exists()
+    assert transport.requests == []
+
+
+def test_corrupt_credential_file_is_discarded_and_needs_enrollment(tmp_path):
+    path = tmp_path / "credential.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("not valid json", encoding="utf-8")
+    store = CredentialStore(path)
+    transport = MockTransport()
+    api = AgentApiClient("https://timeweaver.invalid", transport=transport, retries=0)
+    manager = CredentialManager(api, path, store=store, now=lambda: NOW)
+
+    result = manager.ensure_access_token(60)
+    assert result.reason == "needs_enrollment"
+    assert not path.exists()
+    assert transport.requests == []
+
+
 def test_expired_local_refresh_is_discarded_without_network(tmp_path):
     path = tmp_path / "credential.json"
     store = CredentialStore(path)

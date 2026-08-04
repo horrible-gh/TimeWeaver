@@ -159,19 +159,32 @@ class CredentialStore:
             os.chmod(path, CREDENTIAL_FILE_MODE)
             return
         principal = getpass.getuser()
-        # (M) = Modify: read + write + delete for the owner only. DELETE is
-        # required because atomic replacement renames the temp file via
+        # (M) = Modify: read + write + delete for the granted accounts. DELETE
+        # is required because atomic replacement renames the temp file via
         # MoveFileExW, which needs DELETE on the source; a bare (R,W) grant
         # makes every credential write fail with WinError 5 on Windows.
+        #
+        # Grant SYSTEM and Administrators (as locale-independent well-known
+        # SIDs, since group display names such as "Administrators" are
+        # localized on non-English Windows) in addition to the writing
+        # account. Service managers such as NSSM commonly run agents as
+        # LocalSystem, which differs from the interactive account used for
+        # enrollment; without this grant the service cannot open a file
+        # written by that other account, and the resulting PermissionError
+        # was previously treated as an invalid credential and deleted.
+        accounts = [principal, "*S-1-5-18", "*S-1-5-32-544"]
+        args = ["icacls", str(path), "/inheritance:r"]
+        for account in accounts:
+            args += ["/grant:r", f"{account}:(M)"]
         completed = subprocess.run(
-            ["icacls", str(path), "/inheritance:r", "/grant:r", f"{principal}:(M)"],
+            args,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
         )
         if completed.returncode != 0:
-            raise PermissionError("owner-only credential ACL could not be applied")
+            raise PermissionError("credential ACL could not be applied")
 
     def _verify_owner_only(self, path: Path) -> None:
         if os.name != "nt":
@@ -236,7 +249,21 @@ class CredentialManager:
                 return current
             try:
                 stored = self._store.read()
-            except (OSError, ValueError):
+            except OSError:
+                # A transient read failure (permission denied, sharing
+                # violation, file lock) does not mean the credential is
+                # invalid -- it means this process could not read it right
+                # now. Deleting a still-valid credential here is what caused
+                # the repeated-deletion bug: a service account without ACL
+                # access to a file written by a different account would
+                # otherwise discard a perfectly good refresh token and force
+                # re-enrollment against an already-consumed enrollment token.
+                self._clear_memory()
+                return CredentialOutcome(reason="transient")
+            except ValueError:
+                # The file exists, was readable, and its contents are not a
+                # valid credential (corrupt JSON or schema mismatch). This is
+                # not recoverable by retrying, so discard it.
                 try:
                     self._store.remove()
                 except OSError:
