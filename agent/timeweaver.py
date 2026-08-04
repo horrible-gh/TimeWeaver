@@ -75,7 +75,29 @@ except ImportError:  # Script execution from the agent directory.
 CLOCK_SKEW_WARNING_SECONDS = 300
 CREDENTIAL_PROBE_INTERVAL = 60
 STATUS_SCHEMA_VERSION = "1"
+# Upper bound on how long Ctrl+C/SIGTERM can take to be noticed. A single
+# long threading.Event.wait() call delays delivery of the pending signal
+# handler until the wait itself returns (CPython only runs pending calls
+# when it re-enters the bytecode eval loop), so we poll in short slices
+# instead of blocking for the full duration in one call.
+SHUTDOWN_POLL_INTERVAL_SECONDS = 0.5
 _shutdown_requested = threading.Event()
+
+
+def _wait_for_shutdown(timeout: float) -> bool:
+    """Wait up to `timeout` seconds for a shutdown signal.
+
+    Equivalent to `_shutdown_requested.wait(timeout)` but polls in slices of
+    at most SHUTDOWN_POLL_INTERVAL_SECONDS so a signal handler that only
+    sets the flag is noticed within that slice instead of after the full
+    `timeout` elapses.
+    """
+    remaining = timeout
+    while remaining > 0:
+        if _shutdown_requested.wait(min(SHUTDOWN_POLL_INTERVAL_SECONDS, remaining)):
+            return True
+        remaining -= SHUTDOWN_POLL_INTERVAL_SECONDS
+    return _shutdown_requested.is_set()
 
 
 class AgentRuntime:
@@ -709,8 +731,8 @@ def run_forever() -> None:
     signal.signal(signal.SIGTERM, request_shutdown)
     signal.signal(signal.SIGINT, request_shutdown)
     while not _shutdown_requested.is_set() and not runtime.bootstrap(token):
-        _shutdown_requested.wait(runtime.bootstrap_retry_delay())
-    while not _shutdown_requested.wait(60):
+        _wait_for_shutdown(runtime.bootstrap_retry_delay())
+    while not _wait_for_shutdown(60):
         pass
     Logger.info("[agent] shutdown signal received")
     clean = runtime.shutdown()
