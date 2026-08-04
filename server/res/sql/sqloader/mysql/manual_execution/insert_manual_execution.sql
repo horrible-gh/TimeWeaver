@@ -1,10 +1,10 @@
 INSERT INTO manual_execution(detail_id, is_immediate, schedule_datetime, status, creator, created_at)
 SELECT sd.detail_id,
        %s,
-       CASE WHEN %s = '0' THEN %s ELSE NOW() END,
+       CASE WHEN %s = '0' THEN %s ELSE UTC_TIMESTAMP() END,
        %s,
        %s,
-       NOW()
+       UTC_TIMESTAMP()
   FROM schedule_group sg
   JOIN schedule_detail sd
     ON sg.schedule_id = sd.schedule_id

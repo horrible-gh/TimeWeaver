@@ -57,10 +57,10 @@ class AgentIdentityRepository:
             txn.execute(
                 """
                 INSERT INTO agent_enrollment_token
-                    (enrollment_id, token_hash, device_name, group_id, expires_at)
-                VALUES (%s, %s, %s, %s, %s)
+                    (enrollment_id, token_hash, device_name, group_id, created_at, expires_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (enrollment_id.bytes, digest, device_name, group_id, expires_at),
+                (enrollment_id.bytes, digest, device_name, group_id, now, expires_at),
             )
         return EnrollmentIssue(enrollment_id, expires_at)
 
@@ -177,10 +177,10 @@ class AgentIdentityRepository:
                 txn.execute(
                     """
                     INSERT INTO devices
-                        (group_id, device_name, status, version, last_login_at)
-                    VALUES (%s, %s, 'active', %s, %s)
+                        (group_id, device_name, status, version, created_at, last_login_at)
+                    VALUES (%s, %s, 'active', %s, %s, %s)
                     """,
-                    (token_row["group_id"], requested_device_name, agent_version, now),
+                    (token_row["group_id"], requested_device_name, agent_version, now, now),
                 )
                 device_id = txn.fetch_one("SELECT LAST_INSERT_ID() AS device_id")["device_id"]
 

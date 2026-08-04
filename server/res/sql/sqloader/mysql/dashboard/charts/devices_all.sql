@@ -14,7 +14,7 @@ device_status_conv AS (
                     WHEN COALESCE(last_heartbeat_at, last_login_at) <= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 MINUTE) THEN 'error'
                     ELSE status
                 END
-            WHEN COALESCE(last_heartbeat_at, last_login_at) <= DATE_SUB(NOW(), INTERVAL 1 DAY) THEN 'error'
+            WHEN COALESCE(last_heartbeat_at, last_login_at) <= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY) THEN 'error'
             ELSE status
         END AS status,
         device_id

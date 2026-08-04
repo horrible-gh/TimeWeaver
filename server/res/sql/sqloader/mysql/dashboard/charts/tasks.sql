@@ -17,11 +17,11 @@ WITH task_status AS (
     JOIN devices d ON sg.target_device = d.device_id
     LEFT JOIN execution_log el
         ON el.detail_id = sd.detail_id
-        AND el.start_time >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+        AND el.start_time >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)
     WHERE sd.deleted_at IS NULL
       AND sd.status IN ('active', 'error')
       AND sg.status NOT IN ('inactive', 'manual')
-      AND d.last_login_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+      AND d.last_login_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)
       AND d.status NOT IN ('inactive', 'manual')
 ),
 all_states AS (
