@@ -166,6 +166,12 @@ backup_if_exists() {
   fi
 }
 
+finalize_run_script() {
+  local target="$1"
+  chmod +x "$target"
+  echo "Created $target"
+}
+
 if [[ -z "$COMPONENT" ]]; then
   COMPONENT="$(ask "Install which component? (all/server/agent/client)" "all")"
 fi
@@ -407,6 +413,24 @@ if [[ "$DO_CLIENT" == "1" ]]; then
   popd >/dev/null
 fi
 
+if [[ "$DO_SERVER" == "1" ]]; then
+  cat > "$ROOT_DIR/run-server.sh" <<EOF
+#!/usr/bin/env bash
+cd "\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)/server"
+exec .venv/bin/python -m uvicorn app:app --host $RESOLVED_SERVER_HOST --port $RESOLVED_SERVER_PORT --workers 1
+EOF
+  finalize_run_script "$ROOT_DIR/run-server.sh"
+fi
+
+if [[ "$DO_AGENT" == "1" ]]; then
+  cat > "$ROOT_DIR/run-agent.sh" <<EOF
+#!/usr/bin/env bash
+cd "\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)/agent"
+exec .venv/bin/python timeweaver.py
+EOF
+  finalize_run_script "$ROOT_DIR/run-agent.sh"
+fi
+
 SERVICES_INSTALLED=0
 if [[ "$INSTALL_SERVICES" == "1" ]]; then
   if [[ "$(id -u)" -ne 0 ]]; then
@@ -459,7 +483,7 @@ if [[ "$SERVICES_INSTALLED" == "1" ]]; then
   [[ "$DO_CLIENT" == "1" ]] && echo "Client: serve client/dist, or 'npm run serve' for development"
 else
   echo "Start:"
-  [[ "$DO_SERVER" == "1" ]] && echo "  - cd \"$ROOT_DIR/server\" && . .venv/bin/activate && uvicorn app:app --host $RESOLVED_SERVER_HOST --port $RESOLVED_SERVER_PORT --workers 1"
-  [[ "$DO_AGENT" == "1" ]]  && echo "  - cd \"$ROOT_DIR/agent\" && . .venv/bin/activate && python timeweaver.py   (needs the TimeWeaver server reachable)"
+  [[ "$DO_SERVER" == "1" ]] && echo "  - ./run-server.sh   (listens on $RESOLVED_SERVER_HOST:$RESOLVED_SERVER_PORT)"
+  [[ "$DO_AGENT" == "1" ]]  && echo "  - ./run-agent.sh    (needs the TimeWeaver server reachable)"
   [[ "$DO_CLIENT" == "1" ]] && echo "  - serve client/dist, or 'npm run serve' for development"
 fi

@@ -36,8 +36,9 @@ into the config, so **after the install there is nothing to copy or hand-edit.**
 `SECRET_KEY` is generated as a fresh cryptographic random value (never a
 placeholder). With every default accepted the server uses a local SQLite
 database, so it starts immediately. The installer also creates Python virtual environments, installs
-dependencies, builds the Vue UI (client only), and (on Windows) creates
-`run-server.cmd` / `run-agent.cmd` in the project root.
+dependencies, builds the Vue UI (client only), and creates `run-server.cmd` /
+`run-agent.cmd` (Windows) or `run-server.sh` / `run-agent.sh` (Linux) in the
+project root.
 
 ### Installing a single component
 
@@ -305,7 +306,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\setup-windows.ps1 -Component agent  # agent only
 ```
 
-Both setup scripts accept a component selector (`all`, `server`, `agent`, `client`; default `all`; prompted if omitted). When only the agent or server is selected, Node.js/npm and the UI build are skipped. The Windows setup creates `run-server.cmd` and `run-agent.cmd` in the project root. Both setup scripts **generate ready-to-run config** (`server/.env`, `agent/conf/*.json`, `client/config.js`) from prompts/flags rather than asking you to copy and edit sample files; existing config is preserved unless `--reconfigure` / `-Reconfigure` is passed. The `*.sample.*` files remain in the tree only as references.
+Both setup scripts accept a component selector (`all`, `server`, `agent`, `client`; default `all`; prompted if omitted). When only the agent or server is selected, Node.js/npm and the UI build are skipped. The Windows setup creates `run-server.cmd` and `run-agent.cmd` in the project root; the Linux setup creates the equivalent executable `run-server.sh` and `run-agent.sh`. Both setup scripts **generate ready-to-run config** (`server/.env`, `agent/conf/*.json`, `client/config.js`) from prompts/flags rather than asking you to copy and edit sample files; existing config is preserved unless `--reconfigure` / `-Reconfigure` is passed. The `*.sample.*` files remain in the tree only as references.
 
 ## Docker
 
