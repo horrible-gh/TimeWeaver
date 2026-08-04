@@ -34,10 +34,10 @@
             <dd>{{ schedule.task_count }} Tasks</dd>
           </div>
           <div>
-            <dt><i class="ph ph-play"></i> {{ schedule.group_start_time }}</dt>
+            <dt><i class="ph ph-play"></i> {{ formatDateTime(schedule.group_start_time) }}</dt>
             <dd>
               <i class="ph" :class="{'ph-pause': schedule.custom_status === 'completed', 'ph-prohibit': schedule.custom_status === 'error' , 'ph-play-pause': schedule.custom_status === 'warning'}"></i>
-              {{ schedule.group_end_time }}
+              {{ formatDateTime(schedule.group_end_time) }}
             </dd>
           </div>
         </dl>
@@ -52,10 +52,28 @@
 <script>
 import { getRequest } from "@api";
 import { defineComponent, onMounted, ref } from "vue";
+import { parseServerTime } from "@/dashboard/utils/deviceStatus";
 
 export default defineComponent({
   setup() {
     const schedules = ref([]);
+
+    const formatDateTime = (dateString) => {
+      const date = parseServerTime(dateString);
+      if (!date) return "-";
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Tokyo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).formatToParts(date);
+      const get = (type) => parts.find((p) => p.type === type)?.value;
+      return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}:${get("second")}`;
+    };
 
     onMounted(async () => {
       try {
@@ -76,7 +94,7 @@ export default defineComponent({
     });
 
 
-    return { schedules };
+    return { schedules, formatDateTime };
   },
 });
 </script>
