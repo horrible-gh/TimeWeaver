@@ -1,5 +1,18 @@
 const { defineConfig } = require('@vue/cli-service')
 const path = require("path");
+const fs = require("fs");
+
+// client/config.js is a local-only file (.gitignore'd, written by
+// scripts/setup-windows.ps1 / setup-linux.sh) and is never committed. Any
+// checkout that hasn't run that installer - CI, preview builders, a fresh
+// `git clone` - won't have it, and webpack would fail to resolve "@config"
+// with "Module not found". Fall back to the committed config.sample.js
+// (same env-derived default) so the app always compiles out of the box;
+// a real config.js, when present, still takes priority.
+const localConfigPath = path.resolve(__dirname, "config.js");
+const configPath = fs.existsSync(localConfigPath)
+    ? localConfigPath
+    : path.resolve(__dirname, "config.sample.js");
 
 module.exports = defineConfig({
     devServer: {
@@ -58,7 +71,7 @@ module.exports = defineConfig({
     configureWebpack: {
         resolve: {
             alias: {
-                "@config": path.resolve(__dirname, "config.js"), // ✅ Reference root config.js as @config
+                "@config": configPath, // ✅ Reference config.js (or config.sample.js fallback) as @config
                 "@api": path.resolve(__dirname, "api.js"), // ✅ Reference root api.js as @api
             },
         },

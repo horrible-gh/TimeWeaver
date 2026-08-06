@@ -135,6 +135,7 @@ button {
   border-radius: 4px;
   cursor: pointer;
   transition: 0.2s ease-in-out;
+  white-space: nowrap;
 }
 
 /* ✅ Add button in blue */
@@ -166,6 +167,16 @@ button {
 
 .delete-button:hover {
   background-color: #c82333;
+}
+
+/* ✅ Reissue button in teal blue */
+.reissue-button {
+  background-color: #0b73b9;
+  color: white;
+}
+
+.reissue-button:hover {
+  background-color: #095a91;
 }
 
 /* ✅ Manual execution abandon button in red */

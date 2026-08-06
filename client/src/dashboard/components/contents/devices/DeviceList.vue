@@ -77,6 +77,7 @@
             <td :data-label="$t('list_label_last_heartbeat_at')" :title="device.last_heartbeat_at || ''">{{ relative(device.last_heartbeat_at) }}</td>
             <td :data-label="$t('list_label_actions')">
               <div class="button-group">
+                <button v-if="showEnrollment" class="reissue-button" :title="$t('hint_reissue_for_device')" @click="$emit('open-enrollment', device)">{{ $t('btn_reissue_for_device') }}</button>
                 <button class="edit-button" @click="openEditDeviceModal(device)">{{ $t('btn_edit') }}</button>
                 <button class="delete-button" @click="removeDevice(device.device_id)">{{ $t('btn_remove') }}</button>
               </div>
@@ -245,10 +246,11 @@ async function removeDevice(deviceId) {
 .list-controls input, .list-controls select { min-height: 38px; padding: 8px 10px; border-radius: 6px; border: 1px solid #54708b; background: #071b30; color: #fff; }
 .list-controls label { display: flex; align-items: center; gap: 8px; }
 .table-scroll { overflow-x: auto; }
-.device-table { min-width: 900px; table-layout: fixed; }
 .device-table th { cursor: pointer; }
-.title-device { width: 20%; } .title-status { width: 14%; } .title-group { width: 12%; }
-.title-version { width: 10%; } .title-login { width: 15%; } .title-heartbeat { width: 15%; } .title-actions { width: 14%; }
+.device-table { width: 100%; min-width: 900px; table-layout: fixed; }
+.device-table .button-group { flex-wrap: wrap; row-gap: 6px; }
+.title-device { width: 17%; } .title-status { width: 12%; } .title-group { width: 11%; }
+.title-version { width: 9%; } .title-login { width: 13%; } .title-heartbeat { width: 14%; } .title-actions { width: 24%; }
 .state-badge { display: inline-block; border-radius: 999px; padding: 3px 8px; font-weight: 700; }
 .state-online { color: #6ee7b7; background: rgba(16, 185, 129, .14); }
 .state-attention { color: #fcd34d; background: rgba(245, 158, 11, .14); }
@@ -265,8 +267,8 @@ async function removeDevice(deviceId) {
 @media (max-width: 767px) {
   .top-actions { flex-direction: column; align-items: stretch; width: 100%; }
   .table-scroll { overflow: visible; }
-  .device-table { min-width: 0; }
   .device-table thead { display: none; }
+  .device-table { min-width: 0; }
   .device-table, .device-table tbody, .device-table tr, .device-table td { display: block; width: 100%; }
   .device-table tr { margin-bottom: 12px; padding: 14px; border: 1px solid #38536f; border-radius: 10px; }
   .device-table td { display: flex; justify-content: space-between; padding: 7px 0; border: 0; }

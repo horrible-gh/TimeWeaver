@@ -45,7 +45,7 @@
       />
     </template>
 
-    <EnrollmentPanel v-else :flow="flow" :groups="groups" @close="showDevices" />
+    <EnrollmentPanel v-else :flow="flow" :groups="groups" :devices="devices" @close="showDevices" />
   </main>
 </template>
 
@@ -177,9 +177,9 @@ function handleForbidden() {
 function handleRevoked(id) {
   flow.markRevoked(id);
 }
-function openEnrollment() {
+function openEnrollment(device) {
   if (!canEnroll.value) return;
-  flow.openFlow();
+  flow.openFlow(device);
   activeView.value = "enrollment";
 }
 function showDevices() {
@@ -189,6 +189,7 @@ function showDevices() {
 
 const flow = useEnrollmentFlow({
   groups,
+  devices,
   userGroupId,
   refreshDevices: loadDevices,
   reloadGroups: loadGroups,

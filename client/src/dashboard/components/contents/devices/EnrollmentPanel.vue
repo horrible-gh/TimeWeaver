@@ -17,6 +17,7 @@
     <EnrollmentFormStep
       v-if="step === 1"
       :groups="groups"
+      :devices="devices"
       :form="form"
       :errors="formErrors"
       :canIssue="canIssue"
@@ -24,6 +25,7 @@
       @update-group="form.groupId = $event"
       @update-ttl="form.ttlHours = $event"
       @update-device="form.deviceName = $event"
+      @update-device-mode="setDeviceMode($event)"
       @issue="issue"
     />
     <EnrollmentDeliverStep
@@ -67,13 +69,14 @@ import EnrollmentWatchStep from "@/dashboard/components/contents/devices/Enrollm
 const props = defineProps({
   flow: { type: Object, required: true },
   groups: { type: Array, default: () => [] },
+  devices: { type: Array, default: () => [] },
 });
 const emit = defineEmits(["close"]);
 // eslint-disable-next-line vue/no-setup-props-destructure
 const {
   flowState, form, formErrors, vault, enrollmentId, revealed, remainingSeconds,
   listReflectState, notice, copyFeedback, executionMethod, expiryWarning, canIssue,
-  issue, reveal, hide, copy, startWatch, recheck, reissue, closeFlow,
+  issue, reveal, hide, copy, startWatch, recheck, reissue, closeFlow, setDeviceMode,
 } = props.flow;
 const showCommand = ref(false);
 watch(flowState, () => { if (flowState.value !== "waiting") showCommand.value = false; });
