@@ -1,6 +1,11 @@
 <template>
   <div>
-    <BarChart :chart-data="chartData" :chart-options="chartOptions" />
+    <!-- vue-chart-3 quirks, both of which silently broke these charts:
+           - the options prop is `options`; `chart-options` is ignored.
+           - it wraps the <canvas> in a div of its own with no height, and
+             that div is what chart.js measures. Without `styles` the chart
+             measures itself, settles on a square, and overflows the tile. -->
+    <BarChart :chart-data="chartData" :options="chartOptions" :styles="chartStyles" />
   </div>
 </template>
 
@@ -18,10 +23,11 @@ import {
   LinearScale,
   BarController, // ✅ Add BarController
 } from "chart.js";
+import { applyChartDefaults, chartPalette } from "@/dashboard/utils/chartTheme";
 
 // ✅ Chart.js controller registration (Add BarController)
 ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, BarController);
-ChartJS.defaults.color = "#ffffff";
+applyChartDefaults(ChartJS);
 
 export default defineComponent({
 components: { BarChart },
@@ -29,6 +35,7 @@ setup() {
   const activeCount = ref(0);
   const errorCount = ref(0);
   const inactiveCount = ref(0);
+  const palette = chartPalette();
 
   const chartData = ref({
     labels: ["Active", "Error", "Inactive"],
@@ -36,17 +43,10 @@ setup() {
       {
         label: "Schedules",
         data: [activeCount.value, errorCount.value, inactiveCount.value],
-        backgroundColor: [
-          "rgba(54, 162, 235, 0.4)",
-          "rgba(255, 99, 132, 0.4)",
-          "rgba(255, 206, 86, 0.4)",
-        ],
-        borderColor: [
-          "rgba(54, 162, 235, 1)",
-          "rgba(255, 99, 132, 1)",
-          "rgba(255, 206, 86, 1)",
-        ],
-        borderWidth: 1,
+        backgroundColor: [palette.active, palette.error, palette.inactive],
+        borderWidth: 0,
+        borderRadius: 4,
+        maxBarThickness: 46,
       },
     ],
   });
@@ -72,20 +72,20 @@ setup() {
 
   return {
     chartData,
+    // Gives vue-chart-3's own wrapper a definite box to measure.
+    chartStyles: { width: "100%", height: "100%" },
     chartOptions: {
       responsive: true,
       maintainAspectRatio: false,
+      // The tile title and .tile-foot already name the series; a one-dataset
+      // legend would only repeat them inside the 96px chart well.
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false } },
+        y: { beginAtZero: true, ticks: { precision: 0 } },
+      },
     },
   };
 },
 });
 </script>
-
-
-<style scoped>
-div {
-  width: 95%;
-  height: 250px;
-}
-</style>
-

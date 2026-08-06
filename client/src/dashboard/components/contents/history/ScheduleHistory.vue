@@ -1,11 +1,12 @@
 <template>
-  <div class="app-body-main-content">
-    <ScheduleHistoryList />
+  <div class="page-head">
+    <div>
+      <div class="eyebrow">{{ $t('history_eyebrow') }}</div>
+      <h1>{{ $t('sub_history') }}</h1>
+      <p class="lead">{{ $t('history_lead') }}</p>
+    </div>
   </div>
-  <!--
-  <div class="app-body-sidebar">
-  </div>
-  -->
+  <ScheduleHistoryList />
 </template>
 
 <script>

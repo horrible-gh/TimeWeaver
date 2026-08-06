@@ -1,34 +1,60 @@
 <template>
-  <section v-if="vault" class="step-card">
+  <section v-if="vault">
     <h3>{{ $t('enroll_deliver_heading') }}</h3>
-    <p>{{ $t('enroll_deliver_desc') }}</p>
-    <p class="countdown" :class="{ warning: expiryWarning }">
-      {{ $t(expiryWarning ? 'enroll_expiry_warning' : 'enroll_remaining', { t: countdown }) }}
+    <p class="stage-intro">{{ $t('enroll_deliver_desc') }}</p>
+
+    <div class="token-box">
+      <div class="token-label" :class="{ warning: expiryWarning }">
+        <span>{{ $t('enroll_label_token') }} · {{ $t(expiryWarning ? 'enroll_expiry_warning' : 'enroll_remaining', { t: countdown }) }}</span>
+        <button class="text-btn" @click="$emit(revealed ? 'hide' : 'reveal')">
+          {{ $t(revealed ? 'btn_hide' : 'btn_reveal') }}
+        </button>
+      </div>
+      <div class="token-value">
+        <code :title="revealed ? vault.token : ''">{{ revealed ? vault.token : MASK }}</code>
+        <button class="btn" @click="$emit('copy', vault.token)">
+          <i class="ph ph-copy"></i> {{ $t('btn_copy') }}
+        </button>
+      </div>
+    </div>
+
+    <div class="security-callout">
+      <i class="ph ph-warning"></i>
+      <span>{{ $t('enroll_warn_secret') }}</span>
+    </div>
+
+    <div class="command-tabs" role="tablist" :aria-label="$t('enroll_label_command')">
+      <button
+        v-for="option in METHODS"
+        :key="option"
+        class="command-tab"
+        :class="{ active: method === option }"
+        role="tab"
+        :aria-selected="method === option"
+        @click="$emit('update-method', option)"
+      >
+        {{ $t('enroll_method_' + option) }}
+      </button>
+    </div>
+
+    <div class="codebox">{{ commandText }}<button
+      class="mini copy-code"
+      :aria-label="$t('btn_copy_all')"
+      @click="$emit('copy', commandText)"
+    ><i class="ph ph-copy"></i></button></div>
+
+    <p class="stage-intro" style="margin: 12px 0 0">
+      {{ $t('enroll_hint_install_dir', { dir: installDir }) }}
+      <template v-if="method === 'system_task'"> {{ $t('enroll_hint_system_task') }}</template>
     </p>
+    <p v-if="copyFeedback === 'success'" class="stage-intro" style="color: var(--green); margin: 6px 0 0">{{ $t('msg_copied') }}</p>
+    <p v-if="copyFeedback === 'failed'" class="stage-intro" style="color: var(--red); margin: 6px 0 0">{{ $t('msg_copy_failed') }}</p>
 
-    <label class="block-label">{{ $t('enroll_label_token') }}</label>
-    <div class="secret-row">
-      <input class="secret" :type="revealed ? 'text' : 'password'" :value="vault.token" readonly />
-      <button class="ghost" @click="$emit(revealed ? 'hide' : 'reveal')">{{ $t(revealed ? 'btn_hide' : 'btn_reveal') }}</button>
-      <button class="ghost" @click="$emit('copy', vault.token)">{{ $t('btn_copy') }}</button>
+    <div class="stage-actions">
+      <button class="btn primary" @click="$emit('start-watch')">
+        <i class="ph ph-broadcast"></i> {{ $t('btn_start_watch') }}
+      </button>
     </div>
-
-    <div class="method-grid">
-      <label><input type="radio" value="interactive" :checked="method === 'interactive'" @change="$emit('update-method', 'interactive')" /> {{ $t('enroll_method_interactive') }}</label>
-      <label><input type="radio" value="system_task" :checked="method === 'system_task'" @change="$emit('update-method', 'system_task')" /> {{ $t('enroll_method_system_task') }}</label>
-    </div>
-
-    <label class="block-label">{{ $t('enroll_label_command') }}</label>
-    <textarea class="command" :value="commandText" readonly rows="5"></textarea>
-    <div class="command-actions">
-      <button class="ghost" @click="$emit('copy', commandText)">{{ $t('btn_copy_all') }}</button>
-      <span v-if="copyFeedback === 'success'" class="success">{{ $t('msg_copied') }}</span>
-      <span v-if="copyFeedback === 'failed'" class="error">{{ $t('msg_copy_failed') }}</span>
-    </div>
-    <p>{{ $t('enroll_hint_install_dir', { dir: installDir }) }}</p>
-    <p v-if="method === 'system_task'" class="warning-text">{{ $t('enroll_hint_system_task') }}</p>
-    <p class="secret-warning">{{ $t('enroll_warn_secret') }}</p>
-    <button class="primary" @click="$emit('start-watch')">{{ $t('btn_start_watch') }}</button>
   </section>
 </template>
 
@@ -47,8 +73,15 @@ const props = defineProps({
 });
 defineEmits(["reveal", "hide", "copy", "start-watch", "update-method"]);
 
+// Fixed-width mask: the deck shows bullets, and a mask that tracked the real
+// length would leak it. Copy always reads vault.token, never this string.
+const MASK = "••••••••••••••••••••••••••••";
+const METHODS = ["interactive", "system_task"];
+
 const installDir = ref(DEFAULT_INSTALL_DIR);
-const commandText = computed(() => props.vault ? bundleToText(buildCommandBundle(props.method, props.vault.token, installDir.value)) : "");
+const commandText = computed(() => (props.vault
+  ? bundleToText(buildCommandBundle(props.method, props.vault.token, installDir.value))
+  : ""));
 const countdown = computed(() => {
   const seconds = Math.max(0, props.remainingSeconds);
   const hh = String(Math.floor(seconds / 3600)).padStart(2, "0");
@@ -58,19 +91,14 @@ const countdown = computed(() => {
 });
 </script>
 
-<style scoped>
-.step-card { padding: 24px; border: 1px solid #375575; border-radius: 12px; background: rgba(5, 25, 45, .72); }
-.secret-row, .command-actions, .method-grid { display: flex; gap: 10px; align-items: center; }
-.secret-row { margin-bottom: 18px; }
-.secret, .command { width: 100%; color: #ddecfb; background: #020b14; border: 1px solid #49647f; border-radius: 7px; padding: 11px; font-family: monospace; }
-.command { resize: vertical; white-space: pre; overflow: auto; }
-.method-grid { margin: 18px 0; flex-wrap: wrap; }
-.block-label { display: block; margin: 13px 0 7px; }
-.ghost, .primary { white-space: nowrap; padding: 9px 13px; border: 1px solid #3f91d4; border-radius: 6px; color: #fff; background: transparent; cursor: pointer; }
-.primary { margin-top: 12px; background: #0b73b9; }
-.countdown { font-weight: 700; color: #83d8ff; }
-.warning, .warning-text { color: #fcd34d; }
-.secret-warning { border-left: 3px solid #f0b84d; padding: 10px 12px; color: #c8d6e5; }
-.success { color: #6ee7b7; } .error { color: #fda4af; }
-@media (max-width: 767px) { .secret-row { align-items: stretch; flex-wrap: wrap; } .secret-row .secret { flex-basis: 100%; } }
-</style>
+<!--
+  No <style scoped> block (TR0013 section 4.4 rule 7). `.btn` / `.mini` /
+  `.text-btn` / `.command-tabs` / `.command-tab` come from components.css;
+  `.token-box` / `.token-value` / `.codebox` / `.copy-code` / `.stage-intro` /
+  `.stage-actions` / `.security-callout` from devices.css. The two inline
+  colours are token references, not literals.
+
+  The `<div class="codebox">` opening and closing tags are deliberately kept
+  tight around the text: `.codebox` is `white-space: pre-wrap`, so a newline in
+  the template would render as a blank first line of the command.
+-->

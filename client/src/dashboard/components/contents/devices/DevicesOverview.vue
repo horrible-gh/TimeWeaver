@@ -1,52 +1,74 @@
 <template>
-  <main class="app-body-main-content devices-page">
-    <header class="page-header">
-      <div>
-        <h1>{{ $t('devices_page_title') }}</h1>
-        <p>{{ $t('devices_page_desc') }}</p>
-      </div>
-      <nav v-if="userValid" class="view-tabs">
-        <button :class="{ active: activeView === 'devices' }" @click="showDevices">{{ $t('devices_tab_status') }}</button>
-        <button v-if="canEnroll" :class="{ active: activeView === 'enrollment' }" @click="openEnrollment">{{ $t('devices_tab_enroll') }}</button>
-      </nav>
-    </header>
+  <div class="page-head">
+    <div>
+      <div class="eyebrow">{{ $t('devices_eyebrow') }}</div>
+      <h1>{{ $t('devices_page_title') }}</h1>
+      <p class="lead">{{ $t('devices_page_desc') }}</p>
+    </div>
+    <nav v-if="userValid" class="view-tabs" role="tablist" :aria-label="$t('devices_view_switch')">
+      <button
+        class="view-tab"
+        :class="{ active: activeView === 'devices' }"
+        role="tab"
+        :aria-selected="activeView === 'devices'"
+        @click="showDevices"
+      >
+        <i class="ph ph-desktop"></i>{{ $t('devices_tab_status') }}
+      </button>
+      <button
+        v-if="canEnroll"
+        class="view-tab"
+        :class="{ active: activeView === 'enrollment' }"
+        role="tab"
+        :aria-selected="activeView === 'enrollment'"
+        @click="openEnrollment"
+      >
+        <i class="ph ph-key"></i>{{ $t('devices_tab_enroll') }}
+      </button>
+    </nav>
+  </div>
 
-    <div v-if="!userValid" class="fatal-notice">{{ $t('msg_relogin_required') }}</div>
+  <div v-if="!userValid" class="panel">
+    <div class="empty-state">{{ $t('msg_relogin_required') }}</div>
+  </div>
 
-    <template v-else-if="activeView === 'devices'">
-      <DeviceSummary :devices="devices" :now="now" :loading="devicesLoading" />
-      <DeviceList
-        :devices="devices"
-        :loading="devicesLoading"
-        :error="devicesError"
-        :groupName="currentGroupName"
-        :highlightDeviceId="highlightDeviceId"
-        :now="now"
-        :showEnrollment="canEnroll"
-        @refresh="loadDevices"
-        @saved="loadDevices"
-        @removed="loadDevices"
-        @open-enrollment="openEnrollment"
-      />
-      <div v-if="roleState === 'unknown'" class="history-placeholder">{{ $t('msg_loading') }}</div>
-      <div v-else-if="roleState === 'indeterminate'" class="history-placeholder">
+  <template v-else-if="activeView === 'devices'">
+    <DeviceSummary :devices="devices" :now="now" :loading="devicesLoading" />
+    <DeviceList
+      :devices="devices"
+      :loading="devicesLoading"
+      :error="devicesError"
+      :groupName="currentGroupName"
+      :highlightDeviceId="highlightDeviceId"
+      :now="now"
+      :showEnrollment="canEnroll"
+      @refresh="loadDevices"
+      @saved="loadDevices"
+      @removed="loadDevices"
+      @open-enrollment="openEnrollment"
+    />
+    <div v-if="roleState === 'unknown'" class="panel">
+      <div class="empty-state">{{ $t('msg_loading') }}</div>
+    </div>
+    <div v-else-if="roleState === 'indeterminate'" class="panel">
+      <div class="empty-state">
         <p>{{ $t('enroll_role_check_failed') }}</p>
-        <button @click="probeAdmin">{{ $t('btn_retry') }}</button>
+        <button class="btn" @click="probeAdmin">{{ $t('btn_retry') }}</button>
       </div>
-      <EnrollmentTokenList
-        v-else-if="roleState === 'admin'"
-        :items="enrollments"
-        :groups="groups"
-        :loading="historyLoading"
-        :error="historyError"
-        @refresh="loadHistory"
-        @revoked="handleRevoked"
-        @forbidden="handleForbidden"
-      />
-    </template>
+    </div>
+    <EnrollmentTokenList
+      v-else-if="roleState === 'admin'"
+      :items="enrollments"
+      :groups="groups"
+      :loading="historyLoading"
+      :error="historyError"
+      @refresh="loadHistory"
+      @revoked="handleRevoked"
+      @forbidden="handleForbidden"
+    />
+  </template>
 
-    <EnrollmentPanel v-else :flow="flow" :groups="groups" :devices="devices" @close="showDevices" />
-  </main>
+  <EnrollmentPanel v-else :flow="flow" :groups="groups" :devices="devices" @close="showDevices" />
 </template>
 
 <script setup>
@@ -177,9 +199,14 @@ function handleForbidden() {
 function handleRevoked(id) {
   flow.markRevoked(id);
 }
-function openEnrollment(device) {
+// Called both from the plain "Enroll Agent" buttons (no argument, or a
+// MouseEvent when wired straight to @click) and from a device row's key action,
+// which hands over the device to reissue for. Only a real device row is treated
+// as a preset, so an event object can never be mistaken for one.
+function openEnrollment(device = null) {
   if (!canEnroll.value) return;
-  flow.openFlow(device);
+  const preset = device && device.device_name ? device : null;
+  flow.openFlow(preset);
   activeView.value = "enrollment";
 }
 function showDevices() {
@@ -210,13 +237,8 @@ onUnmounted(() => {
 });
 </script>
 
-<style scoped>
-.devices-page { padding-bottom: 36px; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; }
-.page-header p { color: #9eb1c5; }
-.view-tabs { display: flex; gap: 8px; }
-.view-tabs button, .history-placeholder button { padding: 9px 14px; border: 1px solid #426b8c; border-radius: 7px; color: #c8d6e5; background: transparent; cursor: pointer; }
-.view-tabs button.active { color: #fff; border-color: #43a3e5; background: rgba(32, 133, 201, .18); }
-.fatal-notice, .history-placeholder { margin-top: 22px; padding: 22px; border: 1px dashed #657b91; border-radius: 10px; text-align: center; }
-@media (max-width: 767px) { .page-header { flex-direction: column; align-items: flex-start; } }
-</style>
+<!--
+  No <style scoped> block (TR0013 section 4.4 rule 7). The page head comes from
+  style.css section 5, `.panel` / `.empty-state` / `.btn` from components.css,
+  and `.view-tabs` / `.view-tab` from devices.css section 1.
+-->

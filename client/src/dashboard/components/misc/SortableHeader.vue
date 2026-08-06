@@ -5,7 +5,7 @@
     @click="handleClick"
   >
     {{ label }}
-    <span v-if="sortable && currentSortKey === field">
+    <span v-if="sortable && currentSortKey === field" class="sort-arrow">
       {{ sortOrder === 'asc' ? '▲' : '▼' }}
     </span>
   </th>

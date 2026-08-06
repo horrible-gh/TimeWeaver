@@ -1,85 +1,69 @@
 <template>
-  <div class="board-container">
-    <h2>{{ $t('sub_history') }}</h2>
-
-    <!-- ✅ Search filter -->
-    <div class="filters">
-      <div>
-        <!-- Select group -->
-        <label>{{ $t('list_label_group') }}:</label>
-        <select v-model="selectedGroup">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">
+        <h2>{{ $t('history_list_title') }}</h2>
+        <p>{{ $t('history_list_desc') }}</p>
+      </div>
+      <div class="toolbar">
+        <select class="select" v-model="selectedGroup" :aria-label="$t('list_label_group')">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="group in uniqueGroups" :key="group" :value="group">{{ group }}</option>
         </select>
-      </div>
-
-      <div>
-        <!-- Select schedule name; list changes by selected group -->
-        <label>{{ $t('list_label_schedule_name') }}:</label>
-        <select v-model="selectedSchedule">
+        <select class="select" v-model="selectedSchedule" :aria-label="$t('list_label_schedule_name')">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="schedule in filteredSchedules" :key="schedule" :value="schedule">{{ schedule }}</option>
         </select>
-      </div>
-
-      <div>
-        <!-- Select start time -->
-        <label>{{ $t('list_label_start_time') }}:</label>
-        <input type="datetime-local" v-model="selectedStartTime">
-      </div>
-
-      <div>
-        <!-- Select end time -->
-        <label>{{ $t('list_label_end_time') }}:</label>
-        <input type="datetime-local" v-model="selectedEndTime">
-      </div>
-
-      <div>
-        <!-- Select exit code -->
-        <label>{{ $t('list_label_exit_code') }}:</label>
-        <select v-model="selectedResultCode">
+        <input class="select" type="datetime-local" v-model="selectedStartTime" :aria-label="$t('list_label_start_time')">
+        <input class="select" type="datetime-local" v-model="selectedEndTime" :aria-label="$t('list_label_end_time')">
+        <select class="select" v-model="selectedResultCode" :aria-label="$t('list_label_exit_code')">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="code in uniqueResultCodes" :key="code" :value="code">{{ code }}</option>
         </select>
+        <button class="btn" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
       </div>
-
-      <!-- ✅ Filter reset button -->
-      <button class="reset-button" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
     </div>
 
-    <!-- ✅ Filtered table -->
-    <table v-if="filteredPosts.length > 0" class="board-table">
-      <thead>
-        <tr>
-          <th class="title1" @click="sort('execution_id')">ID <span v-if="sortKey === 'execution_id'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title2" @click="sort('sg_name')">{{ $t('list_label_group') }} <span v-if="sortKey === 'sg_name'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title3" @click="sort('schedule_name')">{{ $t('list_label_schedule_name') }} <span v-if="sortKey === 'schedule_name'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title4" @click="sort('start_time')">{{ $t('list_label_start_time') }} <span v-if="sortKey === 'start_time'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title5" @click="sort('end_time')">{{ $t('list_label_end_time') }} <span v-if="sortKey === 'end_time'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title6" @click="sort('result_code')">{{ $t('list_label_exit_code') }} <span v-if="sortKey === 'result_code'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title7" @click="sort('result_message')">{{ $t('list_label_message') }} <span v-if="sortKey === 'result_message'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="post in paginatedPosts" :key="post.execution_id">
-          <td>{{ post.execution_id }}</td>
-          <td>{{ post.sg_name }}</td>
-          <td>
-            <span @click="showSchedule(post.task_type,post.command,post.source_path,post.destination_path)" class="message-short">
-              {{ post.schedule_name }}
-            </span>
-          </td>
-          <td>{{ formatDate(post.start_time) }}</td>
-          <td>{{ formatDate(post.end_time) }}</td>
-          <td>{{ post.result_code }}</td>
-          <td>
-            <span @click="openModal($t('list_label_message'), post.result_message)" class="message-short">
-              {{ truncateMessage(post.result_message) }}
-            </span>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="table-scroll">
+      <table v-if="filteredPosts.length > 0">
+        <thead>
+          <tr>
+            <SortableHeader field="execution_id" label="ID" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="sg_name" :label="$t('list_label_group')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="schedule_name" :label="$t('list_label_schedule_name')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="start_time" :label="$t('list_label_start_time')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="end_time" :label="$t('list_label_end_time')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="result_code" :label="$t('list_label_exit_code')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="result_message" :label="$t('list_label_message')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="post in paginatedPosts" :key="post.execution_id">
+            <td>{{ post.execution_id }}</td>
+            <td>{{ post.sg_name }}</td>
+            <td>
+              <span @click="showSchedule(post.task_type,post.command,post.source_path,post.destination_path)" class="message-short">
+                {{ post.schedule_name }}
+              </span>
+            </td>
+            <td>{{ formatDate(post.start_time) }}</td>
+            <td>{{ formatDate(post.end_time) }}</td>
+            <td>{{ post.result_code }}</td>
+            <td>
+              <span @click="openModal($t('list_label_message'), post.result_message)" class="message-short">
+                {{ truncateMessage(post.result_message) }}
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-else class="empty-state">{{ $t('schedules_list_no_datas') }}</div>
+    </div>
+
+    <div class="panel-foot" v-if="filteredPosts.length > 0">
+      <span>{{ $t('list_footer_range', { total: filteredPosts.length, start: rangeStart, end: rangeEnd }) }}</span>
+      <BoardPagination :total="filteredPosts.length" :perPage="perPage" @page-changed="changePage" />
+    </div>
 
     <!-- ✅ Use modal component -->
     <ModalComponent
@@ -91,10 +75,18 @@
       @confirm="handleConfirm"
     >
     </ModalComponent>
-
-    <BoardPagination :total="filteredPosts.length" :perPage="perPage" @page-changed="changePage" />
   </div>
 </template>
+
+<script>
+import SortableHeader from "@/dashboard/components/misc/SortableHeader.vue";
+export default {
+    name: 'ScheduleHistoryList'
+    , components: {
+        SortableHeader,
+    }
+}
+</script>
 
 <script setup>
 import { getRequest } from "@api";
@@ -265,37 +257,16 @@ const changePage = (page) => {
   currentPage.value = page;
 };
 
+// ✅ Panel foot range text
+const rangeStart = computed(() => (filteredPosts.value.length === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1));
+const rangeEnd = computed(() => Math.min(currentPage.value * perPage.value, filteredPosts.value.length));
+
 </script>
 
-<style scoped>
-
-.title1 {
-  width:5%
-}
-
-.title2 {
-  width:17%
-}
-
-.title3 {
-  width:17%
-}
-
-.title4 {
-  width:19%
-}
-
-.title5 {
-  width:19%
-}
-
-.title6 {
-  width:10%
-}
-
-.title7 {
-  width:23%
-}
-
-
-</style>
+<!--
+  No <style scoped> block (TR0013 section 4.4 rule 7 / TR0017 DeviceList
+  convention). `.panel` / `.panel-head` / `.toolbar` / `.select` / `.btn` /
+  `.table-scroll` / `.panel-foot` / `.message-short` come from components.css.
+  The pre-renewal `.board-container` / `.board-table` / `.filters` /
+  `.reset-button` names are gone, so this screen no longer needs list.css.
+-->

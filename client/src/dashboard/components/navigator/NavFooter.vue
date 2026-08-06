@@ -1,9 +1,6 @@
 <template>
-    <footer class="footer">
-        <h1>TimeWeaver<small>©</small></h1>
-        <div>
-            TimeWeaver ©<br />
-            All Rights Reserved 2025
-        </div>
-    </footer>
+  <div class="sidebar-copy">
+    TimeWeaver ©<br />
+    All Rights Reserved 2025
+  </div>
 </template>

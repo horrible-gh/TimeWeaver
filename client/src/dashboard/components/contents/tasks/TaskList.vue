@@ -1,78 +1,72 @@
 <template>
-  <div class="board-container">
-    <h2>{{ $t('sub_tasks') }}</h2>
-
-    <!-- ✅ 스케줄 추가 버튼 -->
-    <button class="add-button" @click="openAddScheduleModal">
-      <i class="ph ph-plus"></i> {{ $t('btn_add') }}
-    </button>
-
-    <!-- ✅ 필터 -->
-    <div class="filters">
-      <div>
-        <label>{{ $t('list_label_schedule') }}:</label>
-        <select v-model="selectedSchedule">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">
+        <h2>{{ $t('tasks_list_title') }}</h2>
+        <p>{{ $t('tasks_list_desc') }}</p>
+      </div>
+      <div class="toolbar">
+        <select class="select" v-model="selectedSchedule" :aria-label="$t('list_label_schedule')">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="schedule in uniqueSchedules" :key="schedule" :value="schedule">{{ schedule }}</option>
         </select>
-      </div>
-
-      <div>
-        <label>{{ $t('list_label_task') }}:</label>
-        <select v-model="selectedTask">
+        <select class="select" v-model="selectedTask" :aria-label="$t('list_label_task')">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="task in filteredTasks" :key="task" :value="task">{{ task }}</option>
         </select>
-      </div>
-
-      <div>
-        <label>{{ $t('list_label_status') }}:</label>
-        <select v-model="selectedStatus">
+        <select class="select" v-model="selectedStatus" :aria-label="$t('list_label_status')">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="status in uniqueStatuses" :key="status" :value="status">{{ status }}</option>
         </select>
+        <button class="btn" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
+        <button class="btn primary" @click="openAddScheduleModal">
+          <i class="ph ph-plus"></i> {{ $t('btn_add') }}
+        </button>
       </div>
-
-      <button class="reset-button" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
     </div>
 
-    <!-- ✅ 스케줄 목록 -->
-    <table v-if="paginatedPosts.length > 0" class="board-table">
-      <thead>
-        <tr>
-          <SortableHeader cssClass="title1" field="schedule_id" label="ID" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" width="7%" />
-          <SortableHeader cssClass="title2" field="schedule_group_name" :label="$t('list_label_schedule')"  :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort"   width="16%" />
-          <SortableHeader cssClass="title3" field="task_name" :label="$t('list_label_task')"  :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort"   width="16%" />
-          <SortableHeader cssClass="title4" field="status" :label="$t('list_label_status')"  :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort"  width="9%" />
-          <SortableHeader cssClass="title5" field="lastest_start_time" :label="$t('list_lastest_execution_time')"  :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort"  width="17%" />
-          <SortableHeader cssClass="title6" :label="$t('list_label_actions')"  width="22%" :sortable="false" />
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="post in paginatedPosts" :key="post.detail_id">
-          <td>{{ post.schedule_id }}</td>
-          <td>{{ post.schedule_group_name }}</td>
-          <td>{{ post.task_name }}</td>
-          <td>{{ post.status }}</td>
-          <td>{{ formatDate(post.lastest_start_time) }}</td>
-          <td>
-            <div class="button-group">
-              <button class="edit-button" @click="openEditModal(post)">
-                <i class="ph ph-pencil-simple"></i> {{ $t('btn_edit') }}
-              </button>
-              <button class="delete-button" @click="deleteRecord(post.detail_id)">
-                <i class="ph ph-trash"></i> {{ $t('btn_remove') }}
-              </button>
-              <button class="run-button" @click="openManualRunEditModal(post);">
-                <i class="ph ph-play"></i> {{ $t('btn_run') }}
-              </button>
-            </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="table-scroll">
+      <table v-if="paginatedPosts.length > 0">
+        <thead>
+          <tr>
+            <SortableHeader field="schedule_id" label="ID" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="schedule_group_name" :label="$t('list_label_schedule')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="task_name" :label="$t('list_label_task')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="status" :label="$t('list_label_status')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="lastest_start_time" :label="$t('list_lastest_execution_time')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader :label="$t('list_label_actions')" :sortable="false" />
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="post in paginatedPosts" :key="post.detail_id">
+            <td>{{ post.schedule_id }}</td>
+            <td>{{ post.schedule_group_name }}</td>
+            <td>{{ post.task_name }}</td>
+            <td><span class="badge" :class="statusBadgeClass(post.status)">{{ post.status }}</span></td>
+            <td>{{ formatDate(post.lastest_start_time) }}</td>
+            <td>
+              <div class="row-actions">
+                <button class="mini" :aria-label="$t('btn_edit')" @click="openEditModal(post)">
+                  <i class="ph ph-pencil-simple"></i>
+                </button>
+                <button class="mini" :aria-label="$t('btn_run')" @click="openManualRunEditModal(post);">
+                  <i class="ph ph-play"></i>
+                </button>
+                <button class="mini" :aria-label="$t('btn_remove')" @click="deleteRecord(post.detail_id)">
+                  <i class="ph ph-trash"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-else class="empty-state">{{ $t('schedules_list_no_datas') }}</div>
+    </div>
 
-    <BoardPagination v-if="paginatedPosts.length > 0" :total="filteredPosts.length" :perPage="perPage" @page-changed="changePage" />
+    <div class="panel-foot" v-if="paginatedPosts.length > 0">
+      <span>{{ $t('list_footer_range', { total: filteredPosts.length, start: rangeStart, end: rangeEnd }) }}</span>
+      <BoardPagination :total="filteredPosts.length" :perPage="perPage" @page-changed="changePage" />
+    </div>
 
     <!-- ✅ 공통 모달 사용 -->
     <ModalComponent
@@ -82,83 +76,77 @@
       @close="closeModal"
       @confirm="saveTasks"
     >
-      <div class="modal-form grid-form">
+      <div class="form-grid">
 
-        <div class="form-field">
+        <div class="field full">
           <label>{{ $t('schedule_name') }}</label>
           <SearchableSelect v-model="formControl.schedule_id" :items="scheduleList" label-key="name" value-key="schedule_id" :placeholder="$t('schedule_name') + $t('msg_enter')"/>
         </div>
 
-        <div class="form-field">
+        <div class="field half">
           <label>{{ $t('task_name') }}</label>
           <input type="text" v-model="formControl.task_name" :placeholder="$t('task_command') + $t('msg_enter')" />
         </div>
 
-        <div class="form-field">
+        <div class="field half">
           <label>{{ $t('task_command') }}</label>
           <input type="text" v-model="formControl.command" :placeholder="$t('task_command') + $t('msg_enter')" />
         </div>
 
-        <div class="form-group-inline">
-          <div class="form-field">
-            <label>{{ $t('task_type') }}</label>
-            <select v-model="formControl.task_type">
-              <option value="command">{{ $t('task_type_command') }}</option>
-              <option value="archive">{{ $t('task_type_archive') }}</option>
-              <option value="copy">{{ $t('task_type_copy') }}</option>
-              <option value="housekeep">{{ $t('task_type_housekeep') }}</option>
-            </select>
-          </div>
-
-          <div v-if="formControl.task_type === 'archive'" class="form-field">
-            <label>{{ $t('task_archive_type') }}</label>
-            <select v-model="formControl.archive_type">
-              <option value="">{{ $t('task_archive_type_null') }}</option>
-              <option value="zip">{{ $t('task_archive_type_zip') }}</option>
-            </select>
-          </div>
+        <div class="field half">
+          <label>{{ $t('task_type') }}</label>
+          <select v-model="formControl.task_type">
+            <option value="command">{{ $t('task_type_command') }}</option>
+            <option value="archive">{{ $t('task_type_archive') }}</option>
+            <option value="copy">{{ $t('task_type_copy') }}</option>
+            <option value="housekeep">{{ $t('task_type_housekeep') }}</option>
+          </select>
         </div>
 
-        <div class="form-group-inline">
-          <div class="form-field">
-            <label>{{ $t('task_error_on_missing_source') }}</label>
-            <select v-model="formControl.error_on_missing_source">
-              <option value="1">{{ $t('list_yes') }}</option>
-              <option value="0">{{ $t('list_no') }}</option>
-            </select>
-          </div>
-
-          <div class="form-field">
-            <label>{{ $t('task_sequence') }}</label>
-            <input type="number" v-model="formControl.sequence" :placeholder="$t('task_sequence') + $t('msg_enter')" min="0" max="999" @input="formControl.sequence = $event.target.value.slice(0, 3)" />
-          </div>
+        <div v-if="formControl.task_type === 'archive'" class="field half">
+          <label>{{ $t('task_archive_type') }}</label>
+          <select v-model="formControl.archive_type">
+            <option value="">{{ $t('task_archive_type_null') }}</option>
+            <option value="zip">{{ $t('task_archive_type_zip') }}</option>
+          </select>
         </div>
 
-        <div class="form-field">
+        <div class="field half">
+          <label>{{ $t('task_error_on_missing_source') }}</label>
+          <select v-model="formControl.error_on_missing_source">
+            <option value="1">{{ $t('list_yes') }}</option>
+            <option value="0">{{ $t('list_no') }}</option>
+          </select>
+        </div>
+
+        <div class="field half">
+          <label>{{ $t('task_sequence') }}</label>
+          <input type="number" v-model="formControl.sequence" :placeholder="$t('task_sequence') + $t('msg_enter')" min="0" max="999" @input="formControl.sequence = $event.target.value.slice(0, 3)" />
+        </div>
+
+        <div class="field full">
           <label>{{ $t('task_source_path') }}</label>
           <input type="text" v-model="formControl.source_path" :placeholder="$t('task_source_path') + $t('msg_enter')" />
         </div>
 
-        <div class="form-field">
+        <div class="field full">
           <label>{{ $t('task_destination_path') }}</label>
           <input type="text" v-model="formControl.destination_path" :placeholder="$t('task_destination_path') + $t('msg_enter')" />
         </div>
 
-
-        <div class="form-field">
+        <div class="field half">
           <label>{{ $t('task_house_keep_days') }}</label>
           <input type="number" v-model="formControl.house_keep_days" :placeholder="$t('task_house_keep_days') + $t('msg_enter')" min="0" max="999" @input="formControl.house_keep_days = $event.target.value.slice(0, 3)" />
         </div>
 
-
-          <div class="form-field">
-            <label>{{ $t('task_status') }}</label>
-            <select v-model="formControl.status">
-              <option value="active">{{ $t('label_active') }}</option>
-              <option value="inactive">{{ $t('label_inactive') }}</option>
-              <option value="manual">{{ $t('label_manual') }}</option>
-            </select>
-          </div>
+        <div class="field half">
+          <label>{{ $t('task_status') }}</label>
+          <select v-model="formControl.status">
+            <option value="active">{{ $t('label_active') }}</option>
+            <option value="inactive">{{ $t('label_inactive') }}</option>
+            <option value="manual">{{ $t('label_manual') }}</option>
+          </select>
+        </div>
 
         <input type="hidden" v-model="formControl.detail_id" />
         <input type="hidden" v-model="formControl.creator" />
@@ -175,18 +163,18 @@
       @close="closeManualRunModal"
       @confirm="manualRun"
     >
-      <div class="modal-form grid-form">
-        <div class="form-field">
+      <div class="form-grid">
+        <div class="field full">
           <label>{{ $t('schedule_name') }}</label>
           <label>{{ formControlManualRun.schedule_group_name }}</label>
         </div>
 
-        <div class="form-field">
+        <div class="field full">
           <label>{{ $t('task_name') }}</label>
           <label>{{ formControlManualRun.task_name }}</label>
         </div>
 
-        <div class="form-field">
+        <div class="field half">
           <label>{{ $t('manual_run_method') }}</label>
           <select v-model="formControlManualRun.is_immediate">
             <option value="0">{{ $t('manual_run_immediate_no') }}</option>
@@ -194,17 +182,17 @@
           </select>
         </div>
 
-        <div class="form-field">
-          <label>{{ $t('manual_run_set_time') }}</label>
-          <input type="datetime-local" v-model="formControlManualRun.schedule_datetime" :disabled="formControlManualRun.is_immediate === '1'">
-        </div>
-
-        <div class="form-field">
+        <div class="field half">
           <label>{{ $t('manual_run_status') }}</label>
           <select v-model="formControlManualRun.status">
             <option value="active">{{ $t('manual_run_status_active') }}</option>
             <option value="wait">{{ $t('manual_run_status_wait') }}</option>
           </select>
+        </div>
+
+        <div class="field full">
+          <label>{{ $t('manual_run_set_time') }}</label>
+          <input type="datetime-local" v-model="formControlManualRun.schedule_datetime" :disabled="formControlManualRun.is_immediate === '1'">
         </div>
 
         <input type="hidden" v-model="formControlManualRun.detail_id" />
@@ -385,6 +373,10 @@ const changePage = (page) => {
   currentPage.value = page;
 };
 
+// ✅ 패널 바닥의 "총 N건 중 X–Y 표시" 범위
+const rangeStart = computed(() => (filteredPosts.value.length === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1));
+const rangeEnd = computed(() => Math.min(currentPage.value * perPage.value, filteredPosts.value.length));
+
 const isManualRunModalOpen = ref(false);
 const isManualRunEditMode = ref(false);
 const formControlManualRun = ref({ group_id : 0, status: "active", creator: group_id,  modifier:group_id });
@@ -468,4 +460,22 @@ watch([selectedSchedule, selectedTask, selectedStatus], () => {
   currentPage.value = 1;
 });
 
+// ✅ 상태값 → 배지 색 매핑 (active=online, inactive=offline, manual=warning)
+const statusBadgeClass = (status) => ({
+  online: status === 'active',
+  offline: status === 'inactive',
+  warning: status === 'manual',
+});
+
 </script>
+
+<!--
+  No <style scoped> block (TR0013 section 4.4 rule 7 / TR0017 DeviceList
+  convention). `.panel` / `.panel-head` / `.toolbar` / `.select` / `.btn` /
+  `.table-scroll` / `.badge` / `.row-actions` / `.mini` / `.panel-foot` /
+  `.form-grid` / `.field` come from components.css. The pre-renewal
+  `.board-container` / `.board-table` / `.filters` / `.add-button` /
+  `.edit-button` / `.delete-button` / `.run-button` / `.reset-button` /
+  `.button-group` / `.modal-form` / `.grid-form` / `.form-field` /
+  `.form-group-inline` names are gone, so this screen no longer needs list.css.
+-->

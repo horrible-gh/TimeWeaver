@@ -1,117 +1,167 @@
 <template>
-  <section class="board-container device-board">
-    <div class="section-heading">
-      <div>
-        <h2>{{ $t('devices_tab_status') }}</h2>
-        <p>{{ $t('devices_page_desc') }}</p>
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">
+        <h2>{{ $t('devices_list_title') }}</h2>
+        <p>{{ $t('devices_list_desc') }}</p>
       </div>
-      <div class="top-actions">
-        <div>
-          <button class="add-button" @click="openAddDeviceModal">
-            <i class="ph ph-plus"></i> {{ $t('btn_add_device_manual') }}
-          </button>
-          <small>{{ $t('hint_add_device_manual') }}</small>
+      <div class="toolbar">
+        <div class="search">
+          <i class="ph ph-magnifying-glass"></i>
+          <input
+            v-model="rawSearch"
+            type="search"
+            :aria-label="$t('msg_search_device_name')"
+            :placeholder="$t('msg_search_device_name')"
+          />
         </div>
-        <div v-if="showEnrollment">
-          <button class="enroll-button" @click="$emit('open-enrollment')">
-            <i class="ph ph-key"></i> {{ $t('btn_enroll_agent') }}
-          </button>
-          <small>{{ $t('hint_enroll_agent') }}</small>
-        </div>
-      </div>
-    </div>
-
-    <div class="list-controls">
-      <input v-model="rawSearch" type="search" :placeholder="$t('msg_search_device_name')" />
-      <label>
-        <span>{{ $t('label_filter_status') }}</span>
-        <select v-model="statusFilter">
+        <select v-model="statusFilter" class="select" :aria-label="$t('label_filter_status')">
           <option value="all">{{ $t('select_box_all') }}</option>
           <option value="online">{{ $t('device_state_online') }}</option>
           <option value="attention">{{ $t('device_state_attention') }}</option>
           <option value="offline">{{ $t('device_state_offline') }}</option>
         </select>
-      </label>
-      <button class="ghost-button" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
-      <button class="ghost-button" @click="$emit('refresh')">{{ $t('btn_refresh') }}</button>
+        <button class="btn" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
+        <button class="btn" :aria-label="$t('btn_refresh')" @click="$emit('refresh')">
+          <i class="ph ph-arrow-clockwise"></i> {{ $t('btn_refresh') }}
+        </button>
+        <button class="btn" :title="$t('hint_add_device_manual')" @click="openAddDeviceModal">
+          <i class="ph ph-plus"></i> {{ $t('btn_add_device_manual') }}
+        </button>
+        <button
+          v-if="showEnrollment"
+          class="btn primary"
+          :title="$t('hint_enroll_agent')"
+          @click="$emit('open-enrollment')"
+        >
+          <i class="ph ph-key"></i> {{ $t('btn_enroll_agent') }}
+        </button>
+      </div>
     </div>
 
     <div v-if="loading" class="empty-state">{{ $t('msg_loading') }}</div>
-    <div v-else-if="error" class="empty-state error-state">
+    <div v-else-if="error" class="empty-state">
       <p>{{ $t('msg_list_load_failed') }}</p>
-      <button class="ghost-button" @click="$emit('refresh')">{{ $t('btn_retry') }}</button>
+      <button class="btn" @click="$emit('refresh')">{{ $t('btn_retry') }}</button>
     </div>
     <div v-else-if="devices.length === 0" class="empty-state">
       <p>{{ $t('msg_no_devices') }}</p>
       <p>{{ $t('msg_no_devices_hint') }}</p>
-      <button v-if="showEnrollment" class="enroll-button" @click="$emit('open-enrollment')">{{ $t('btn_enroll_agent') }}</button>
+      <button v-if="showEnrollment" class="btn primary" @click="$emit('open-enrollment')">
+        {{ $t('btn_enroll_agent') }}
+      </button>
     </div>
     <div v-else-if="view.totalCount === 0" class="empty-state">
       <p>{{ $t('msg_no_filtered_devices') }}</p>
-      <button class="ghost-button" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
+      <button class="btn" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
     </div>
 
-    <div v-else class="table-scroll">
-      <table class="board-table device-table">
-        <thead>
-          <tr>
-            <th class="title-device" @click="sort('device_name')">{{ $t('list_label_device') }} {{ sortMark('device_name') }}</th>
-            <th class="title-status" @click="sort('status')">{{ $t('list_label_status') }} {{ sortMark('status') }}</th>
-            <th class="title-group">{{ $t('list_label_group') }}</th>
-            <th class="title-version" @click="sort('version')">{{ $t('list_label_version') }} {{ sortMark('version') }}</th>
-            <th class="title-login" @click="sort('last_login_at')">{{ $t('list_label_last_login_at') }} {{ sortMark('last_login_at') }}</th>
-            <th class="title-heartbeat" @click="sort('last_heartbeat_at')">{{ $t('list_label_last_heartbeat_at') }} {{ sortMark('last_heartbeat_at') }}</th>
-            <th class="title-actions">{{ $t('list_label_actions') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="device in view.rows" :key="device.device_id" :class="{ highlighted: String(device.device_id) === String(highlightDeviceId) }" :style="{ '--highlight-duration': NEW_DEVICE_HIGHLIGHT_MS + 'ms' }">
-            <td :data-label="$t('list_label_device')" class="device-name">{{ device.device_name }}</td>
-            <td :data-label="$t('list_label_status')">
-              <span class="state-badge" :class="'state-' + state(device)">{{ $t('device_state_' + state(device)) }}</span>
-              <small class="state-reason">{{ reasonText(device) }}</small>
-            </td>
-            <td :data-label="$t('list_label_group')" class="optional-mobile">{{ groupName || userGroupId }}</td>
-            <td :data-label="$t('list_label_version')" class="optional-mobile">{{ device.version || '—' }}</td>
-            <td :data-label="$t('list_label_last_login_at')" class="optional-mobile" :title="device.last_login_at || ''">{{ relative(device.last_login_at) }}</td>
-            <td :data-label="$t('list_label_last_heartbeat_at')" :title="device.last_heartbeat_at || ''">{{ relative(device.last_heartbeat_at) }}</td>
-            <td :data-label="$t('list_label_actions')">
-              <div class="button-group">
-                <button v-if="showEnrollment" class="reissue-button" :title="$t('hint_reissue_for_device')" @click="$emit('open-enrollment', device)">{{ $t('btn_reissue_for_device') }}</button>
-                <button class="edit-button" @click="openEditDeviceModal(device)">{{ $t('btn_edit') }}</button>
-                <button class="delete-button" @click="removeDevice(device.device_id)">{{ $t('btn_remove') }}</button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <BoardPagination
-        :key="paginationKey"
-        :total="view.totalCount"
-        :perPage="DEVICE_PAGE_SIZE"
-        @page-changed="currentPage = $event"
-      />
-    </div>
+    <template v-else>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th @click="sort('device_name')">
+                {{ $t('list_label_device') }}<span class="sort-arrow">{{ sortMark('device_name') }}</span>
+              </th>
+              <th @click="sort('status')">
+                {{ $t('list_label_status') }}<span class="sort-arrow">{{ sortMark('status') }}</span>
+              </th>
+              <th>{{ $t('list_label_group') }}</th>
+              <th @click="sort('version')">
+                {{ $t('list_label_version') }}<span class="sort-arrow">{{ sortMark('version') }}</span>
+              </th>
+              <th @click="sort('last_login_at')">
+                {{ $t('list_label_last_login_at') }}<span class="sort-arrow">{{ sortMark('last_login_at') }}</span>
+              </th>
+              <th @click="sort('last_heartbeat_at')">
+                {{ $t('list_label_last_heartbeat_at') }}<span class="sort-arrow">{{ sortMark('last_heartbeat_at') }}</span>
+              </th>
+              <th>{{ $t('list_label_actions') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="device in view.rows"
+              :key="device.device_id"
+              :class="{ 'row-new': String(device.device_id) === String(highlightDeviceId) }"
+              :style="{ '--highlight-duration': NEW_DEVICE_HIGHLIGHT_MS + 'ms' }"
+            >
+              <td>
+                <div class="device-name">
+                  <span class="device-glyph"><i class="ph ph-hard-drives"></i></span>
+                  <span>{{ device.device_name }}</span>
+                </div>
+              </td>
+              <td>
+                <span class="badge" :class="stateBadgeClass(device)">{{ $t('device_state_' + state(device)) }}</span>
+                <small v-if="reasonText(device)" class="state-reason">{{ reasonText(device) }}</small>
+              </td>
+              <td>{{ groupName || userGroupId }}</td>
+              <td>{{ device.version || '—' }}</td>
+              <td :title="device.last_login_at || ''">{{ relative(device.last_login_at) }}</td>
+              <td :title="device.last_heartbeat_at || ''">{{ relative(device.last_heartbeat_at) }}</td>
+              <td>
+                <div class="row-actions">
+                  <button
+                    v-if="showEnrollment"
+                    class="mini"
+                    :aria-label="$t('btn_reissue_for_device')"
+                    :title="$t('hint_reissue_for_device', { name: device.device_name })"
+                    @click="$emit('open-enrollment', device)"
+                  >
+                    <i class="ph ph-key"></i>
+                  </button>
+                  <button class="mini" :aria-label="$t('btn_edit')" @click="openEditDeviceModal(device)">
+                    <i class="ph ph-pencil-simple"></i>
+                  </button>
+                  <button class="mini" :aria-label="$t('btn_remove')" @click="removeDevice(device.device_id)">
+                    <i class="ph ph-trash"></i>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-    <ModalComponent
-      :isOpen="isModalOpen"
-      :title="isEditMode ? $t('list_label_device') + ' ' + $t('btn_edit') : $t('list_label_device') + ' ' + $t('btn_add')"
-      :confirmText="$t('btn_save')"
-      @close="closeModal"
-      @confirm="saveDevice"
-    >
-      <div class="modal-form">
-        <label>{{ $t('list_label_device') }}</label>
+      <div class="panel-foot">
+        <span>{{ $t('list_footer_range', { total: view.totalCount, start: rangeStart, end: rangeEnd }) }}</span>
+        <BoardPagination
+          :key="paginationKey"
+          :total="view.totalCount"
+          :perPage="DEVICE_PAGE_SIZE"
+          @page-changed="currentPage = $event"
+        />
+      </div>
+    </template>
+  </div>
+
+  <ModalComponent
+    :isOpen="isModalOpen"
+    :title="isEditMode ? $t('list_label_device') + ' ' + $t('btn_edit') : $t('list_label_device') + ' ' + $t('btn_add')"
+    :confirmText="$t('btn_save')"
+    @close="closeModal"
+    @confirm="saveDevice"
+  >
+    <div class="form-grid">
+      <div class="field full">
+        <label>{{ $t('list_label_device') }} <span>*</span></label>
         <input v-model="deviceForm.device_name" type="text" :placeholder="$t('msg_enter_device_name')" />
+      </div>
+      <div class="field full">
         <label>{{ $t('list_label_status') }}</label>
         <select v-model="deviceForm.status">
           <option value="active">{{ $t('label_active') }}</option>
           <option value="inactive">{{ $t('label_inactive') }}</option>
         </select>
-        <p v-if="actionError" class="inline-error">{{ $t(actionError) }}</p>
       </div>
-    </ModalComponent>
-  </section>
+    </div>
+    <div v-if="actionError" class="security-callout error">
+      <i class="ph ph-warning-circle"></i>
+      <span>{{ $t(actionError) }}</span>
+    </div>
+  </ModalComponent>
 </template>
 
 <script setup>
@@ -163,6 +213,8 @@ const view = computed(() => visibleDevices(props.devices, {
   now: props.now,
 }));
 const paginationKey = computed(() => `${search.value}:${statusFilter.value}`);
+const rangeStart = computed(() => (view.value.totalCount === 0 ? 0 : (view.value.page - 1) * DEVICE_PAGE_SIZE + 1));
+const rangeEnd = computed(() => Math.min(view.value.page * DEVICE_PAGE_SIZE, view.value.totalCount));
 
 function sort(key) {
   if (sortKey.value === key) sortDir.value = sortDir.value === "asc" ? "desc" : "asc";
@@ -173,9 +225,20 @@ function sortMark(key) {
   return sortDir.value === "asc" ? "▲" : "▼";
 }
 function state(device) { return computeLiveness(device, props.now); }
+// Deck badge vocabulary: online -> green, attention -> amber, offline -> grey.
+function stateBadgeClass(device) {
+  const liveness = state(device);
+  return {
+    online: liveness === "online",
+    warning: liveness === "attention",
+    offline: liveness === "offline",
+  };
+}
+// null when the device is simply healthy: the badge already says so, and the
+// deck's status cell carries no second line.
 function reasonText(device) {
   const reason = livenessReason(device, props.now);
-  return reason ? t(`device_reason_${reason}`) : t("device_state_online");
+  return reason ? t(`device_reason_${reason}`) : null;
 }
 function relative(value) {
   const result = relativeTime(value, props.now);
@@ -234,45 +297,12 @@ async function removeDevice(deviceId) {
 }
 </script>
 
-<style scoped>
-.device-board { margin-top: 18px; }
-.section-heading, .top-actions, .list-controls, .button-group { display: flex; align-items: center; gap: 12px; }
-.section-heading { justify-content: space-between; align-items: flex-start; }
-.section-heading p, .top-actions small { color: #9eb1c5; }
-.top-actions > div { display: flex; flex-direction: column; align-items: flex-start; max-width: 220px; }
-.enroll-button, .ghost-button { border: 1px solid #3f91d4; border-radius: 6px; padding: 9px 14px; color: #fff; background: #0b5f9e; cursor: pointer; }
-.ghost-button { background: transparent; }
-.list-controls { margin: 20px 0 14px; flex-wrap: wrap; }
-.list-controls input, .list-controls select { min-height: 38px; padding: 8px 10px; border-radius: 6px; border: 1px solid #54708b; background: #071b30; color: #fff; }
-.list-controls label { display: flex; align-items: center; gap: 8px; }
-.table-scroll { overflow-x: auto; }
-.device-table th { cursor: pointer; }
-.device-table { width: 100%; min-width: 900px; table-layout: fixed; }
-.device-table .button-group { flex-wrap: wrap; row-gap: 6px; }
-.title-device { width: 17%; } .title-status { width: 12%; } .title-group { width: 11%; }
-.title-version { width: 9%; } .title-login { width: 13%; } .title-heartbeat { width: 14%; } .title-actions { width: 24%; }
-.state-badge { display: inline-block; border-radius: 999px; padding: 3px 8px; font-weight: 700; }
-.state-online { color: #6ee7b7; background: rgba(16, 185, 129, .14); }
-.state-attention { color: #fcd34d; background: rgba(245, 158, 11, .14); }
-.state-offline { color: #fda4af; background: rgba(244, 63, 94, .14); }
-.state-reason { display: block; margin-top: 4px; color: #c2cfdd; }
-.highlighted { animation: new-device var(--highlight-duration) ease-out; }
-.empty-state { padding: 32px; text-align: center; border: 1px dashed #54708b; border-radius: 10px; }
-.error-state, .inline-error { color: #fda4af; }
-.modal-form { display: grid; gap: 10px; }
-@keyframes new-device { from { background: rgba(44, 187, 255, .32); } to { background: transparent; } }
-@media (max-width: 1200px) {
-  .section-heading { flex-direction: column; }
-}
-@media (max-width: 767px) {
-  .top-actions { flex-direction: column; align-items: stretch; width: 100%; }
-  .table-scroll { overflow: visible; }
-  .device-table thead { display: none; }
-  .device-table { min-width: 0; }
-  .device-table, .device-table tbody, .device-table tr, .device-table td { display: block; width: 100%; }
-  .device-table tr { margin-bottom: 12px; padding: 14px; border: 1px solid #38536f; border-radius: 10px; }
-  .device-table td { display: flex; justify-content: space-between; padding: 7px 0; border: 0; }
-  .device-table td::before { content: attr(data-label); color: #9eb1c5; margin-right: 10px; }
-  .device-table td.optional-mobile { display: none; }
-}
-</style>
+<!--
+  No <style scoped> block (TR0013 section 4.4 rule 7). `.panel` / `.toolbar` /
+  `.search` / `.select` / `.btn` / `.table-scroll` / `.badge` / `.device-name` /
+  `.row-actions` / `.mini` / `.panel-foot` / `.form-grid` come from
+  components.css; `.state-reason` / `.row-new` / `.security-callout` from
+  devices.css. The pre-renewal `.board-container` / `.board-table` /
+  `.list-controls` / `.enroll-button` / `.ghost-button` / `.state-badge` /
+  `.modal-form` names are gone, so this screen no longer needs list.css.
+-->

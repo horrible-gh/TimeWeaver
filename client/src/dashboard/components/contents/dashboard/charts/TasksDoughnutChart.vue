@@ -1,6 +1,11 @@
 <template>
     <div>
-      <DoughnutChart :chart-data="chartData" :chart-options="chartOptions" />
+      <!-- vue-chart-3 quirks, both of which silently broke these charts:
+             - the options prop is `options`; `chart-options` is ignored.
+             - it wraps the <canvas> in a div of its own with no height, and
+               that div is what chart.js measures. Without `styles` the chart
+               measures itself, settles on a square, and overflows the tile. -->
+      <DoughnutChart :chart-data="chartData" :options="chartOptions" :styles="chartStyles" />
     </div>
   </template>
 
@@ -9,9 +14,10 @@
   import { DoughnutChart } from 'vue-chart-3';
   import { Chart, registerables } from 'chart.js';
   import { getRequest } from "@api";
+  import { applyChartDefaults, chartPalette } from "@/dashboard/utils/chartTheme";
 
   Chart.register(...registerables);
-  Chart.defaults.color = "#ffffff";
+  applyChartDefaults(Chart);
 
 export default defineComponent({
   components: { DoughnutChart },
@@ -20,18 +26,16 @@ export default defineComponent({
     const pendingCount = ref(0);
     const completedCount = ref(0);
     const errorCount = ref(0);
+    const palette = chartPalette();
 
     const chartData = ref({
       labels: ['Running', 'Wait', 'Complate', 'Error'],
       datasets: [
         {
           data: [inProgressCount.value, pendingCount.value, completedCount.value, errorCount.value],
-          backgroundColor: [
-            "rgba(67, 220, 45, 0.5)",
-            "rgba(255, 206, 86, 0.5)",
-            "rgba(54, 162, 235, 0.5)",
-            "rgba(255, 84, 127, 0.5)",
-          ],
+          backgroundColor: [palette.running, palette.wait, palette.completed, palette.error],
+          borderColor: palette.surface,
+          borderWidth: 2,
         },
       ],
     });
@@ -59,18 +63,22 @@ export default defineComponent({
 
     return {
       chartData,
+      // Gives vue-chart-3's own wrapper a definite box to measure.
+      chartStyles: { width: "100%", height: "100%" },
       chartOptions: {
         responsive: true,
         maintainAspectRatio: false,
+        cutout: "62%",
+        // Four states need naming, so this legend stays -- but on the side, so
+        // the ring keeps the height of the 96px chart well.
+        plugins: {
+          legend: {
+            position: "right",
+            labels: { boxWidth: 10, boxHeight: 10, padding: 10, font: { size: 10 } },
+          },
+        },
       },
     };
   },
 });
 </script>
-
-<style scoped>
-div {
-  width: 100%;
-  height: 250px;
-}
-</style>

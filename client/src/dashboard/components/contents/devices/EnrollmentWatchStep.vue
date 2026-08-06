@@ -1,39 +1,36 @@
 <template>
-  <section class="step-card">
-    <h3>{{ $t('enroll_watch_heading') }}</h3>
-    <p>{{ $t('enroll_watch_desc') }}</p>
-    <div class="watch-grid">
-      <div>
-        <h4>{{ $t('enroll_summary_title') }}</h4>
-        <dl>
-          <div><dt>{{ $t('enroll_label_device_name') }}</dt><dd>{{ form.deviceName }}</dd></div>
-          <div><dt>{{ $t('enroll_label_group') }}</dt><dd>{{ groupName || form.groupId }}</dd></div>
-          <div><dt>{{ $t('enroll_label_ttl') }}</dt><dd>{{ form.ttlHours }}</dd></div>
-          <div><dt>{{ $t('enroll_label_enrollment_id') }}</dt><dd :title="String(enrollmentId || '')">{{ shortId }}</dd></div>
-        </dl>
-      </div>
-      <div>
-        <h4>{{ $t('enroll_progress_title') }}</h4>
-        <ol class="progress">
-          <li class="done">{{ $t('enroll_progress_admin') }}</li>
-          <li class="done">{{ $t('enroll_progress_issue') }}</li>
-          <li :class="{ done: flowState === 'succeeded' }">{{ $t('enroll_progress_connect') }}</li>
-          <li :class="{ done: listReflectState === 'done' }">{{ $t('enroll_progress_list') }}</li>
-        </ol>
-      </div>
+  <section>
+    <div class="waiting" :class="outcome">
+      <div class="radar"><i :class="radarIcon"></i></div>
+      <h3>{{ $t(headingKey) }}</h3>
+      <p class="stage-intro">
+        {{ $t('enroll_watch_desc') }}
+        <template v-if="flowState === 'succeeded' && listReflectState"> {{ $t('enroll_list_' + listReflectState) }}</template>
+      </p>
+      <span class="badge" :class="badgeClass">{{ $t(stateKey) }}</span>
     </div>
-    <p class="state-message" :class="'state-' + flowState">{{ $t(stateKey) }}</p>
-    <p v-if="flowState === 'succeeded' && listReflectState">{{ $t('enroll_list_' + listReflectState) }}</p>
-    <div v-if="cleanupCommand" class="cleanup">
+
+    <template v-if="cleanupCommand">
+      <div class="divider"></div>
       <h4>{{ $t('enroll_cleanup_title') }}</h4>
-      <textarea :value="cleanupCommand" readonly rows="2"></textarea>
-      <button class="ghost" @click="$emit('copy', cleanupCommand)">{{ $t('btn_copy') }}</button>
-    </div>
-    <div class="actions">
-      <button v-if="flowState === 'watchFailed' || flowState === 'watchPaused'" class="primary" @click="$emit('recheck')">{{ $t('btn_recheck') }}</button>
-      <button v-if="flowState === 'expired' || flowState === 'revoked'" class="primary" @click="$emit('reissue')">{{ $t('btn_reissue') }}</button>
-      <button v-if="vault" class="ghost" @click="$emit('show-command')">{{ $t('btn_show_command') }}</button>
-      <button class="ghost" @click="$emit('close')">{{ $t('btn_close') }}</button>
+      <div class="codebox">{{ cleanupCommand }}<button
+        class="mini copy-code"
+        :aria-label="$t('btn_copy')"
+        @click="$emit('copy', cleanupCommand)"
+      ><i class="ph ph-copy"></i></button></div>
+      <p v-if="copyFeedback === 'success'" class="stage-intro" style="color: var(--green); margin: 6px 0 0">{{ $t('msg_copied') }}</p>
+      <p v-if="copyFeedback === 'failed'" class="stage-intro" style="color: var(--red); margin: 6px 0 0">{{ $t('msg_copy_failed') }}</p>
+    </template>
+
+    <div class="stage-actions">
+      <button v-if="vault" class="btn" @click="$emit('show-command')">{{ $t('btn_show_command') }}</button>
+      <button v-if="flowState === 'watchFailed' || flowState === 'watchPaused'" class="btn secondary" @click="$emit('recheck')">
+        <i class="ph ph-arrow-clockwise"></i> {{ $t('btn_recheck') }}
+      </button>
+      <button v-if="flowState === 'expired' || flowState === 'revoked'" class="btn secondary" @click="$emit('reissue')">
+        <i class="ph ph-key"></i> {{ $t('btn_reissue') }}
+      </button>
+      <button class="btn primary" @click="$emit('close')">{{ $t('btn_close') }}</button>
     </div>
   </section>
 </template>
@@ -44,17 +41,29 @@ import { buildCleanupCommand } from "@/dashboard/utils/enrollmentCommand";
 
 const props = defineProps({
   flowState: { type: String, required: true },
-  form: { type: Object, required: true },
-  enrollmentId: { type: [String, Number], default: null },
-  groupName: { type: [String, Number], default: "" },
   listReflectState: { type: String, default: null },
   method: { type: String, default: "interactive" },
   vault: { type: Object, default: null },
+  copyFeedback: { type: String, default: null },
 });
 defineEmits(["recheck", "reissue", "show-command", "close", "copy"]);
 
-const shortId = computed(() => String(props.enrollmentId || "—").slice(0, 8));
-const cleanupCommand = computed(() => props.flowState === "succeeded" ? buildCleanupCommand(props.method) : null);
+const FAILED = ["expired", "revoked", "watchFailed", "forbidden"];
+
+const cleanupCommand = computed(() => (props.flowState === "succeeded" ? buildCleanupCommand(props.method) : null));
+const outcome = computed(() => {
+  if (props.flowState === "succeeded") return "success";
+  return FAILED.includes(props.flowState) ? "failed" : "";
+});
+const radarIcon = computed(() => {
+  if (props.flowState === "succeeded") return "ph ph-check";
+  return FAILED.includes(props.flowState) ? "ph ph-warning" : "ph ph-broadcast";
+});
+const badgeClass = computed(() => {
+  if (props.flowState === "succeeded") return "online";
+  if (props.flowState === "watchPaused") return "offline";
+  return FAILED.includes(props.flowState) ? "danger" : "warning";
+});
 const stateKey = computed(() => ({
   waiting: "enroll_state_waiting",
   succeeded: "enroll_state_succeeded",
@@ -64,21 +73,21 @@ const stateKey = computed(() => ({
   watchPaused: "enroll_state_watch_paused",
   forbidden: "err_admin_required",
 }[props.flowState] || "enroll_state_waiting"));
+const headingKey = computed(() => {
+  if (props.flowState === "succeeded") return "enroll_watch_heading_done";
+  return FAILED.includes(props.flowState) || props.flowState === "watchPaused"
+    ? stateKey.value
+    : "enroll_watch_heading";
+});
 </script>
 
-<style scoped>
-.step-card { padding: 24px; border: 1px solid #375575; border-radius: 12px; background: rgba(5, 25, 45, .72); }
-.watch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
-dl div { display: flex; justify-content: space-between; gap: 15px; padding: 7px 0; border-bottom: 1px solid rgba(90, 120, 150, .25); }
-dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
-.progress { list-style: none; padding: 0; }
-.progress li { margin: 9px 0; color: #90a4b8; }
-.progress li::before { content: "○"; margin-right: 8px; }
-.progress li.done { color: #6ee7b7; } .progress li.done::before { content: "●"; }
-.state-message { padding: 12px; border-left: 3px solid #4da3df; background: rgba(77, 163, 223, .08); }
-.cleanup textarea { width: 100%; color: #ddecfb; background: #020b14; border: 1px solid #49647f; }
-.actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
-.ghost, .primary { padding: 9px 13px; border: 1px solid #3f91d4; border-radius: 6px; color: #fff; background: transparent; cursor: pointer; }
-.primary { background: #0b73b9; }
-@media (max-width: 767px) { .watch-grid { grid-template-columns: 1fr; } }
-</style>
+<!--
+  No <style scoped> block (TR0013 section 4.4 rule 7). `.badge` / `.btn` /
+  `.mini` / `.divider` come from components.css; `.waiting` / `.radar` /
+  `.codebox` / `.copy-code` / `.stage-intro` / `.stage-actions` from devices.css.
+
+  The enrollment summary and the progress timeline that used to sit in this
+  component now live in EnrollmentPanel's side rail, where the deck puts them
+  and where they stay visible on all three steps. Props `form`, `groupName` and
+  `enrollmentId` moved with them.
+-->

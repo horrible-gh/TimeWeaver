@@ -1,35 +1,34 @@
 <!-- TabComponent.vue -->
 <template>
   <div>
-    <div style="display:flex; gap:10px;">
+    <div class="command-tabs">
       <button
         v-for="(tab, idx) in tabs"
         :key="idx"
+        class="command-tab"
         :class="{ active: activeTab === idx }"
         @click="activeTab = idx"
       >
         {{ tab.title }}
       </button>
     </div>
-    <div style="margin-top:10px;">
+    <div class="tab-panel">
       <slot :name="tabs[activeTab].slot"></slot>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, defineProps } from 'vue'
 
-const props = defineProps({
+defineProps({
   tabs: Array // [{ title: 'Basic information', slot: 'basic' }, ...]
 })
 
 const activeTab = ref(0)
 </script>
 
-<style scoped>
-button.active {
-  font-weight: bold;
-  border-bottom: 2px solid blue;
-}
-</style>
+<!--
+  No <style scoped> block: `.command-tabs` / `.command-tab` are the shared tab
+  rules in components.css section 11 (deck `devices.html` command tabs).
+-->

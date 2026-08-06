@@ -1,224 +1,239 @@
 <template>
-  <div class="board-container">
-    <h2>{{ $t('sub_schedules') }}</h2>
+  <div class="metric-grid">
+    <article class="metric">
+      <div class="metric-top">
+        <span>{{ $t('metric_schedules_total_label') }}</span>
+        <span class="metric-icon"><i class="ph ph-calendar"></i></span>
+      </div>
+      <div class="metric-value">
+        <strong>{{ totalCount }}</strong>
+        <small>{{ $t('metric_schedules_count') }}</small>
+      </div>
+    </article>
+    <article class="metric">
+      <div class="metric-top">
+        <span>{{ $t('label_active') }}</span>
+        <span class="metric-icon" style="color:var(--green)"><i class="ph ph-check-circle"></i></span>
+      </div>
+      <div class="metric-value">
+        <strong>{{ activeCount }}</strong>
+        <small>{{ $t('devices_summary_ratio', { n: activeRatio }) }}</small>
+      </div>
+    </article>
+    <article class="metric">
+      <div class="metric-top">
+        <span>{{ $t('label_manual') }}</span>
+        <span class="metric-icon" style="color:var(--amber)"><i class="ph ph-warning"></i></span>
+      </div>
+      <div class="metric-value">
+        <strong>{{ manualCount }}</strong>
+        <small>{{ $t('metric_manual_desc') }}</small>
+      </div>
+    </article>
+    <article class="metric">
+      <div class="metric-top">
+        <span>{{ $t('label_inactive') }}</span>
+        <span class="metric-icon"><i class="ph ph-x-circle"></i></span>
+      </div>
+      <div class="metric-value">
+        <strong>{{ inactiveCount }}</strong>
+        <small>{{ $t('metric_inactive_desc') }}</small>
+      </div>
+    </article>
+  </div>
 
-    <!-- ✅ 스케줄 추가 버튼 -->
-    <button class="add-button" @click="openAddScheduleModal">
-      <i class="ph ph-plus"></i> {{ $t('btn_add') }}
-    </button>
-
-    <!-- ✅ 검색 필터 -->
-    <div class="filters">
-      <div>
-        <label>{{ $t('list_label_device') }}:</label>
-        <select v-model="selectedDevice">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">
+        <h2>{{ $t('schedules_list_title') }}</h2>
+        <p>{{ $t('schedules_list_desc') }}</p>
+      </div>
+      <div class="toolbar">
+        <select class="select" v-model="selectedDevice" :aria-label="$t('list_label_device')">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="device in uniqueDevices" :key="device" :value="device">{{ device }}</option>
         </select>
-      </div>
-
-      <!-- 이거 추가 -->
-      <div>
-        <label>{{ $t('list_label_schedule') }}:</label>
-        <select v-model="selectedSchedule">
+        <select class="select" v-model="selectedSchedule" :aria-label="$t('list_label_schedule')">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="schedule in filteredSchedules" :key="schedule" :value="schedule">{{ schedule }}</option>
         </select>
-      </div>
-
-      <!-- 이거 추가 -->
-      <div>
-        <label>{{ $t('list_label_status') }}:</label>
-        <select v-model="selectedStatus">
+        <select class="select" v-model="selectedStatus" :aria-label="$t('list_label_status')">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="status in uniqueStatuses" :key="status" :value="status">{{ status }}</option>
         </select>
+        <button class="btn" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
+        <button class="btn primary" @click="openAddScheduleModal">
+          <i class="ph ph-plus"></i> {{ $t('btn_new_schedule') }}
+        </button>
       </div>
-
-      <button class="reset-button" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
     </div>
 
+    <div class="table-scroll">
+      <table v-if="paginatedPosts.length > 0">
+        <thead>
+          <tr>
+            <SortableHeader field="schedule_id" label="ID" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="device_name" :label="$t('list_label_device')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="name" :label="$t('list_label_schedule')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="status" :label="$t('list_label_status')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader :label="$t('list_label_actions')" :sortable="false" />
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="post in paginatedPosts" :key="post.schedule_id">
+            <td>{{ post.schedule_id }}</td>
+            <td>{{ post.device_name }}</td>
+            <td>{{ post.name }}</td>
+            <td><span class="badge" :class="statusBadgeClass(post.status)">{{ post.status }}</span></td>
+            <td>
+              <div class="row-actions">
+                <button class="mini" :aria-label="$t('btn_edit')" @click="openEditModal(post)">
+                  <i class="ph ph-pencil-simple"></i>
+                </button>
+                <button class="mini" :aria-label="$t('btn_run')" @click="openManualRunEditModal(post)">
+                  <i class="ph ph-play"></i>
+                </button>
+                <button class="mini" :aria-label="$t('btn_remove')" @click="deleteRecord(post.schedule_id)">
+                  <i class="ph ph-trash"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-else class="empty-state">{{ $t('schedules_list_no_datas') }}</div>
+    </div>
 
-    <!-- ✅ 스케줄 목록 -->
-    <table v-if="paginatedPosts.length > 0" class="board-table">
-      <thead>
-        <tr>
-          <SortableHeader cssClass="title1" field="schedule_id" label="ID" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" width="12%" />
-          <SortableHeader cssClass="title21" field="device_name" :label="$t('list_label_device')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" width="18%" />
-          <SortableHeader cssClass="title22" field="name" :label="$t('list_label_schedule')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" width="20%" />
-          <SortableHeader cssClass="title3" field="status" :label="$t('list_label_status')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" width="13%" />
-          <SortableHeader cssClass="title4" :label="$t('list_label_actions')"  width="20%" :sortable="false" />
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="post in paginatedPosts" :key="post.schedule_id">
-          <td>{{ post.schedule_id }}</td>
-          <td>{{ post.device_name }}</td>
-          <td>{{ post.name }}</td>
-          <td>{{ post.status }}</td>
-          <td>
-            <div class="button-group">
-              <button class="edit-button" @click="openEditModal(post)">
-                <i class="ph ph-pencil-simple"></i> {{ $t('btn_edit') }}
-              </button>
-              <button class="delete-button" @click="deleteRecord(post.schedule_id)">
-                <i class="ph ph-trash"></i> {{ $t('btn_remove') }}
-              </button>
-              <button class="run-button" @click="openManualRunEditModal(post);">
-                <i class="ph ph-play"></i> {{ $t('btn_run') }}
-              </button>
-            </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-
-    <BoardPagination v-if="paginatedPosts.length > 0" :total="filteredPosts.length" :perPage="perPage" @page-changed="changePage" />
-
-    <!-- ✅ 공통 모달 사용 -->
-    <ModalComponent
-      :isOpen="isModalOpen"
-      :title="isEditMode ? $t('list_label_schedule') + ' ' + $t('btn_edit') : $t('list_label_schedule') + ' ' + $t('btn_add')"
-      :confirmText="$t('btn_save')"
-      @close="closeModal"
-      @confirm="saveSchedule"
-    >
-      <div class="modal-form grid-form">
-        <div class="form-field">
-          <label>{{ $t('schedule_name') }}</label>
-          <input type="text" v-model="formControl.name" :placeholder="$t('schedule_name') + $t('msg_enter')" />
-        </div>
-
-        <div class="form-group-inline">
-          <div class="form-field">
-            <label>{{ $t('schedule_year') }}</label>
-            <input type="text" v-model="formControl.year" :placeholder="$t('schedule_year') + $t('msg_enter')" />
-          </div>
-
-          <div class="form-field">
-            <label>{{ $t('schedule_month') }}</label>
-            <input type="text" v-model="formControl.month" :placeholder="$t('schedule_month') + $t('msg_enter')" />
-          </div>
-        </div>
-
-        <div class="form-group-inline">
-          <div class="form-field">
-            <label>{{ $t('schedule_dayofweek') }}</label>
-            <select v-model="formControl.day_of_week">
-              <option value="*">{{ $t('schedule_dayofweek_all') }}</option>
-              <option value="0">{{ $t('schedule_dayofweek_sun') }}</option>
-              <option value="1">{{ $t('schedule_dayofweek_mon') }}</option>
-              <option value="2">{{ $t('schedule_dayofweek_tue') }}</option>
-              <option value="3">{{ $t('schedule_dayofweek_wed') }}</option>
-              <option value="4">{{ $t('schedule_dayofweek_thr') }}</option>
-              <option value="5">{{ $t('schedule_dayofweek_fri') }}</option>
-              <option value="6">{{ $t('schedule_dayofweek_sat') }}</option>
-            </select>
-          </div>
-
-          <div class="form-field">
-            <label>{{ $t('schedule_day') }}</label>
-            <input type="text" v-model="formControl.day" :placeholder="$t('schedule_day') + $t('msg_enter')" />
-          </div>
-        </div>
-
-        <div class="form-group-inline">
-          <div class="form-field">
-            <label>{{ $t('schedule_hour') }}</label>
-            <input type="text" v-model="formControl.hour" :placeholder="$t('schedule_name') + $t('msg_enter')" />
-          </div>
-
-          <div class="form-field">
-            <label>{{ $t('schedule_minute') }}</label>
-            <input type="text" v-model="formControl.minute" :placeholder="$t('schedule_minute') + $t('msg_enter')" />
-          </div>
-        </div>
-
-        <div class="form-group-inline">
-          <div class="form-field">
-            <label>{{ $t('schedule_second') }}</label>
-            <input type="text" v-model="formControl.second" :placeholder="$t('schedule_second') + $t('msg_enter')" />
-          </div>
-
-          <div class="form-field">
-          </div>
-        </div>
-
-        <div class="form-field">
-          <label>{{ $t('list_label_status') }}</label>
-          <select v-model="formControl.status">
-            <option value="active">{{ $t('label_active') }}</option>
-            <option value="inactive">{{ $t('label_inactive') }}</option>
-            <option value="manual">{{ $t('label_manual') }}</option>
-          </select>
-        </div>
-
-        <div class="form-field">
-          <label>{{ $t('schedule_error_stop') }}</label>
-          <select v-model="formControl.is_error_stop">
-            <option value="1">{{ $t('schedule_error_stop_yes') }}</option>
-            <option value="0">{{ $t('schedule_error_stop_no') }}</option>
-          </select>
-        </div>
-
-        <div class="form-field">
-          <label>{{ $t('schedule_device') }}</label>
-          <select v-model="formControl.target_device">
-            <option disabled value="">{{ $t('schedule_device') + $t('msg_enter') }}</option>
-            <option v-for="device in deviceList" :key="device.device_id" :value="device.device_id">
-              {{ device.device_name }}
-            </option>
-          </select>
-        </div>
-
-        <input type="hidden" v-model="formControl.creator" />
-        <input type="hidden" v-model="formControl.modifier" />
-      </div>
-    </ModalComponent>
-
-
-    <!-- ✅ 수동실행 모달 사용 -->
-    <ModalComponent
-      :isOpen="isManualRunModalOpen"
-      :title="$t('manual_run_title')"
-      :confirmText="$t('btn_run')"
-      @close="closeManualRunModal"
-      @confirm="manualRun"
-    >
-      <div class="modal-form grid-form">
-        <div class="form-field">
-          <label>{{ $t('schedule_name') }}</label>
-          <label>{{ formControlManualRun.name }}</label>
-        </div>
-
-        <div class="form-field">
-          <label>{{ $t('manual_run_method') }}</label>
-          <select v-model="formControlManualRun.is_immediate">
-            <option value="0">{{ $t('manual_run_immediate_no') }}</option>
-            <option value="1">{{ $t('manual_run_immediate_yes') }}</option>
-          </select>
-        </div>
-
-        <div class="form-field">
-          <label>{{ $t('manual_run_set_time') }}</label>
-          <input type="datetime-local" v-model="formControlManualRun.schedule_datetime" :disabled="formControlManualRun.is_immediate === '1'">
-        </div>
-
-        <div class="form-field">
-          <label>{{ $t('manual_run_status') }}</label>
-          <select v-model="formControlManualRun.status">
-            <option value="active">{{ $t('manual_run_status_active') }}</option>
-            <option value="wait">{{ $t('manual_run_status_wait') }}</option>
-          </select>
-        </div>
-
-        <input type="hidden" v-model="formControlManualRun.schedule_id" />
-        <input type="hidden" v-model="formControlManualRun.creator" />
-        <input type="hidden" v-model="formControlManualRun.modifier" />
-      </div>
-    </ModalComponent>
-
+    <div class="panel-foot" v-if="paginatedPosts.length > 0">
+      <span>{{ $t('list_footer_range', { total: filteredPosts.length, start: rangeStart, end: rangeEnd }) }}</span>
+      <BoardPagination :total="filteredPosts.length" :perPage="perPage" @page-changed="changePage" />
+    </div>
   </div>
+
+  <!-- ✅ 공통 모달 사용 -->
+  <ModalComponent
+    :isOpen="isModalOpen"
+    :title="isEditMode ? $t('list_label_schedule') + ' ' + $t('btn_edit') : $t('list_label_schedule') + ' ' + $t('btn_add')"
+    :confirmText="$t('btn_save')"
+    @close="closeModal"
+    @confirm="saveSchedule"
+  >
+    <div class="form-grid">
+      <div class="field full">
+        <label>{{ $t('schedule_name') }}</label>
+        <input type="text" v-model="formControl.name" :placeholder="$t('schedule_name') + $t('msg_enter')" />
+      </div>
+
+      <div class="field">
+        <label>{{ $t('schedule_year') }}</label>
+        <input type="text" v-model="formControl.year" :placeholder="$t('schedule_year') + $t('msg_enter')" />
+      </div>
+      <div class="field">
+        <label>{{ $t('schedule_month') }}</label>
+        <input type="text" v-model="formControl.month" :placeholder="$t('schedule_month') + $t('msg_enter')" />
+      </div>
+      <div class="field">
+        <label>{{ $t('schedule_day') }}</label>
+        <input type="text" v-model="formControl.day" :placeholder="$t('schedule_day') + $t('msg_enter')" />
+      </div>
+      <div class="field">
+        <label>{{ $t('schedule_dayofweek') }}</label>
+        <select v-model="formControl.day_of_week">
+          <option value="*">{{ $t('schedule_dayofweek_all') }}</option>
+          <option value="0">{{ $t('schedule_dayofweek_sun') }}</option>
+          <option value="1">{{ $t('schedule_dayofweek_mon') }}</option>
+          <option value="2">{{ $t('schedule_dayofweek_tue') }}</option>
+          <option value="3">{{ $t('schedule_dayofweek_wed') }}</option>
+          <option value="4">{{ $t('schedule_dayofweek_thr') }}</option>
+          <option value="5">{{ $t('schedule_dayofweek_fri') }}</option>
+          <option value="6">{{ $t('schedule_dayofweek_sat') }}</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>{{ $t('schedule_hour') }}</label>
+        <input type="text" v-model="formControl.hour" :placeholder="$t('schedule_name') + $t('msg_enter')" />
+      </div>
+      <div class="field">
+        <label>{{ $t('schedule_minute') }}</label>
+        <input type="text" v-model="formControl.minute" :placeholder="$t('schedule_minute') + $t('msg_enter')" />
+      </div>
+      <div class="field">
+        <label>{{ $t('schedule_second') }}</label>
+        <input type="text" v-model="formControl.second" :placeholder="$t('schedule_second') + $t('msg_enter')" />
+      </div>
+      <div class="field">
+        <label>{{ $t('list_label_status') }}</label>
+        <select v-model="formControl.status">
+          <option value="active">{{ $t('label_active') }}</option>
+          <option value="inactive">{{ $t('label_inactive') }}</option>
+          <option value="manual">{{ $t('label_manual') }}</option>
+        </select>
+      </div>
+
+      <div class="field half">
+        <label>{{ $t('schedule_error_stop') }}</label>
+        <select v-model="formControl.is_error_stop">
+          <option value="1">{{ $t('schedule_error_stop_yes') }}</option>
+          <option value="0">{{ $t('schedule_error_stop_no') }}</option>
+        </select>
+      </div>
+      <div class="field half">
+        <label>{{ $t('schedule_device') }}</label>
+        <select v-model="formControl.target_device">
+          <option disabled value="">{{ $t('schedule_device') + $t('msg_enter') }}</option>
+          <option v-for="device in deviceList" :key="device.device_id" :value="device.device_id">
+            {{ device.device_name }}
+          </option>
+        </select>
+      </div>
+
+      <input type="hidden" v-model="formControl.creator" />
+      <input type="hidden" v-model="formControl.modifier" />
+    </div>
+  </ModalComponent>
+
+
+  <!-- ✅ 수동실행 모달 사용 -->
+  <ModalComponent
+    :isOpen="isManualRunModalOpen"
+    :title="$t('manual_run_title')"
+    :confirmText="$t('btn_run')"
+    @close="closeManualRunModal"
+    @confirm="manualRun"
+  >
+    <div class="form-grid">
+      <div class="field full">
+        <label>{{ $t('schedule_name') }}</label>
+        <label>{{ formControlManualRun.name }}</label>
+      </div>
+
+      <div class="field half">
+        <label>{{ $t('manual_run_method') }}</label>
+        <select v-model="formControlManualRun.is_immediate">
+          <option value="0">{{ $t('manual_run_immediate_no') }}</option>
+          <option value="1">{{ $t('manual_run_immediate_yes') }}</option>
+        </select>
+      </div>
+      <div class="field half">
+        <label>{{ $t('manual_run_status') }}</label>
+        <select v-model="formControlManualRun.status">
+          <option value="active">{{ $t('manual_run_status_active') }}</option>
+          <option value="wait">{{ $t('manual_run_status_wait') }}</option>
+        </select>
+      </div>
+
+      <div class="field full">
+        <label>{{ $t('manual_run_set_time') }}</label>
+        <input type="datetime-local" v-model="formControlManualRun.schedule_datetime" :disabled="formControlManualRun.is_immediate === '1'">
+      </div>
+
+      <input type="hidden" v-model="formControlManualRun.schedule_id" />
+      <input type="hidden" v-model="formControlManualRun.creator" />
+      <input type="hidden" v-model="formControlManualRun.modifier" />
+    </div>
+  </ModalComponent>
+
 </template>
 
 <script>
@@ -361,6 +376,10 @@ const changePage = (page) => {
   currentPage.value = page;
 };
 
+// ✅ 패널 바닥의 "총 N건 중 X–Y 표시" 범위
+const rangeStart = computed(() => (filteredPosts.value.length === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1));
+const rangeEnd = computed(() => Math.min(currentPage.value * perPage.value, filteredPosts.value.length));
+
 const isManualRunModalOpen = ref(false);
 const isManualRunEditMode = ref(false);
 const formControlManualRun = ref({ group_id : 0, status: "active", creator: group_id,  modifier:group_id });
@@ -440,5 +459,19 @@ const resetFilters = () => {
   selectedStatus.value = "";
   currentPage.value = 1; // 이거 추가!
 };
+
+// ✅ 상단 지표 카드 — 필터와 무관하게 전체 스케줄 기준
+const totalCount = computed(() => posts.value.length);
+const activeCount = computed(() => posts.value.filter(post => post.status === 'active').length);
+const manualCount = computed(() => posts.value.filter(post => post.status === 'manual').length);
+const inactiveCount = computed(() => posts.value.filter(post => post.status === 'inactive').length);
+const activeRatio = computed(() => (totalCount.value ? Math.round((activeCount.value / totalCount.value) * 100) : 0));
+
+// ✅ 상태값 → 배지 색 매핑 (active=online, inactive=offline, manual=warning)
+const statusBadgeClass = (status) => ({
+  online: status === 'active',
+  offline: status === 'inactive',
+  warning: status === 'manual',
+});
 
 </script>
