@@ -26,7 +26,7 @@ import { parseServerTime } from "@/dashboard/utils/deviceStatus";
 
 export function useEnrollmentFlow(options = {}) {
   const flowState = ref("idle");
-  const form = reactive({ groupId: null, deviceName: "", ttlHours: TTL_DEFAULT });
+  const form = reactive({ groupId: null, deviceName: "", deviceMode: "new", ttlHours: TTL_DEFAULT });
   const formErrors = ref({});
   const vault = ref(null);
   const enrollmentId = ref(null);
@@ -51,6 +51,10 @@ export function useEnrollmentFlow(options = {}) {
 
   const groups = () => {
     const value = unref(options.groups);
+    return Array.isArray(value) ? value : [];
+  };
+  const devices = () => {
+    const value = unref(options.devices);
     return Array.isArray(value) ? value : [];
   };
   const currentUserGroupId = () => unref(options.userGroupId);
@@ -82,7 +86,11 @@ export function useEnrollmentFlow(options = {}) {
   function validateForm() {
     const errors = {};
     const name = String(form.deviceName || "").trim();
-    if (name.length < DEVICE_NAME_MIN_LEN) errors.deviceName = "msg_device_name_required";
+    if (form.deviceMode === "existing") {
+      const known = devices();
+      if (known.length === 0) errors.deviceName = "msg_no_existing_devices";
+      else if (!known.some((device) => device.device_name === name)) errors.deviceName = "msg_device_selection_required";
+    } else if (name.length < DEVICE_NAME_MIN_LEN) errors.deviceName = "msg_device_name_required";
     else if (name.length > DEVICE_NAME_MAX_LEN) errors.deviceName = "msg_device_name_too_long";
     if (
       form.groupId == null
@@ -105,25 +113,43 @@ export function useEnrollmentFlow(options = {}) {
     return Object.keys(validateForm()).length === 0;
   });
 
-  function resetForm() {
+  function resetForm(presetDevice) {
     const userGroupId = Number(currentUserGroupId());
     const availableGroups = groups();
     const preferred = availableGroups.find((group) => Number(group.group_id) === userGroupId);
     form.groupId = userGroupId === 0
       ? (availableGroups.length === 0 ? 0 : null)
       : (preferred ? preferred.group_id : null);
-    form.deviceName = "";
+    if (presetDevice && presetDevice.device_name) {
+      form.deviceMode = "existing";
+      form.deviceName = presetDevice.device_name;
+    } else {
+      form.deviceMode = "new";
+      form.deviceName = "";
+    }
     form.ttlHours = TTL_DEFAULT;
     formErrors.value = {};
     notice.value = userGroupId !== 0 && !preferred
       ? { key: "msg_user_group_unavailable", params: {} }
-      : null;
+      : (presetDevice && presetDevice.device_name
+        ? { key: "enroll_notice_existing_device_selected", params: { name: presetDevice.device_name } }
+        : null);
     executionMethod.value = "interactive";
   }
 
-  function openFlow() {
-    resetForm();
+  function openFlow(presetDevice) {
+    resetForm(presetDevice);
     flowState.value = "form";
+  }
+
+  function setDeviceMode(mode) {
+    form.deviceMode = mode;
+    if (mode === "existing") {
+      const known = devices();
+      form.deviceName = known.length > 0 ? known[0].device_name : "";
+    } else {
+      form.deviceName = "";
+    }
   }
 
   function updateRemaining() {
@@ -387,6 +413,7 @@ export function useEnrollmentFlow(options = {}) {
     canIssue,
     openFlow,
     resetForm,
+    setDeviceMode,
     validateForm,
     issue,
     reveal,
