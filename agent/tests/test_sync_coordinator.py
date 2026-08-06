@@ -121,6 +121,23 @@ def test_each_snapshot_contract_violation_rejects_the_whole_snapshot(mutator):
         validate_snapshot(candidate, IDENTITY)
 
 
+def test_exec_sequence_scope_is_per_schedule_not_global():
+    # Regression for timeweaver.agent.0011.0003-NR: exec_sequence is only
+    # guaranteed nondecreasing within a schedule_id (server dense_rank is per
+    # schedule_id), so overlapping `sequence` values across different
+    # schedules must not be rejected by a global sort/check.
+    schedule_a = schedule(11, detail_id="00000000-0000-0000-0000-000000000011")
+    schedule_a["details"][0]["sequence"] = 40
+    schedule_a["details"][0]["exec_sequence"] = 4
+    schedule_b = schedule(13, detail_id="00000000-0000-0000-0000-000000000013")
+    schedule_b["details"][0]["sequence"] = 40
+    schedule_b["details"][0]["exec_sequence"] = 3
+    snapshot = validate_snapshot(
+        response(schedules=[schedule_a, schedule_b], manuals=[]), IDENTITY
+    )
+    assert [item.schedule_id for item in snapshot.schedules] == [11, 13]
+
+
 def test_valid_snapshot_is_immutable_and_normalized():
     snapshot = validate_snapshot(response(), IDENTITY)
     assert snapshot.device.device_id == 7
