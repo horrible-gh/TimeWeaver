@@ -1,42 +1,52 @@
 <template>
-  <div class="board-container">
-    <h2>{{ $t('sub_groups') }}</h2>
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">
+        <h2>{{ $t('groups_list_title') }}</h2>
+        <p>{{ $t('groups_list_desc') }}</p>
+      </div>
+      <div class="toolbar">
+        <button class="btn primary" @click="openAddGroupModal">
+          <i class="ph ph-plus"></i> {{ $t('btn_add') }}
+        </button>
+      </div>
+    </div>
 
-    <!-- ✅ Add group button -->
-    <button class="add-button" @click="openAddGroupModal">
-      <i class="ph ph-plus"></i> {{ $t('btn_add') }}
-    </button>
+    <div class="table-scroll">
+      <table v-if="paginatedPosts.length > 0">
+        <thead>
+          <tr>
+            <SortableHeader field="group_id" label="ID" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="group_name" :label="$t('list_label_group')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="status" :label="$t('list_label_status')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader :label="$t('list_label_actions')" :sortable="false" />
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="post in paginatedPosts" :key="post.group_id">
+            <td>{{ post.group_id }}</td>
+            <td>{{ post.group_name }}</td>
+            <td><span class="badge" :class="statusBadgeClass(post.status)">{{ post.status }}</span></td>
+            <td>
+              <div class="row-actions">
+                <button class="mini" :aria-label="$t('btn_edit')" @click="openEditGroupModal(post)">
+                  <i class="ph ph-pencil-simple"></i>
+                </button>
+                <button class="mini" :aria-label="$t('btn_remove')" @click="deleteGroup(post.group_id)">
+                  <i class="ph ph-trash"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-else class="empty-state">{{ $t('schedules_list_no_datas') }}</div>
+    </div>
 
-    <!-- ✅ Group list -->
-    <table v-if="paginatedPosts.length > 0" class="board-table">
-      <thead>
-        <tr>
-          <th class="title1" @click="sort('group_id')">ID <span v-if="sortKey === 'group_id'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title2" @click="sort('group_name')">{{ $t('list_label_group') }} <span v-if="sortKey === 'group_name'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title3" @click="sort('status')">{{ $t('list_label_status') }} <span v-if="sortKey === 'status'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title4">{{ $t('list_label_actions') }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="post in paginatedPosts" :key="post.group_id">
-          <td>{{ post.group_id }}</td>
-          <td>{{ post.group_name }}</td>
-          <td>{{ post.status }}</td>
-          <td>
-            <div class="button-group">
-              <button class="edit-button" @click="openEditGroupModal(post)">
-                <i class="ph ph-pencil-simple"></i> {{ $t('btn_edit') }}
-              </button>
-              <button class="delete-button" @click="deleteGroup(post.group_id)">
-                <i class="ph ph-trash"></i> {{ $t('btn_remove') }}
-              </button>
-            </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-
-    <BoardPagination v-if="paginatedPosts.length > 0" :total="posts.length" :perPage="perPage" @page-changed="changePage" />
+    <div class="panel-foot" v-if="paginatedPosts.length > 0">
+      <span>{{ $t('list_footer_range', { total: posts.length, start: rangeStart, end: rangeEnd }) }}</span>
+      <BoardPagination :total="posts.length" :perPage="perPage" @page-changed="changePage" />
+    </div>
 
     <!-- ✅ Use shared modal -->
     <ModalComponent
@@ -46,15 +56,19 @@
       @close="closeModal"
       @confirm="saveGroup"
     >
-      <div class="modal-form">
-        <label>{{ $t('list_label_group') }}</label>
-        <input type="text" v-model="formGroup.group_name" :placeholder="$t('msg_enter_group_name')" />
+      <div class="form-grid">
+        <div class="field full">
+          <label>{{ $t('list_label_group') }}</label>
+          <input type="text" v-model="formGroup.group_name" :placeholder="$t('msg_enter_group_name')" />
+        </div>
 
-        <label>{{ $t('list_label_status') }}</label>
-        <select v-model="formGroup.status">
-          <option value="active">{{ $t('label_active') }}</option>
-          <option value="inactive">{{ $t('label_inactive') }}</option>
-        </select>
+        <div class="field full">
+          <label>{{ $t('list_label_status') }}</label>
+          <select v-model="formGroup.status">
+            <option value="active">{{ $t('label_active') }}</option>
+            <option value="inactive">{{ $t('label_inactive') }}</option>
+          </select>
+        </div>
 
         <input type="hidden" v-model="formGroup.creator" />
         <input type="hidden" v-model="formGroup.modifier" />
@@ -64,6 +78,18 @@
   </div>
 </template>
 
+
+
+<script>
+import SortableHeader from "@/dashboard/components/misc/SortableHeader.vue";
+export default {
+    name: 'GroupList'
+    , components: {
+        SortableHeader,
+    }
+}
+
+</script>
 
 
 <script setup>
@@ -80,9 +106,6 @@ const { sortKey, sortOrder, sort } = useSort(posts);
 const isLoading = ref(true);
 const currentPage = ref(1);
 const perPage = ref(7);
-
-// const searchGroup = ref("");
-// const selectedStatus = ref("");
 
 // ✅ Modal state
 const user = JSON.parse(localStorage.getItem("user") || "{}"); // ✅ Convert safely
@@ -171,25 +194,23 @@ const changePage = (page) => {
   currentPage.value = page;
 };
 
+// ✅ Panel foot의 "총 N건 중 X–Y 표시" 범위
+const rangeStart = computed(() => (posts.value.length === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1));
+const rangeEnd = computed(() => Math.min(currentPage.value * perPage.value, posts.value.length));
+
+// ✅ 상태값 → 배지 색 매핑 (active=online, inactive=offline)
+const statusBadgeClass = (status) => ({
+  online: status === 'active',
+  offline: status === 'inactive',
+});
+
 </script>
 
-
-<style scoped>
-
-.title1 {
-  width:25%
-}
-
-.title2 {
-  width:25%
-}
-
-.title3 {
-  width:25%
-}
-
-.title4 {
-  width:25%
-}
-
-</style>
+<!--
+  No <style scoped> block (TR0013 section 4.4 rule 7 / TR0017 DeviceList
+  convention). `.panel` / `.panel-head` / `.toolbar` / `.btn` / `.table-scroll`
+  / `.badge` / `.row-actions` / `.mini` / `.panel-foot` / `.form-grid` / `.field`
+  come from components.css. The pre-renewal `.board-container` / `.board-table`
+  / `.add-button` / `.edit-button` / `.delete-button` / `.button-group` /
+  `.modal-form` names are gone, so this screen no longer needs list.css.
+-->

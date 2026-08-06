@@ -26,7 +26,9 @@ import { parseServerTime } from "@/dashboard/utils/deviceStatus";
 
 export function useEnrollmentFlow(options = {}) {
   const flowState = ref("idle");
-  const form = reactive({ groupId: null, deviceName: "", ttlHours: TTL_DEFAULT });
+  // deviceMode "new" keeps the free-text field; "existing" turns the field into
+  // a picker over the group's registered devices, which is the reissue path.
+  const form = reactive({ groupId: null, deviceMode: "new", deviceName: "", ttlHours: TTL_DEFAULT });
   const formErrors = ref({});
   const vault = ref(null);
   const enrollmentId = ref(null);
@@ -54,6 +56,13 @@ export function useEnrollmentFlow(options = {}) {
     return Array.isArray(value) ? value : [];
   };
   const currentUserGroupId = () => unref(options.userGroupId);
+  const deviceList = () => {
+    const value = unref(options.devices);
+    return Array.isArray(value) ? value : [];
+  };
+  const existingDeviceNames = () => deviceList()
+    .map((device) => String(device.device_name || ""))
+    .filter((name) => name.length > 0);
   const usesImplicitHiddenGroup = () => (
     Number(currentUserGroupId()) === 0
     && groups().length === 0
@@ -82,7 +91,15 @@ export function useEnrollmentFlow(options = {}) {
   function validateForm() {
     const errors = {};
     const name = String(form.deviceName || "").trim();
-    if (name.length < DEVICE_NAME_MIN_LEN) errors.deviceName = "msg_device_name_required";
+    if (form.deviceMode === "existing") {
+      // Reissue path. enroll only reuses the existing device_id when device_name
+      // matches character for character, so the value has to be an exact hit in
+      // the device list rather than anything the admin can type. A near miss
+      // would quietly create a second device and orphan its schedules.
+      const names = existingDeviceNames();
+      if (names.length === 0) errors.deviceName = "msg_no_existing_devices";
+      else if (!names.includes(name)) errors.deviceName = "msg_device_selection_required";
+    } else if (name.length < DEVICE_NAME_MIN_LEN) errors.deviceName = "msg_device_name_required";
     else if (name.length > DEVICE_NAME_MAX_LEN) errors.deviceName = "msg_device_name_too_long";
     if (
       form.groupId == null
@@ -105,25 +122,53 @@ export function useEnrollmentFlow(options = {}) {
     return Object.keys(validateForm()).length === 0;
   });
 
-  function resetForm() {
+  function resetForm(presetDevice = null) {
     const userGroupId = Number(currentUserGroupId());
     const availableGroups = groups();
     const preferred = availableGroups.find((group) => Number(group.group_id) === userGroupId);
     form.groupId = userGroupId === 0
       ? (availableGroups.length === 0 ? 0 : null)
       : (preferred ? preferred.group_id : null);
-    form.deviceName = "";
+    // A device row's key action arrives here as presetDevice: the flow opens
+    // straight in reissue mode with that exact device_name already chosen.
+    if (
+      presetDevice
+      && presetDevice.group_id != null
+      && availableGroups.some((group) => Number(group.group_id) === Number(presetDevice.group_id))
+    ) {
+      form.groupId = presetDevice.group_id;
+    }
+    form.deviceMode = presetDevice ? "existing" : "new";
+    form.deviceName = presetDevice ? String(presetDevice.device_name || "") : "";
     form.ttlHours = TTL_DEFAULT;
     formErrors.value = {};
     notice.value = userGroupId !== 0 && !preferred
       ? { key: "msg_user_group_unavailable", params: {} }
       : null;
+    if (!notice.value && presetDevice) {
+      notice.value = {
+        key: "enroll_notice_existing_device_selected",
+        params: { name: form.deviceName },
+        tone: "info",
+      };
+    }
     executionMethod.value = "interactive";
   }
 
-  function openFlow() {
-    resetForm();
+  function openFlow(presetDevice = null) {
+    resetForm(presetDevice);
     flowState.value = "form";
+  }
+
+  // Switching mode clears the name on purpose: a free-typed string is never a
+  // valid pick in the existing-device list, and a picked name is rarely what you
+  // meant to keep when you deliberately switch to registering a new device.
+  function setDeviceMode(mode) {
+    if (mode !== "new" && mode !== "existing") return;
+    if (form.deviceMode === mode) return;
+    form.deviceMode = mode;
+    form.deviceName = "";
+    if (notice.value && notice.value.key === "enroll_notice_existing_device_selected") notice.value = null;
   }
 
   function updateRemaining() {
@@ -386,6 +431,7 @@ export function useEnrollmentFlow(options = {}) {
     expiryWarning: computed(() => remainingSeconds.value <= EXPIRY_WARNING_THRESHOLD_SEC),
     canIssue,
     openFlow,
+    setDeviceMode,
     resetForm,
     validateForm,
     issue,

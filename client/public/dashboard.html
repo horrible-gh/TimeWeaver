@@ -8,11 +8,21 @@
   </title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <!-- External fonts, icons, reset CSS, and similar assets -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- Renewal font stack: Inter, Pretendard, "Noto Sans KR", "Noto Sans JP" -->
+  <link rel="stylesheet"
+    href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css" />
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&family=Noto+Sans+JP:wght@400;500;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/meyer-reset/2.0/reset.min.css" />
-  <link rel="stylesheet" href="/css/dashboard/color.css" />
+  <!-- Design tokens first: every sheet below reads its colours from here -->
+  <link rel="stylesheet" href="/css/dashboard/tokens.css" />
   <link rel="stylesheet" href="/css/dashboard/style.css" />
-  <link rel="stylesheet" href="/css/dashboard/list/list.css" />
-  <link rel="stylesheet" href="/css/dashboard/modal/modal.css" />
+  <!-- Common component layer: panel / table / button / badge / field / modal -->
+  <link rel="stylesheet" href="/css/dashboard/components.css" />
+  <!-- Device screen layer: stepper / workflow / token box / code box / radar -->
+  <link rel="stylesheet" href="/css/dashboard/devices.css" />
   <!-- Dashboard-only global CSS -->
   <!-- <link rel="stylesheet" href="/assets/css/dashboard.css" /> -->
 </head>

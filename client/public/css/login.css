@@ -1,0 +1,101 @@
+/* =============================================================================
+ * TimeWeaver · login screen
+ * -----------------------------------------------------------------------------
+ * Login screen only. Shared vocabulary (.panel, .btn, .field, .form-grid,
+ * .text-btn) is owned by components.css — this file does not redeclare it.
+ *
+ * Load order (public/login.html):
+ *   meyer-reset -> tokens.css -> style.css -> components.css -> login.css
+ *
+ * RULES
+ *   - No colour literals here. Every colour/radius/shadow comes from
+ *     tokens.css. If a value is missing, add a token there (contract §2)
+ *     instead of inlining it.
+ * ============================================================================= */
+
+
+/* -----------------------------------------------------------------------------
+ * 1. Auth frame
+ * -------------------------------------------------------------------------- */
+.auth {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--content-pad-sm);
+}
+
+/* .panel already supplies border / radius / background / shadow; this class
+   only adds the width and inner padding the login card needs on top of it. */
+.auth-card {
+  width: 400px;
+  max-width: 100%;
+  padding: 34px 30px;
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 2. Brand block
+ * -------------------------------------------------------------------------- */
+.auth-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 26px;
+  text-align: center;
+}
+
+.auth-brand strong {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+
+.auth-brand span {
+  color: var(--muted-2);
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 3. Form actions and foot
+ * -------------------------------------------------------------------------- */
+.auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.auth-actions .btn {
+  flex: 1;
+}
+
+.auth-foot {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+  display: flex;
+  justify-content: center;
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 4. Loading spinner
+ * -------------------------------------------------------------------------- */
+.auth-spinner {
+  display: inline-block;
+  animation: auth-spin .8s linear infinite;
+}
+
+@keyframes auth-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}

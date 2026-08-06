@@ -1,61 +1,83 @@
 <template>
-  <section class="history-board">
-    <div class="history-heading">
-      <div>
+  <div class="panel token-list">
+    <div class="panel-head">
+      <div class="panel-title">
         <h2>{{ $t('enroll_history_title') }}</h2>
         <p>{{ $t('enroll_history_desc') }}</p>
       </div>
-      <div class="history-actions">
-        <select v-model="statusFilter">
+      <div class="actions">
+        <select v-model="statusFilter" class="select" :aria-label="$t('list_label_status')">
           <option value="all">{{ $t('select_box_all') }}</option>
           <option value="unused">{{ $t('enroll_status_unused') }}</option>
           <option value="used">{{ $t('enroll_status_used') }}</option>
           <option value="expired">{{ $t('enroll_status_expired') }}</option>
           <option value="revoked">{{ $t('enroll_status_revoked') }}</option>
         </select>
-        <button class="ghost" @click="$emit('refresh')">{{ $t('btn_refresh') }}</button>
+        <button class="btn" @click="$emit('refresh')">
+          <i class="ph ph-arrow-clockwise"></i> {{ $t('btn_refresh') }}
+        </button>
       </div>
     </div>
-    <p v-if="notice" class="notice">{{ $t(notice.key, notice.params) }}</p>
-    <div v-if="loading" class="empty">{{ $t('msg_loading') }}</div>
-    <div v-else-if="error" class="empty">
+
+    <div v-if="notice" class="security-callout error" style="margin: 16px 20px">
+      <i class="ph ph-warning-circle"></i>
+      <span>{{ $t(notice.key, notice.params) }}</span>
+    </div>
+
+    <div v-if="loading" class="empty-state">{{ $t('msg_loading') }}</div>
+    <div v-else-if="error" class="empty-state">
       <p>{{ $t('msg_list_load_failed') }}</p>
-      <button class="ghost" @click="$emit('refresh')">{{ $t('btn_retry') }}</button>
+      <button class="btn" @click="$emit('refresh')">{{ $t('btn_retry') }}</button>
     </div>
-    <div v-else-if="items.length === 0" class="empty">{{ $t('enroll_history_empty') }}</div>
-    <div v-else-if="filtered.length === 0" class="empty">{{ $t('enroll_history_no_filtered') }}</div>
-    <div v-else class="table-scroll">
-      <table class="history-table">
-        <thead>
-          <tr>
-            <th class="id">{{ $t('enroll_label_enrollment_id') }}</th>
-            <th class="device">{{ $t('list_label_device') }}</th>
-            <th class="group">{{ $t('list_label_group') }}</th>
-            <th class="created">{{ $t('enroll_label_created_at') }}</th>
-            <th class="expires">{{ $t('enroll_label_expires_at') }}</th>
-            <th class="status">{{ $t('list_label_status') }}</th>
-            <th class="used">{{ $t('enroll_label_used_device') }}</th>
-            <th class="actions">{{ $t('list_label_actions') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in paged" :key="item.enrollment_id">
-            <td :title="String(item.enrollment_id)">{{ shortId(item.enrollment_id) }}</td>
-            <td>{{ item.device_name || '—' }}</td>
-            <td>{{ groupLabel(item.group_id) }}</td>
-            <td>{{ formatDate(item.created_at) }}</td>
-            <td>{{ formatDate(item.expires_at) }}</td>
-            <td><span class="token-state" :class="'token-' + item.status">{{ $t('enroll_status_' + item.status) }}</span></td>
-            <td>{{ item.used_device_name || item.used_device_id || '—' }}</td>
-            <td>
-              <button v-if="item.status === 'unused'" class="revoke" @click="revoke(item)">{{ $t('btn_revoke') }}</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <BoardPagination :key="statusFilter" :total="filtered.length" :perPage="TOKEN_PAGE_SIZE" @page-changed="currentPage = $event" />
-    </div>
-  </section>
+    <div v-else-if="items.length === 0" class="empty-state">{{ $t('enroll_history_empty') }}</div>
+    <div v-else-if="filtered.length === 0" class="empty-state">{{ $t('enroll_history_no_filtered') }}</div>
+
+    <template v-else>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>{{ $t('enroll_label_enrollment_id') }}</th>
+              <th>{{ $t('list_label_device') }}</th>
+              <th>{{ $t('list_label_group') }}</th>
+              <th>{{ $t('enroll_label_created_at') }}</th>
+              <th>{{ $t('enroll_label_expires_at') }}</th>
+              <th>{{ $t('list_label_status') }}</th>
+              <th>{{ $t('enroll_label_used_device') }}</th>
+              <th>{{ $t('list_label_actions') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in paged" :key="item.enrollment_id">
+              <td class="mono" :title="String(item.enrollment_id)">{{ shortId(item.enrollment_id) }}</td>
+              <td>{{ item.device_name || '—' }}</td>
+              <td>{{ groupLabel(item.group_id) }}</td>
+              <td>{{ formatDate(item.created_at) }}</td>
+              <td>{{ formatDate(item.expires_at) }}</td>
+              <td><span class="status-text" :class="item.status">{{ $t('enroll_status_' + item.status) }}</span></td>
+              <td>{{ item.used_device_name || item.used_device_id || '—' }}</td>
+              <td>
+                <button v-if="item.status === 'unused'" class="btn danger" @click="revoke(item)">
+                  {{ $t('btn_revoke') }}
+                </button>
+                <span v-else>—</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel-foot">
+        <span>{{ $t('list_footer_range', { total: filtered.length, start: rangeStart, end: rangeEnd }) }}</span>
+        <BoardPagination
+          :key="statusFilter"
+          :total="filtered.length"
+          :perPage="TOKEN_PAGE_SIZE"
+          @page-changed="currentPage = $event"
+        />
+      </div>
+    </template>
+  </div>
 </template>
 
 <script setup>
@@ -92,6 +114,9 @@ const paged = computed(() => {
   const start = (currentPage.value - 1) * TOKEN_PAGE_SIZE;
   return filtered.value.slice(start, start + TOKEN_PAGE_SIZE);
 });
+const rangeStart = computed(() => (filtered.value.length === 0 ? 0 : (currentPage.value - 1) * TOKEN_PAGE_SIZE + 1));
+const rangeEnd = computed(() => Math.min(currentPage.value * TOKEN_PAGE_SIZE, filtered.value.length));
+
 function shortId(value) { return String(value || "").slice(0, 8); }
 function groupLabel(groupId) {
   if (Number(groupId) === 0) return "Unknown";
@@ -118,20 +143,11 @@ async function revoke(item) {
 }
 </script>
 
-<style scoped>
-.history-board { margin-top: 24px; padding-top: 20px; border-top: 1px solid #36516b; }
-.history-heading, .history-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.history-heading p { color: #9eb1c5; }
-.history-actions select, .ghost, .revoke { padding: 8px 11px; border: 1px solid #4f7596; border-radius: 6px; color: #fff; background: #071b30; }
-.ghost, .revoke { cursor: pointer; }
-.revoke { border-color: #c45b68; background: rgba(196, 58, 76, .15); }
-.table-scroll { overflow-x: auto; }
-.history-table { width: 100%; min-width: 900px; table-layout: fixed; border-collapse: collapse; }
-.history-table th, .history-table td { padding: 10px; border-bottom: 1px solid #29445e; overflow-wrap: anywhere; }
-.id { width: 10%; }.device { width: 18%; }.group { width: 12%; }.created { width: 14%; }.expires { width: 14%; }.status { width: 10%; }.used { width: 12%; }.actions { width: 10%; }
-.token-state { font-weight: 700; }
-.token-unused { color: #fcd34d; }.token-used { color: #6ee7b7; }.token-expired, .token-revoked { color: #a9b4c0; }
-.empty { padding: 28px; text-align: center; border: 1px dashed #4d6c88; }
-.notice { color: #fda4af; }
-@media (max-width: 767px) { .history-heading { align-items: flex-start; flex-direction: column; } }
-</style>
+<!--
+  No <style scoped> block (TR0013 section 4.4 rule 7). `.panel` / `.actions` /
+  `.select` / `.btn` / `.table-scroll` / `.status-text` / `.empty-state` /
+  `.panel-foot` come from components.css; the `.token-list` panel modifier and
+  `.security-callout` from devices.css. `.status-text.revoked` was added to
+  components.css section 7 because the API has a fourth token state the deck's
+  three-state table does not show.
+-->

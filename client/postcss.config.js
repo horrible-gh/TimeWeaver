@@ -10,11 +10,6 @@ module.exports = {
             if (selector.startsWith('.dashboard')) return selector;
             return '.dashboard ' + selector;
           }
-          // Apply .login-form prefix to login_form CSS files
-          if (filePath && filePath.indexOf('/assets/css/login_form/') !== -1) {
-            if (selector.startsWith('.login-form')) return selector;
-            return '.login-form ' + selector;
-          }
           // Return other selectors unchanged
           return selector;
         }

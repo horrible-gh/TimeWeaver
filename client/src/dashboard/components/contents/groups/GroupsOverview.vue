@@ -1,7 +1,12 @@
 <template>
-  <div class="app-body-main-content">
-    <GroupList />
+  <div class="page-head">
+    <div>
+      <div class="eyebrow">{{ $t('groups_eyebrow') }}</div>
+      <h1>{{ $t('sub_groups') }}</h1>
+      <p class="lead">{{ $t('groups_lead') }}</p>
+    </div>
   </div>
+  <GroupList />
 </template>
 
 <script>

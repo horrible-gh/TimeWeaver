@@ -1,0 +1,147 @@
+/* =============================================================================
+ * TimeWeaver · dashboard design tokens
+ * -----------------------------------------------------------------------------
+ * Source of truth: MirageGlass deck `d3aqp8mu` v4
+ * (dashboard.html / schedules.html / devices.html carry an identical :root
+ *  block; every value in section 1-6 below is copied from it verbatim).
+ *
+ * CONTRACT — read this before writing CSS anywhere under client/
+ *
+ *   1. Every colour, radius, shadow and shell metric used by the dashboard
+ *      comes from this file. No global sheet, no component <style> block and
+ *      no inline style may introduce a raw colour literal (#rrggbb, rgb(),
+ *      hsl(), or a named colour such as `red`).
+ *   2. If a value you need is missing, ADD A TOKEN HERE and note what it is
+ *      for. Do not inline it at the call site.
+ *   3. This sheet is linked first in public/dashboard.html, before style.css,
+ *      components.css and devices.css, so every later sheet can rely on it.
+ *   4. Dark theme only. There is no light variant (deck is dark-only).
+ *
+ * Sections 7-8 hold values that the deck used as inline literals inside its
+ * shell rules; they are promoted to tokens here so that style.css can stay
+ * literal-free. The comment on each one names the deck rule it came from.
+ * ============================================================================= */
+
+:root {
+  /* --- 1. Surfaces ------------------------------------------------------- */
+  --bg: #080b10;          /* page background                                */
+  --panel: #10151d;       /* card / panel background                        */
+  --panel-2: #151b25;     /* raised panel, top of panel gradients           */
+
+  /* --- 2. Lines ---------------------------------------------------------- */
+  --line: #27303d;        /* control borders (button, select, input)        */
+  --line-soft: #1f2732;   /* structural dividers (panel edges, table rows)  */
+
+  /* --- 3. Text ----------------------------------------------------------- */
+  --text: #f4f7fb;        /* primary text                                   */
+  --muted: #919dac;       /* secondary text, inactive nav                   */
+  --muted-2: #657182;     /* captions, table headers, meta                  */
+
+  /* --- 4. Accents -------------------------------------------------------- */
+  --cyan: #38d7c7;        /* brand accent, primary button, active nav       */
+  --blue: #5e8cff;        /* informational series                           */
+  --amber: #f2b84b;       /* warning                                        */
+  --red: #f36f7c;         /* error / danger                                 */
+  --green: #61d394;       /* success / online                               */
+
+  /* --- 5. Accent tints (backgrounds for badges, pills, active states) ---- */
+  --cyan-soft: rgba(56, 215, 199, .12);
+  --blue-soft: rgba(94, 140, 255, .13);
+  --amber-soft: rgba(242, 184, 75, .13);
+  --red-soft: rgba(243, 111, 124, .12);
+  --green-soft: rgba(97, 211, 148, .12);
+
+  /* --- 6. Shape ---------------------------------------------------------- */
+  --radius: 16px;                             /* panels, tiles             */
+  --shadow: 0 18px 45px rgba(0, 0, 0, .22);   /* panels, tiles             */
+
+  /* --- 7. Derived surfaces (deck inline literals, promoted) --------------- */
+  --sidebar-bg: rgba(12, 16, 23, .92);   /* deck `.sidebar` background      */
+  --topbar-bg: rgba(8, 11, 16, .64);     /* deck `.topbar` background       */
+  --surface-sunken: #0c1016;             /* deck `.select` background       */
+  --surface-raised: #171d27;             /* deck `.btn` background          */
+  --surface-control: #151b24;            /* deck `.mini` background         */
+  --surface-glyph: #1c2532;              /* deck `.device-glyph` background */
+  --surface-avatar: #293342;             /* deck `.avatar` background       */
+  --table-head-bg: #0d1219;              /* deck `th` background            */
+  --text-dim: #cbd3dd;                   /* deck `td` colour                */
+  --line-strong: #425064;                /* deck `.icon-btn:hover` border   */
+  --line-control-hover: #48566b;         /* deck `.mini:hover` border       */
+  --line-btn-hover: #465267;             /* deck `.btn:hover` border        */
+  --hover-soft: rgba(255, 255, 255, .035);  /* deck `.nav a:hover`          */
+  --hover-faint: rgba(255, 255, 255, .018); /* deck `tbody tr:hover`        */
+  --icon-well: rgba(255, 255, 255, .045);   /* deck `.metric-icon`          */
+  --on-accent: #07100f;                  /* text on a --cyan fill           */
+  --bg-glow: rgba(56, 215, 199, .08);     /* deck body radial gradient      */
+  --brand-glow: rgba(56, 215, 199, .08);  /* deck `.brand-mark` halo        */
+  --scrim: rgba(4, 6, 10, .62);           /* mobile nav drawer backdrop     */
+  --focus-ring: rgba(56, 215, 199, .45);  /* keyboard focus outline         */
+
+  /* --- 8. Shell metrics --------------------------------------------------- */
+  --sidebar-w: 238px;      /* deck `.shell` first column                    */
+  --sidebar-w-rail: 76px;  /* collapsed icon rail (<= 1080px)               */
+  --topbar-h: 70px;        /* deck `.topbar`                                */
+  --topbar-h-sm: 58px;     /* deck `.topbar` (<= 760px)                     */
+  --content-max: 1420px;   /* deck `.content`                               */
+  --content-pad: 34px;     /* deck `.content`                               */
+  --content-pad-sm: 16px;  /* deck `.content` (<= 760px)                    */
+  --radius-md: 11px;       /* brand mark                                    */
+  --radius-sm: 10px;       /* nav item, icon button                         */
+  --radius-xs: 8px;        /* small glyph wells                             */
+
+  /* --- 9. Typography ------------------------------------------------------ */
+  /* Deck stack + Noto Sans JP: the dashboard ships ko/ja/en locales, and
+     Noto Sans KR carries no kana. Web fonts are linked in dashboard.html.  */
+  --font-sans: Inter, Pretendard, "Noto Sans KR", "Noto Sans JP", system-ui,
+    -apple-system, "Segoe UI", sans-serif;
+  --font-size-base: 13px;
+  --line-height-base: 1.5;
+
+  /* --- 10. Component layer (added by T2) ---------------------------------- */
+  /* Deck literals used inside its component rules, promoted the same way
+     section 7 promoted the shell literals. Values marked (derived) have no
+     deck counterpart and were built from an existing accent + its -soft tint. */
+  --panel-translucent: rgba(16, 21, 29, .92); /* deck `.panel` background     */
+  --neutral: #8c98a8;                    /* deck `.badge.offline` text        */
+  --neutral-soft: rgba(140, 152, 168, .1); /* deck `.badge.offline` fill      */
+  --red-line: rgba(243, 111, 124, .25);  /* deck `.btn.danger` border         */
+  --red-text: #ff9ca5;                   /* deck `.btn.danger` text           */
+  --blue-line: rgba(94, 140, 255, .3);   /* deck `.btn.secondary` border      */
+  --blue-text: #aac0ff;                  /* deck `.btn.secondary` text        */
+  --green-line: rgba(97, 211, 148, .28); /* `.btn.success` border  (derived)  */
+  --green-text: #9ce7bd;                 /* `.btn.success` text    (derived)  */
+  --label: #b8c2cf;                      /* deck `.field label`               */
+  --glyph-fg: #8fa2b7;                   /* deck `.device-glyph` icon         */
+  --focus-line: rgba(56, 215, 199, .7);  /* deck `input:focus` border         */
+  --focus-halo: rgba(56, 215, 199, .08); /* deck `input:focus` ring           */
+
+  /* --- 11. Control metrics (added by T2) ---------------------------------- */
+  --radius-pill: 999px;    /* badges, pills                                   */
+  --control-h: 36px;       /* deck `.btn` / `.select` / `.search input`       */
+  --field-h: 42px;         /* deck `.field input` / `.field select`           */
+
+  /* --- 12. Device screen layer (added by T4) ------------------------------ */
+  /* Literals the deck used inside devices.html only (stepper, workflow card,
+     token box, code box, radar, timeline). Promoted the same way sections 7
+     and 10 promoted the shell and component literals. devices.css reads them.
+     Values marked (derived) have no deck counterpart. */
+  --surface-inset: #0d1219;              /* deck `.stepper` / `.workflow-card`
+                                            / `.side-card` background. Shares
+                                            its value with --table-head-bg by
+                                            deck design; kept separate because
+                                            the roles are unrelated.          */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, .2); /* deck `.proposal-tab.active`    */
+  --amber-line: rgba(242, 184, 75, .25); /* deck `.security-callout` border   */
+  --amber-text: #e5c47c;                 /* deck `.security-callout` text     */
+  --cyan-line: rgba(56, 215, 199, .25);  /* deck `.radar` ring                */
+  --cyan-line-soft: rgba(56, 215, 199, .15); /* deck `.radar::before` ring    */
+  --cyan-dim: #8fc7bd;                   /* deck `.step.done` label           */
+  --cyan-pale: #bff8ee;                  /* deck `.token-value code`          */
+  --dot-ring-idle: rgba(69, 81, 99, .12); /* deck `.time-dot` halo            */
+}
+
+/* Absorbed from the retired color.css (its only rule). Kept so that existing
+   markup using `class="white"` keeps resolving to the primary text token. */
+.white {
+  color: var(--text);
+}

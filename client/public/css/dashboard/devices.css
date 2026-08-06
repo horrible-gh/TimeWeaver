@@ -1,0 +1,696 @@
+/* =============================================================================
+ * TimeWeaver · device screen layer
+ * -----------------------------------------------------------------------------
+ * Source of truth: MirageGlass deck `d3aqp8mu` v4, devices.html
+ * (517 lines, the largest of the three deck screens; it is the only one that
+ *  carries a stepper, a workflow card, a token box, a code box, a radar and a
+ *  timeline. None of that vocabulary appears on dashboard.html or
+ *  schedules.html, so none of it belongs in components.css.)
+ *
+ * Load order (public/dashboard.html):
+ *   meyer-reset -> tokens.css -> style.css -> components.css -> devices.css
+ *   -> list.css
+ *
+ * WHY THIS IS A SEPARATE SHEET
+ *   TR0013 section 4.4 rule 6 allows a screen to own UI that is not in the
+ *   canonical list, and rule 7 forbids new <style scoped> blocks and requires
+ *   colour, radius and height to come through components.css / tokens.css.
+ *   Eight device files would otherwise each redeclare the same step, callout
+ *   and card rules -- which is the "one style system per screen" fault that
+ *   R0001 and NR0003 recorded in the first place. One screen sheet gives every
+ *   rule exactly one definition, keeps the common layer free of single-screen
+ *   vocabulary, and gives T6 one file to audit.
+ *
+ * RULES
+ *   - No colour literals. Every value comes from tokens.css (section 12 holds
+ *     the device-only tokens).
+ *   - Nothing here may redefine a canonical name from TR0011 section 4.1 or
+ *     TR0013 section 4.1. `.panel`, `.btn`, `.badge`, `.select`, `.field`,
+ *     `.form-grid`, `.command-tabs`, `.status-text`, `.mini` and `.metric*`
+ *     are used as-is; this sheet only adds names the deck has and the common
+ *     layer does not.
+ *   - `.token-list` and `.copy-code` are modifiers layered onto a canonical
+ *     element (`.panel`, `.mini`) exactly as the deck does it.
+ * ============================================================================= */
+
+
+/* -----------------------------------------------------------------------------
+ * 1. Screen switcher  (deck `.proposal-tabs` / `.proposal-tab`)
+ * -----------------------------------------------------------------------------
+ * The deck used this pill group to flip between its two proposals; in the app
+ * it is the existing device-status / agent-enrollment view switch, so it keeps
+ * the app's own `.view-tabs` name rather than the deck's prototype-only one.
+ * -------------------------------------------------------------------------- */
+.view-tabs {
+  display: flex;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  flex-shrink: 0;
+}
+
+.view-tab {
+  padding: 10px 14px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.view-tab:hover {
+  color: var(--text);
+}
+
+.view-tab.active {
+  color: var(--text);
+  background: var(--panel-2);
+  box-shadow: var(--shadow-sm);
+}
+
+.view-tab i {
+  margin-right: 5px;
+  color: var(--cyan);
+  font-size: 14px;
+  vertical-align: -2px;
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 2. Enrollment panel head  (deck `.enroll-head` / `.title-row` / `.admin-pill`)
+ * -------------------------------------------------------------------------- */
+.enroll-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 24px;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-pill {
+  padding: 5px 8px;
+  border: 1px solid var(--blue-line);
+  border-radius: var(--radius-pill);
+  background: var(--blue-soft);
+  color: var(--blue-text);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  white-space: nowrap;
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 3. Stepper  (deck `.stepper` / `.step` / `.step-no`)
+ * -------------------------------------------------------------------------- */
+.stepper {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface-inset);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  color: var(--muted-2);
+  font-size: 10px;
+}
+
+.step + .step {
+  border-left: 1px solid var(--line-soft);
+}
+
+.step-no {
+  width: 23px;
+  height: 23px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.step-copy {
+  min-width: 0;
+}
+
+.step strong {
+  display: block;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.step small {
+  display: block;
+  color: inherit;
+  opacity: .8;
+}
+
+.step.active {
+  color: var(--text);
+  background: linear-gradient(90deg, var(--cyan-soft), transparent);
+}
+
+.step.active .step-no,
+.step.done .step-no {
+  border-color: var(--cyan);
+  background: var(--cyan);
+  color: var(--on-accent);
+}
+
+.step.done {
+  color: var(--cyan-dim);
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 4. Workflow layout  (deck `.workflow` / `.workflow-card` / `.workflow-side`)
+ * -------------------------------------------------------------------------- */
+.workflow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, .72fr);
+  gap: 14px;
+  padding: 16px;
+}
+
+.workflow-card {
+  min-height: 430px;
+  padding: 22px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  min-width: 0;
+}
+
+.workflow-card h3 {
+  margin: 0 0 5px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+
+.stage-intro {
+  margin: 0 0 21px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.stage-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 22px;
+  flex-wrap: wrap;
+}
+
+.stage-actions .btn {
+  min-height: 39px;
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 4.1 Device mode toggle  (app-only; the deck has no such control)
+ * -----------------------------------------------------------------------------
+ * Two mutually exclusive choices inside a `.field`, so it is a segmented control
+ * rather than `.command-tabs` (which is a page-level tab strip with a shared
+ * bottom rule). It borrows `--field-h` so it lines up with the group and
+ * lifetime selects sitting directly above it in the same `.form-grid`.
+ * -------------------------------------------------------------------------- */
+.mode-toggle {
+  display: flex;
+  gap: 6px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+
+.mode-toggle button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1 1 0;
+  min-height: calc(var(--field-h) - 8px);
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--muted-2);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mode-toggle button i {
+  font-size: 13px;
+}
+
+.mode-toggle button:hover:not(:disabled) {
+  color: var(--muted);
+  background: var(--hover-soft);
+}
+
+.mode-toggle button.active {
+  border-color: var(--cyan-line);
+  background: var(--cyan-soft);
+  color: var(--text);
+}
+
+.mode-toggle button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 5. Callout  (deck `.security-callout`)
+ * -----------------------------------------------------------------------------
+ * `.error` is a device-screen variant: the deck only ever shows the amber
+ * security notice, but the enrollment flow also surfaces API failures
+ * (err_admin_required, err_group_inactive, ...) which must not read as advice.
+ * -------------------------------------------------------------------------- */
+.security-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid var(--amber-line);
+  border-radius: var(--radius-sm);
+  background: var(--amber-soft);
+  color: var(--amber-text);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.security-callout i {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  font-size: 16px;
+}
+
+.security-callout.error {
+  border-color: var(--red-line);
+  background: var(--red-soft);
+  color: var(--red-text);
+}
+
+.security-callout.info {
+  border-color: var(--blue-line);
+  background: var(--blue-soft);
+  color: var(--blue-text);
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 6. Token box  (deck `.token-box` / `.token-label` / `.token-value`)
+ * -------------------------------------------------------------------------- */
+.token-box {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.token-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted-2);
+  font-size: 9px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.token-label.warning {
+  color: var(--amber);
+}
+
+.token-value {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.token-value code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cyan-pale);
+  font: 600 12px ui-monospace, SFMono-Regular, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 7. Code box  (deck `.codebox` / `.copy-code`)
+ * -------------------------------------------------------------------------- */
+.codebox {
+  position: relative;
+  min-height: 78px;
+  margin-top: 12px;
+  padding: 14px 46px 14px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-dim);
+  font: 10px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+}
+
+.copy-code {
+  position: absolute;
+  right: 9px;
+  top: 9px;
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 8. Side rail  (deck `.side-card` / `.summary` / `.summary-row`)
+ * -------------------------------------------------------------------------- */
+.workflow-side {
+  min-width: 0;
+}
+
+.side-card {
+  padding: 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  min-width: 0;
+}
+
+.side-card + .side-card {
+  margin-top: 12px;
+}
+
+.side-card h4 {
+  margin: 0 0 14px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.summary {
+  display: grid;
+  gap: 12px;
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 10px;
+}
+
+.summary-row span:first-child {
+  color: var(--muted-2);
+  flex-shrink: 0;
+}
+
+.summary-row b {
+  min-width: 0;
+  color: var(--text-dim);
+  font-weight: 600;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 9. Timeline  (deck `.timeline` / `.time-row` / `.time-dot`)
+ * -------------------------------------------------------------------------- */
+.timeline {
+  display: grid;
+  gap: 13px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.time-row {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 9px;
+  color: var(--muted-2);
+  font-size: 9px;
+}
+
+.time-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 2px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  box-shadow: 0 0 0 4px var(--dot-ring-idle);
+}
+
+.time-row.done {
+  color: var(--text-dim);
+}
+
+.time-row.done .time-dot {
+  background: var(--green);
+  box-shadow: 0 0 0 4px var(--green-soft);
+}
+
+.time-row.current {
+  color: var(--text);
+}
+
+.time-row.current .time-dot {
+  background: var(--cyan);
+  box-shadow: 0 0 0 4px var(--cyan-soft);
+  animation: tw-pulse 1.5s infinite;
+}
+
+@keyframes tw-pulse {
+  50% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 10. Waiting state  (deck `.waiting` / `.radar`)
+ * -------------------------------------------------------------------------- */
+.waiting {
+  padding: 22px 8px 10px;
+  text-align: center;
+}
+
+.radar {
+  position: relative;
+  width: 70px;
+  height: 70px;
+  margin: 0 auto 17px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--cyan-line);
+  border-radius: 50%;
+  color: var(--cyan);
+}
+
+.radar::before,
+.radar::after {
+  content: "";
+  position: absolute;
+  border: 1px solid var(--cyan-line-soft);
+  border-radius: 50%;
+}
+
+.radar::before {
+  inset: 10px;
+}
+
+.radar::after {
+  inset: 21px;
+  background: var(--cyan-soft);
+}
+
+.radar i {
+  position: relative;
+  z-index: 2;
+  font-size: 20px;
+}
+
+.waiting h3 {
+  margin-bottom: 7px;
+}
+
+.waiting .stage-intro {
+  margin-bottom: 14px;
+}
+
+/* Terminal states recolour the radar; the deck only defines success. */
+.waiting.success .radar {
+  border-color: var(--green-line);
+  color: var(--green);
+}
+
+.waiting.success .radar::after {
+  background: var(--green-soft);
+}
+
+.waiting.failed .radar {
+  border-color: var(--red-line);
+  color: var(--red);
+}
+
+.waiting.failed .radar::after {
+  background: var(--red-soft);
+}
+
+.waiting.failed .radar i,
+.waiting.success .radar i {
+  animation: none;
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 11. Token history panel  (deck `.token-list`)
+ * -------------------------------------------------------------------------- */
+.panel.token-list {
+  margin-top: 14px;
+}
+
+.token-list .panel-head {
+  padding: 17px 20px;
+}
+
+.token-list td,
+.token-list th {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.token-list .mono {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 12. Device list extras
+ * -----------------------------------------------------------------------------
+ * The deck's device table has no secondary line under the status badge; the
+ * app computes a liveness reason (heartbeat stale, never seen, ...) that would
+ * be lost if the cell only carried the badge.
+ * -------------------------------------------------------------------------- */
+.state-reason {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted-2);
+  font-size: 9px;
+}
+
+/* A freshly enrolled device is flagged for NEW_DEVICE_HIGHLIGHT_MS. */
+.row-new {
+  animation: tw-new-device var(--highlight-duration, 10000ms) ease-out;
+}
+
+@keyframes tw-new-device {
+  from {
+    background: var(--cyan-soft);
+  }
+
+  to {
+    background: transparent;
+  }
+}
+
+
+/* -----------------------------------------------------------------------------
+ * 13. Responsive
+ * -------------------------------------------------------------------------- */
+@media (max-width: 1080px) {
+  .workflow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workflow-side {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .side-card + .side-card {
+    margin-top: 0;
+  }
+
+  .step small {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .enroll-head {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 18px;
+  }
+
+  .enroll-head .btn {
+    align-self: flex-start;
+  }
+
+  .title-row {
+    flex-wrap: wrap;
+  }
+
+  .view-tabs {
+    width: 100%;
+  }
+
+  .view-tab {
+    flex: 1;
+    min-width: 0;
+    padding-left: 6px;
+    padding-right: 6px;
+    font-size: 10px;
+  }
+
+  .step {
+    padding: 12px 10px;
+  }
+
+  .workflow {
+    padding: 10px;
+  }
+
+  .workflow-card {
+    min-height: auto;
+    padding: 17px;
+  }
+
+  .workflow-side {
+    grid-template-columns: 1fr;
+  }
+}

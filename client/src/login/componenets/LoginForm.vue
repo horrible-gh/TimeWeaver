@@ -1,59 +1,63 @@
 <template>
-    <div class="limiter">
-      <div
-        class="container-login100"
-        :style="{ backgroundImage: `url(${require('@/assets/login_form/images/bg-01.jpg')})` }"
-      >
-        <div class="wrap-login100 p-t-30 p-b-50">
-          <span class="login100-form-title p-b-41">
-            {{ $t('title') }}
-          </span>
-          <form name="loginForm" class="login100-form validate-form p-b-33 p-t-5" @submit.prevent="login">
-            <div class="wrap-input100 validate-input" data-validate="Enter username">
-              <input
-                class="input100"
-                type="text"
-                name="id"
-                v-model="id"
-                placeholder="ID"
-                @keypress.enter="$refs.password.focus()"
-              />
-              <span class="focus-input100" data-placeholder="&#xe82a;"></span>
-            </div>
+  <div class="auth">
+    <div class="auth-card panel">
+      <div class="auth-brand">
+        <span class="brand-mark">
+          <img src="@/assets/img/dashboard/logo-timeweaver.png" alt="TimeWeaver" />
+        </span>
+        <strong>TimeWeaver</strong>
+        <span>{{ $t('title') }}</span>
+      </div>
 
-            <div class="wrap-input100 validate-input" data-validate="Enter password">
-              <input
-                class="input100"
-                ref="password"
-                type="password"
-                name="pwd"
-                v-model="password"
-                :placeholder="$t('password')"
-                @keypress.enter="login"
-              />
-              <span class="focus-input100" data-placeholder="&#xe80f;"></span>
-            </div>
-
-            <div class="container-login100-form-btn m-t-32">
-              <button type="button" class="login100-form-btn m-r-8" @click="login">
-                {{ $t('login') }}
-              </button>
-              <button type="button" class="login105-form-btn m-l-8" @click="register">
-                {{ $t('join') }}
-              </button>
-              <br /><br />
-              <a href="javascript:void(0);" class="login110-form-btn" @click="forgot">
-                {{ $t('forgot') }}
-              </a>
-              <div id="process" v-if="isLoading">
-                <i class="fa fa-spinner fa-spin"></i>
-              </div>
-            </div>
-          </form>
+      <form class="form-grid" @submit.prevent="login">
+        <div class="field full">
+          <label for="auth-id">ID</label>
+          <input
+            id="auth-id"
+            type="text"
+            name="id"
+            v-model="id"
+            placeholder="ID"
+            @keypress.enter="$refs.password.focus()"
+          />
         </div>
+
+        <div class="field full">
+          <label for="auth-password">{{ $t('password') }}</label>
+          <input
+            id="auth-password"
+            ref="password"
+            type="password"
+            name="pwd"
+            v-model="password"
+            :placeholder="$t('password')"
+            @keypress.enter="login"
+          />
+        </div>
+
+        <div class="field full" v-if="error">
+          <small class="error">{{ error }}</small>
+        </div>
+
+        <div class="field full auth-actions">
+          <button type="button" class="btn primary" :disabled="isLoading" @click="login">
+            <i v-if="isLoading" class="ph ph-circle-notch auth-spinner"></i>
+            <span v-else>{{ $t('login') }}</span>
+          </button>
+          <button type="button" class="btn" @click="register">
+            {{ $t('join') }}
+          </button>
+        </div>
+      </form>
+
+      <div class="auth-foot">
+        <button type="button" class="text-btn" @click="forgot">
+          {{ $t('forgot') }}
+        </button>
       </div>
     </div>
-  </template>
+  </div>
+</template>
 
 <script>
 import { postRequest } from "@api";
@@ -65,10 +69,12 @@ export default {
       id: "",
       password: "",
       isLoading: false,
+      error: "",
     };
   },
   methods: {
     async login() {
+      this.error = "";
       try {
         const response = await postRequest("/login", {
           username: this.id,
@@ -83,6 +89,7 @@ export default {
         window.location.href = "/dashboard";
       } catch (error) {
         console.error("Login failed:", error);
+        this.error = this.$t('login_failed');
       }
     },
     register() {
@@ -96,9 +103,3 @@ export default {
   }
 };
 </script>
-
-<style>
-@import "@/assets/login_form/css/util.css";
-@import "@/assets/login_form/css/main.css";
-@import "@/assets/login_form/fonts/Linearicons-Free-v1.0.0/icon-font.min.css";
-</style>

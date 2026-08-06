@@ -1,24 +1,41 @@
 <template>
-    <section class="service-section">
-        <h2>{{ $t('chart_title') }}</h2>
-        <div class="tiles">
-            <article class="tile">
-                <h4 class="white"><i class="ph ph-hard-drives"></i> {{ $t('chart_subtitle_device') }}</h4>
+    <div class="section-label">
+        <h2>{{ $t('section_service_status_label') }}</h2>
+        <span>{{ $t('section_service_status_desc') }}</span>
+    </div>
+    <div class="tile-grid">
+        <article class="tile">
+            <div class="tile-head">
+                <span class="metric-icon"><i class="ph ph-hard-drives"></i></span>
+                <h3>{{ $t('chart_subtitle_device') }}</h3>
+            </div>
+            <div class="tile-chart">
                 <DevicesBarChart />
-            </article>
-            <article class="tile">
-                <h4 class="white"><i class="ph ph-calendar"></i> {{ $t('chart_subtitle_schedules') }}</h4>
+            </div>
+            <div class="tile-foot">{{ $t('chart_footer_devices') }}</div>
+        </article>
+        <article class="tile">
+            <div class="tile-head">
+                <span class="metric-icon" style="color:var(--cyan)"><i class="ph ph-calendar"></i></span>
+                <h3>{{ $t('chart_subtitle_schedules') }}</h3>
+            </div>
+            <div class="tile-chart">
                 <SchedulesBarChart />
-            </article>
-            <article class="tile">
-                <h4 class="white"><i class="ph ph-wrench"></i> {{ $t('chart_subtitle_tasks') }}</h4>
+            </div>
+            <div class="tile-foot">{{ $t('chart_footer_schedules') }}</div>
+        </article>
+        <article class="tile">
+            <div class="tile-head">
+                <span class="metric-icon" style="color:var(--blue)"><i class="ph ph-wrench"></i></span>
+                <h3>{{ $t('chart_subtitle_tasks') }}</h3>
+            </div>
+            <div class="tile-chart">
                 <TasksDoughnutChart />
-            </article>
-        </div>
-        <div class="service-section-footer">
-            <p>{{ $t('chart_last_updated_time_title') }}: {{ currentTime }}</p>
-        </div>
-    </section>
+            </div>
+            <div class="tile-foot">{{ $t('chart_footer_tasks') }}</div>
+        </article>
+    </div>
+    <div class="service-foot">{{ $t('chart_last_updated_time_title') }}: {{ currentTime }}</div>
 </template>
 
 <script>
@@ -30,7 +47,7 @@ export default {
     name: 'DashboardChart'
     , components: {
         DevicesBarChart, SchedulesBarChart, TasksDoughnutChart
-  },  // ✅ Verify DevicesBarChart registration
+  },
   data() {
     return {
       currentTime: new Date().toLocaleString()

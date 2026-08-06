@@ -1,69 +1,69 @@
 <template>
-  <div class="board-container">
-    <h2>{{ $t('sub_manual_execution') }}</h2>
-
-    <!-- ✅ 검색 필터 -->
-    <div class="filters">
-      <div>
-        <label>{{ $t('list_label_group') }}:</label>
-        <select v-model="selectedGroup">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">
+        <h2>{{ $t('manual_execution_list_title') }}</h2>
+        <p>{{ $t('manual_execution_list_desc') }}</p>
+      </div>
+      <div class="toolbar">
+        <select class="select" v-model="selectedGroup" :aria-label="$t('list_label_group')">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="group in uniqueGroups" :key="group" :value="group">{{ group }}</option>
         </select>
-      </div>
-    
-      <div>
-        <label>{{ $t('list_label_schedule_name') }}:</label>
-        <select v-model="selectedSchedule">
+        <select class="select" v-model="selectedSchedule" :aria-label="$t('list_label_schedule_name')">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="schedule in filteredSchedules" :key="schedule" :value="schedule">{{ schedule }}</option>
         </select>
-      </div>
-    
-      <div>
-        <label>{{ $t('list_label_status') }}:</label>
-        <select v-model="selectedStatus">
+        <select class="select" v-model="selectedStatus" :aria-label="$t('list_label_status')">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="status in uniqueStatuses" :key="status" :value="status">{{ status }}</option>
         </select>
+        <button class="btn" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
       </div>
-    
-      <button class="reset-button" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
     </div>
 
-    <!-- ✅ 필터링된 테이블 -->
-    <table v-if="filteredPosts.length > 0" class="board-table">
-      <thead>
-        <tr>
-          <th class="title1" @click="sort('manual_id')">ID <span v-if="sortKey === 'manual_id'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title2" @click="sort('name')">{{ $t('list_label_group') }} <span v-if="sortKey === 'name'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title3" @click="sort('schedule_name')">{{ $t('list_label_schedule_name') }} <span v-if="sortKey === 'schedule_name'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title4" @click="sort('is_immediate')">{{ $t('manual_run_method') }} <span v-if="sortKey === 'is_immediate'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title5" @click="sort('schedule_datetime')">{{ $t('manual_run_set_time') }} <span v-if="sortKey === 'schedule_datetime'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title6" @click="sort('status')">{{ $t('list_label_status') }} <span v-if="sortKey === 'status'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></th>
-          <th class="title7">{{ $t('list_label_actions') }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="post in paginatedPosts" :key="post.manual_id">
-          <td>{{ post.manual_id }}</td>
-          <td>{{ post.name }}</td>
-          <td>{{ post.schedule_name }}</td>
-          <td>{{ post.is_immediate === 1 ? $t('manual_run_immediate_yes') : $t('manual_run_immediate_no') }}</td>
-          <td>{{ formatDate(post.schedule_datetime) }}</td>
-          <td>{{ post.status }}</td>
-          <td>
-            <button v-if="post.status === 'processing'" class="abandon-button" @click="abandonManualExecution(post)">
-              <i class="ph ph-x-circle"></i> {{ $t('btn_abandon') }}
-            </button>
-            <button v-else-if="post.edit_enable === '1'" class="edit-button" @click="openEditModal(post)">
-              <i class="ph ph-pencil-simple"></i> {{ $t('btn_edit') }}
-            </button>
-            <span v-else>-</span>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="table-scroll">
+      <table v-if="paginatedPosts.length > 0">
+        <thead>
+          <tr>
+            <SortableHeader field="manual_id" label="ID" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="name" :label="$t('list_label_group')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="schedule_name" :label="$t('list_label_schedule_name')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="is_immediate" :label="$t('manual_run_method')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="schedule_datetime" :label="$t('manual_run_set_time')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader field="status" :label="$t('list_label_status')" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
+            <SortableHeader :label="$t('list_label_actions')" :sortable="false" />
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="post in paginatedPosts" :key="post.manual_id">
+            <td>{{ post.manual_id }}</td>
+            <td>{{ post.name }}</td>
+            <td>{{ post.schedule_name }}</td>
+            <td>{{ post.is_immediate === 1 ? $t('manual_run_immediate_yes') : $t('manual_run_immediate_no') }}</td>
+            <td>{{ formatDate(post.schedule_datetime) }}</td>
+            <td><span class="badge" :class="statusBadgeClass(post.status)">{{ post.status }}</span></td>
+            <td>
+              <div class="row-actions">
+                <button v-if="post.status === 'processing'" class="mini" :aria-label="$t('btn_abandon')" @click="abandonManualExecution(post)">
+                  <i class="ph ph-x-circle"></i>
+                </button>
+                <button v-else-if="post.edit_enable === '1'" class="mini" :aria-label="$t('btn_edit')" @click="openEditModal(post)">
+                  <i class="ph ph-pencil-simple"></i>
+                </button>
+                <span v-else>-</span>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-else class="empty-state">{{ $t('schedules_list_no_datas') }}</div>
+    </div>
+
+    <div class="panel-foot" v-if="paginatedPosts.length > 0">
+      <span>{{ $t('list_footer_range', { total: filteredPosts.length, start: rangeStart, end: rangeEnd }) }}</span>
+      <BoardPagination :total="filteredPosts.length" :perPage="perPage" @page-changed="changePage" />
+    </div>
 
     <!-- ✅ 모달 컴포넌트 사용 -->
     <ModalComponent
@@ -73,31 +73,26 @@
       @close="closeModal"
       @confirm="saveManualExecution"
     >
-      <div class="modal-form grid-form">
-        <div class="form-field">
+      <div class="form-grid">
+        <div class="field full">
           <label>{{ $t('list_label_group') }}</label>
           <input type="text" v-model="formControl.name" disabled />
         </div>
-      
-        <div class="form-field">
+
+        <div class="field full">
           <label>{{ $t('list_label_schedule_name') }}</label>
           <input type="text" v-model="formControl.schedule_name" disabled />
         </div>
-      
-        <div class="form-field">
+
+        <div class="field half">
           <label>{{ $t('manual_run_method') }}</label>
           <select v-model="formControl.is_immediate">
             <option value="0">{{ $t('manual_run_immediate_no') }}</option>
             <option value="1">{{ $t('manual_run_immediate_yes') }}</option>
           </select>
         </div>
-      
-        <div class="form-field">
-          <label>{{ $t('manual_run_set_time') }}</label>
-          <input type="datetime-local" v-model="formControl.schedule_datetime" :disabled="formControl.is_immediate === '1'">
-        </div>
-      
-        <div class="form-field">
+
+        <div class="field half">
           <label>{{ $t('list_label_status') }}</label>
           <select v-model="formControl.status">
             <option value="active">{{ $t('manual_run_status_active') }}</option>
@@ -105,15 +100,29 @@
             <option value="inactive">{{ $t('label_inactive') }}</option>
           </select>
         </div>
-      
+
+        <div class="field full">
+          <label>{{ $t('manual_run_set_time') }}</label>
+          <input type="datetime-local" v-model="formControl.schedule_datetime" :disabled="formControl.is_immediate === '1'">
+        </div>
+
         <input type="hidden" v-model="formControl.manual_id" />
         <input type="hidden" v-model="formControl.modifier" />
       </div>
     </ModalComponent>
 
-    <BoardPagination :total="filteredPosts.length" :perPage="perPage" @page-changed="changePage" />
   </div>
 </template>
+
+<script>
+import SortableHeader from "@/dashboard/components/misc/SortableHeader.vue";
+export default {
+    name: 'ManualExecutionHistoryList'
+    , components: {
+        SortableHeader,
+    }
+}
+</script>
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
@@ -181,7 +190,7 @@ const openEditModal = (post) => {
   Object.assign(formControl.value, post, {
     modifier: userId.value
   });
-  
+
   // datetime-local 형식으로 변환
   const parsedDatetime = parseServerTime(post.schedule_datetime);
   if (parsedDatetime) {
@@ -189,7 +198,7 @@ const openEditModal = (post) => {
       .toISOString()
       .slice(0, 16);
   }
-  
+
   isModalOpen.value = true;
 };
 
@@ -272,6 +281,10 @@ const changePage = (page) => {
   currentPage.value = page;
 };
 
+// ✅ 패널 바닥의 "총 N건 중 X–Y 표시" 범위
+const rangeStart = computed(() => (filteredPosts.value.length === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1));
+const rangeEnd = computed(() => Math.min(currentPage.value * perPage.value, filteredPosts.value.length));
+
 // 필터 변경시 페이지 리셋
 watch([selectedGroup, selectedSchedule, selectedStatus], () => {
   currentPage.value = 1;
@@ -291,14 +304,22 @@ const abandonManualExecution = async (post) => {
   }
 };
 
+// ✅ 상태값 → 배지 색 매핑 (active=online, wait=warning, inactive=offline, processing=info)
+const statusBadgeClass = (status) => ({
+  online: status === 'active',
+  warning: status === 'wait',
+  offline: status === 'inactive',
+  info: status === 'processing',
+});
+
 </script>
 
-<style scoped>
-.title1 { width: 8%; }
-.title2 { width: 18%; }
-.title3 { width: 18%; }
-.title4 { width: 12%; }
-.title5 { width: 18%; }
-.title6 { width: 12%; }
-.title7 { width: 14%; }
-</style>
+<!--
+  No <style scoped> block (TR0013 section 4.4 rule 7 / TR0017 DeviceList
+  convention). `.panel` / `.panel-head` / `.toolbar` / `.select` / `.btn` /
+  `.table-scroll` / `.badge` / `.row-actions` / `.mini` / `.panel-foot` /
+  `.form-grid` / `.field` come from components.css. The pre-renewal
+  `.board-container` / `.board-table` / `.filters` / `.reset-button` /
+  `.edit-button` / `.abandon-button` / `.modal-form` / `.grid-form` /
+  `.form-field` names are gone, so this screen no longer needs list.css.
+-->

@@ -1,25 +1,15 @@
 // src/i18n.js
 import { createI18n } from 'vue-i18n'
+import en_msg from './en/login'
+import ja_msg from './ja/login'
 import ko_msg from './ko/login'
 
 const userLocale = navigator.language.split('-')[0] || 'en';
 
 // Define only the message objects for each language.
 const messages = {
-  en: {
-    title: 'TimeWeaver-UI',
-    login: "Login",
-    join: "Join",
-    forgot: "Forgot Password",
-    password: "Password"
-  },
-  ja: {
-    title: 'TimeWeaver-UI',
-    login: "ログイン",
-    join: "会員登録",
-    forgot: "パスワードのお忘れ",
-    password: "パスワード"
-  },
+  en: {...en_msg},
+  ja: {...ja_msg},
   ko: {...ko_msg}
 }
 
