@@ -131,7 +131,6 @@ def validate_snapshot(
         schedule_ids: set[int] = set()
         detail_ids: set[str] = set()
         schedule_details: dict[int, set[str]] = {}
-        all_details = []
         for index, item in enumerate(schedules_data):
             schedule_data = require_mapping(item, f"schedules[{index}]")
             _require_fields(
@@ -186,16 +185,18 @@ def validate_snapshot(
                     detail.cron, f"schedules[{index}].details[{detail_index}].cron"
                 )
                 _validate_task(detail, index, detail_index)
-                all_details.append(detail)
             schedule_details[schedule.schedule_id] = current_details
+            ordered_details = sorted(
+                schedule.details, key=lambda detail: (detail.sequence, str(detail.detail_id))
+            )
+            if any(
+                left.exec_sequence > right.exec_sequence
+                for left, right in zip(ordered_details, ordered_details[1:])
+            ):
+                raise SnapshotValidationError(
+                    f"schedules[{index}].details exec_sequence must be nondecreasing"
+                )
             schedules.append(schedule)
-
-        ordered_details = sorted(all_details, key=lambda detail: (detail.sequence, str(detail.detail_id)))
-        if any(
-            left.exec_sequence > right.exec_sequence
-            for left, right in zip(ordered_details, ordered_details[1:])
-        ):
-            raise SnapshotValidationError("exec_sequence must be nondecreasing")
 
         manuals: list[ManualExecution] = []
         manual_ids: set[int] = set()
