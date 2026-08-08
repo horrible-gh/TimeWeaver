@@ -18,7 +18,7 @@ schedule_final_status AS (
     SELECT
         sg.schedule_id,
         CASE
-            WHEN d.last_login_at <= DATE_SUB(NOW(), INTERVAL 1 DAY)
+            WHEN COALESCE(d.last_heartbeat_at, d.last_login_at) <= DATE_SUB(NOW(), INTERVAL 1 DAY)
                 OR sg.group_status = 'inactive'
                 THEN 'inactive'
             WHEN el.has_error = 1 THEN 'error'  -- error when any execution log has an error
