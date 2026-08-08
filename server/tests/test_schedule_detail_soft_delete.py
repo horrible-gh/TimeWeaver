@@ -45,7 +45,7 @@ def test_agent_active_reads_exclude_tombstones_but_result_history_does_not():
     execution = read(SERVER_ROOT / "repositories" / "agent_execution.py")
 
     assert runtime.count("AND sd.deleted_at IS NULL") == 2
-    assert execution.count("deleted_at IS NULL") == 2
+    assert execution.count("deleted_at IS NULL") == 4
     accept_result = execution[execution.index("    def accept_result"):execution.index("    @staticmethod\n    def _find_result")]
     assert "deleted_at IS NULL" not in accept_result
 

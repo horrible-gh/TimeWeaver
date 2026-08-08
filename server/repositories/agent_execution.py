@@ -37,6 +37,11 @@ class ResultRecord:
 
 
 @dataclass(frozen=True)
+class StartRecord:
+    db_now: datetime
+
+
+@dataclass(frozen=True)
 class EventRecord:
     db_now: datetime
 
@@ -198,6 +203,73 @@ class AgentExecutionRepository:
 
         return self._run_retryable(operation)
 
+    def start_execution(self, device_id: int, payload: dict) -> StartRecord:
+        def operation():
+            with self.db.begin_transaction() as txn:
+                self._prepare_transaction(txn)
+                candidate = txn.fetch_one(
+                    """
+                    SELECT schedule_id
+                      FROM schedule_detail
+                     WHERE detail_id = %s
+                       AND deleted_at IS NULL
+                    """,
+                    (payload["detail_id"],),
+                )
+                if not candidate:
+                    raise ExecutionRepositoryError("not_found")
+
+                group = txn.fetch_one(
+                    """
+                    SELECT schedule_id, target_device
+                      FROM schedule_group
+                     WHERE schedule_id = %s
+                     FOR UPDATE
+                    """,
+                    (candidate["schedule_id"],),
+                )
+                detail = txn.fetch_one(
+                    """
+                    SELECT detail_id, schedule_id
+                      FROM schedule_detail
+                     WHERE detail_id = %s
+                       AND deleted_at IS NULL
+                     FOR UPDATE
+                    """,
+                    (payload["detail_id"],),
+                )
+                if (
+                    not group
+                    or not detail
+                    or int(group["target_device"]) != device_id
+                    or int(group["schedule_id"]) != payload["schedule_id"]
+                    or int(detail["schedule_id"]) != payload["schedule_id"]
+                ):
+                    raise ExecutionRepositoryError("not_found")
+
+                db_now = txn.fetch_one("SELECT UTC_TIMESTAMP() AS db_now")["db_now"]
+                txn.execute(
+                    """
+                    INSERT INTO execution_running
+                        (schedule_id, detail_id, execution_grp_id, attempt, start_time)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        execution_grp_id = VALUES(execution_grp_id),
+                        attempt = VALUES(attempt),
+                        start_time = VALUES(start_time)
+                    """,
+                    (
+                        payload["schedule_id"],
+                        payload["detail_id"],
+                        payload["execution_grp_id"],
+                        payload["attempt"],
+                        payload["started_at"],
+                    ),
+                )
+            return StartRecord(db_now)
+
+        return self._run_retryable(operation)
+
     def accept_result(self, device_id: int, payload: dict) -> ResultRecord:
         def operation():
             with self.db.begin_transaction() as txn:
@@ -243,7 +315,9 @@ class AgentExecutionRepository:
                 db_now = txn.fetch_one("SELECT UTC_TIMESTAMP() AS db_now")["db_now"]
                 existing = self._find_result(txn, payload)
                 if existing:
-                    return self._duplicate(existing, payload, db_now)
+                    duplicate = self._duplicate(existing, payload, db_now)
+                    self._clear_running(txn, payload)
+                    return duplicate
 
                 manual = None
                 if payload["manual_id"] is not None:
@@ -302,11 +376,14 @@ class AgentExecutionRepository:
                     existing = self._find_result(txn, payload)
                     if not existing:
                         raise
-                    return self._duplicate(existing, payload, db_now)
+                    duplicate = self._duplicate(existing, payload, db_now)
+                    self._clear_running(txn, payload)
+                    return duplicate
 
                 execution_id = int(
                     txn.fetch_one("SELECT LAST_INSERT_ID() AS execution_id")["execution_id"]
                 )
+                self._clear_running(txn, payload)
                 transitions = []
                 if manual is not None:
                     next_status = "done" if payload["result_code"] == 0 else "failed"
@@ -354,6 +431,13 @@ class AgentExecutionRepository:
             return ResultRecord(execution_id, False, transitions, db_now)
 
         return self._run_retryable(operation)
+
+    @staticmethod
+    def _clear_running(txn, payload: dict):
+        txn.execute(
+            "DELETE FROM execution_running WHERE schedule_id = %s AND detail_id = %s",
+            (payload["schedule_id"], payload["detail_id"]),
+        )
 
     @staticmethod
     def _find_result(txn, payload: dict):

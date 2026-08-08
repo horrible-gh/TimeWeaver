@@ -7,9 +7,9 @@ WITH task_status AS (
         el.start_time,
         el.end_time,
         CASE
+            WHEN er.detail_id IS NOT NULL THEN 'in_progress'  -- active run wins over history
             WHEN el.result_code = 0 THEN 'completed'  -- completed
             WHEN el.result_code IS NULL THEN 'pending'  -- pending
-            WHEN el.start_time IS NOT NULL AND el.end_time IS NULL THEN 'in_progress'  -- in progress
             ELSE 'error'  -- error
         END AS task_state
     FROM schedule_detail sd
@@ -17,10 +17,15 @@ WITH task_status AS (
     JOIN devices d ON sg.target_device = d.device_id
     LEFT JOIN execution_log el
         ON el.detail_id = sd.detail_id
-        AND el.start_time >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+        AND el.start_time >= datetime('now', '-1 day')
+    LEFT JOIN execution_running er
+        ON er.schedule_id = sd.schedule_id
+        AND er.detail_id = sd.detail_id
+        -- Ignore stale markers left behind if an agent dies mid-task.
+        AND er.start_time >= datetime('now', '-1 hour')
     WHERE sd.status IN ('active', 'error')
       AND sg.status NOT IN ('inactive')
-      AND d.last_login_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+      AND d.last_login_at >= datetime('now', '-1 day')
       AND d.status NOT IN ('inactive')
 ),
 all_states AS (

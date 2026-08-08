@@ -8,6 +8,8 @@ from schemas.agent_execution import (
     AgentEventRequest,
     ExecutionResultEnvelope,
     ExecutionResultRequest,
+    ExecutionStartEnvelope,
+    ExecutionStartRequest,
     ManualClaimEnvelope,
 )
 from services.agent.execution_service import (
@@ -55,6 +57,31 @@ async def claim_manual_run(
             "claim_expires_at": result["claim_expires_at"],
             "execution_grp_id": None,
         },
+    }
+
+
+@router.post("/executions/{execution_grp_id}/start", response_model=ExecutionStartEnvelope)
+async def start_execution(
+    execution_grp_id: UUID,
+    request: ExecutionStartRequest,
+    principal: DeviceIdentity = Depends(verify_agent_token),
+    service: AgentExecutionService = Depends(get_execution_service),
+):
+    try:
+        result = await run_blocking(
+            service.start_execution,
+            principal,
+            execution_grp_id,
+            request,
+        )
+    except AgentExecutionError as exc:
+        _raise(exc)
+    except BlockingQueueFull as exc:
+        _queue_full(exc)
+    return {
+        "schema_version": "1",
+        "server_time": result["server_time"],
+        "data": {"accepted": True},
     }
 
 

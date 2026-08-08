@@ -7,9 +7,9 @@ WITH task_status AS (
         el.start_time,
         el.end_time,
         CASE
+            WHEN er.detail_id IS NOT NULL THEN 'in_progress'  -- active run wins over history
             WHEN el.result_code = 0 THEN 'completed'  -- completed
             WHEN el.result_code IS NULL THEN 'pending'  -- pending
-            WHEN el.start_time IS NOT NULL AND el.end_time IS NULL THEN 'in_progress'  -- in progress
             ELSE 'error'  -- error
         END AS task_state
     FROM schedule_detail sd
@@ -18,6 +18,11 @@ WITH task_status AS (
     LEFT JOIN execution_log el
         ON el.detail_id = sd.detail_id
         AND el.start_time >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)
+    LEFT JOIN execution_running er
+        ON er.schedule_id = sd.schedule_id
+        AND er.detail_id = sd.detail_id
+        -- Ignore stale markers left behind if an agent dies mid-task.
+        AND er.start_time >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR)
     WHERE sd.deleted_at IS NULL
       AND sd.status IN ('active', 'error')
       AND sg.status NOT IN ('inactive', 'manual')

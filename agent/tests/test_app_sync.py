@@ -104,6 +104,8 @@ class FakeClient:
     def __init__(self):
         self.claims = []
         self.claim_error = None
+        self.starts = []
+        self.start_error = None
         self.events = []
 
     def claim_manual_execution(self, manual_id):
@@ -111,6 +113,12 @@ class FakeClient:
         if self.claim_error:
             raise self.claim_error
         return {"manual_id": manual_id, "claim_token": "claim-token"}
+
+    def report_execution_start(self, execution_grp_id, start):
+        self.starts.append((execution_grp_id, start))
+        if self.start_error:
+            raise self.start_error
+        return {"accepted": True}
 
     def report_execution_event(self, event):
         self.events.append(event)
@@ -269,7 +277,7 @@ def _regular_context(current):
 
 
 def test_execute_task_writes_only_to_outbox_and_waits_for_ack(wired_app, monkeypatch):
-    _scheduler, _state, _coordinator, _adapter, _client, outbox = wired_app
+    _scheduler, _state, _coordinator, _adapter, client, outbox = wired_app
     current = snapshot(include_manual=False)
     app.apply_snapshot(current)
     _regular_context(current)
@@ -284,12 +292,39 @@ def test_execute_task_writes_only_to_outbox_and_waits_for_ack(wired_app, monkeyp
     )
 
 
+    assert len(client.starts) == 1
+    execution_grp_id, start = client.starts[0]
+    assert execution_grp_id == str(app.group_execution_status[12]["context_id"])
+    assert start["detail_id"] == str(DETAIL_ID)
+    assert start["attempt"] == 1
     assert outbox.queued_results == 1
     assert app.running_tasks[12] is True
     item = outbox.peek(str(app.group_execution_status[12]["context_id"]))
     assert item is not None
     app.handle_result_ack(item.envelope, ())
     assert app.running_tasks[12] is False
+
+
+def test_start_signal_failure_never_blocks_task_execution(wired_app, monkeypatch):
+    _scheduler, _state, _coordinator, _adapter, client, outbox = wired_app
+    current = snapshot(include_manual=False)
+    app.apply_snapshot(current)
+    _regular_context(current)
+    client.start_error = CommunicationError("offline", code="unavailable")
+    ran = []
+    monkeypatch.setattr(app.task, "task_run", lambda value: (ran.append(value) or 0, None))
+    monkeypatch.setattr(app, "get_environment_info", lambda value: {})
+    assert outbox.reserve_slot()
+
+    app.execute_task(
+        str(DETAIL_ID), 12, 1,
+        app._detail_task_data(current.schedules[0].details[0]),
+        False, False, None,
+    )
+
+    assert len(client.starts) == 1
+    assert len(ran) == 1
+    assert outbox.queued_results == 1
 
 
 @pytest.mark.parametrize(

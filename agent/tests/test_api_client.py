@@ -60,6 +60,30 @@ def test_enroll_token_heartbeat_and_snapshot_match_protocol():
     assert transport.requests[3].kwargs["headers"]["If-None-Match"] == 'W/"oldoldoldoldold1"'
 
 
+def test_execution_start_is_one_shot_with_a_short_timeout():
+    transport = MockTransport(
+        MockResponse(payload=envelope({"accepted": True})),
+    )
+    api = client(transport, retries=3)
+    payload = {
+        "execution_grp_id": "3f0d1c9e-7a44-4e2c-9d8b-1a2b3c4d5e6f",
+        "schedule_id": 12,
+        "detail_id": "8f0d65c5-b6a4-4bb0-a2c5-f23672fc9b76",
+        "attempt": 1,
+        "started_at": "2026-08-01T02:00:01Z",
+    }
+
+    assert api.report_execution_start(payload["execution_grp_id"], payload) == {
+        "accepted": True
+    }
+    request = transport.requests[0]
+    assert request.url.endswith(
+        f'/api/agent/v1/executions/{payload["execution_grp_id"]}/start'
+    )
+    assert request.kwargs["timeout"] == (0.5, 1.0)
+    assert request.kwargs["json"] == payload
+
+
 def test_snapshot_304_has_no_body_decode():
     result = client(MockTransport(not_modified())).get_schedule_snapshot()
     assert isinstance(result, NotModified)
