@@ -29,7 +29,7 @@ export default defineComponent({
     const palette = chartPalette();
 
     const chartData = ref({
-      labels: ['Running', 'Wait', 'Complate', 'Error'],
+      labels: ['Running', 'Wait', 'Complete', 'Error'],
       datasets: [
         {
           data: [inProgressCount.value, pendingCount.value, completedCount.value, errorCount.value],

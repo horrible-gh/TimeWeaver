@@ -95,6 +95,7 @@ class EndpointPaths:
     heartbeat: str = "/api/agent/v1/heartbeat"
     snapshot: str = "/api/agent/v1/snapshot"
     claim_manual_execution: str = "/api/agent/v1/manual-runs/{manual_id}/claim"
+    execution_start: str = "/api/agent/v1/executions/{execution_grp_id}/start"
     execution_results: str = "/api/agent/v1/executions/{execution_grp_id}/results"
     events: str = "/api/agent/v1/events"
 
@@ -252,6 +253,29 @@ class AgentApiClient:
             raise MalformedResponseError("claim data must be an object")
         return data
 
+    def report_execution_start(
+        self,
+        execution_grp_id: str,
+        start: Mapping[str, Any],
+        *,
+        access_token: str | None = None,
+    ) -> Mapping[str, Any]:
+        path = self._endpoints.execution_start.format(
+            execution_grp_id=quote(execution_grp_id, safe="")
+        )
+        data = self._request(
+            "POST",
+            path,
+            json=dict(start),
+            access_token=access_token,
+            include_contract_headers=True,
+            request_timeout=(0.5, 1.0),
+            request_retries=0,
+        )
+        if not isinstance(data, Mapping):
+            raise MalformedResponseError("execution start data must be an object")
+        return data
+
     def report_execution_results(
         self,
         execution_grp_id: str,
@@ -314,6 +338,8 @@ class AgentApiClient:
         allow_not_modified: bool = False,
         return_envelope: bool = False,
         use_default_credential: bool = True,
+        request_timeout: tuple[float, float] | None = None,
+        request_retries: int | None = None,
         **kwargs: Any,
     ) -> Any:
         headers = {"Accept": "application/json"}
@@ -328,14 +354,16 @@ class AgentApiClient:
         if extra_headers:
             headers.update(extra_headers)
         url = self.endpoint_url(path)
+        timeout = request_timeout or self._timeout
+        retries = self._retries if request_retries is None else request_retries
 
-        for attempt in range(self._retries + 1):
+        for attempt in range(retries + 1):
             try:
                 response = self._transport.request(
-                    method, url, headers=headers, timeout=self._timeout, **kwargs
+                    method, url, headers=headers, timeout=timeout, **kwargs
                 )
             except (TimeoutError, ConnectionError, requests.Timeout, requests.ConnectionError) as exc:
-                if attempt < self._retries:
+                if attempt < retries:
                     self._sleep(self._backoff * (2**attempt))
                     continue
                 raise CommunicationError(

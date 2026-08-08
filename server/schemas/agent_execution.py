@@ -28,6 +28,29 @@ def _require_utc(value: datetime) -> datetime:
     return value
 
 
+class ExecutionStartRequest(BaseModel):
+    execution_grp_id: UUID
+    schedule_id: int
+    detail_id: UUID
+    attempt: int = Field(ge=1)
+    started_at: datetime
+
+    @field_validator("started_at")
+    @classmethod
+    def started_at_is_utc(cls, value: datetime):
+        return _require_utc(value)
+
+
+class ExecutionStartData(BaseModel):
+    accepted: Literal[True] = True
+
+
+class ExecutionStartEnvelope(BaseModel):
+    schema_version: Literal["1"] = "1"
+    server_time: datetime
+    data: ExecutionStartData
+
+
 class ExecutionResultRequest(BaseModel):
     execution_grp_id: UUID
     schedule_id: int

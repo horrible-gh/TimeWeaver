@@ -11,6 +11,7 @@ from repositories.agent_execution import (
 from schemas.agent_execution import (
     AgentEventRequest,
     ExecutionResultRequest,
+    ExecutionStartRequest,
     canonical_environment,
 )
 from services.agent.identity_service import DeviceIdentity
@@ -60,6 +61,40 @@ class AgentExecutionService:
             "claim_expires_at": _utc(record.claim_expires_at),
             "execution_grp_id": None,
         }
+
+    def start_execution(
+        self,
+        principal: DeviceIdentity,
+        path_execution_grp_id: UUID,
+        request: ExecutionStartRequest,
+    ) -> dict:
+        serialized = json.dumps(
+            request.model_dump(mode="json"),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if (
+            path_execution_grp_id != request.execution_grp_id
+            or len(serialized) > REQUEST_BODY_MAX
+        ):
+            raise AgentExecutionError(
+                422,
+                "invalid_request",
+                "Execution start contract is inconsistent",
+            )
+
+        payload = {
+            "execution_grp_id": request.execution_grp_id.bytes,
+            "schedule_id": request.schedule_id,
+            "detail_id": request.detail_id.bytes,
+            "attempt": request.attempt,
+            "started_at": _db_datetime(request.started_at),
+        }
+        try:
+            record = self.repository.start_execution(principal.device_id, payload)
+        except ExecutionRepositoryError as exc:
+            self._raise_repository_error(exc)
+        return {"server_time": _utc(record.db_now), "accepted": True}
 
     def accept_result(
         self,

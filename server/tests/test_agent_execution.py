@@ -14,6 +14,7 @@ from repositories.agent_execution import (
     EventRecord,
     ExecutionRepositoryError,
     ResultRecord,
+    StartRecord,
 )
 from routers.agent import execution as execution_router
 from services.agent.execution_service import (
@@ -87,6 +88,7 @@ class MemoryExecutionRepository(MemoryIdentityRepository):
             },
         }
         self.logs = {}
+        self.running = {}
         self.events = []
         self.next_execution_id = 1
 
@@ -128,6 +130,20 @@ class MemoryExecutionRepository(MemoryIdentityRepository):
             )
             return ClaimRecord(manual_id, claim_token, expires, now)
 
+    def start_execution(self, device_id, payload):
+        with self.lock:
+            now = db_now()
+            group, _ = self._owned(
+                device_id,
+                payload["detail_id"],
+                payload["schedule_id"],
+            )
+            if not group:
+                raise ExecutionRepositoryError("not_found")
+            key = (payload["schedule_id"], payload["detail_id"])
+            self.running[key] = copy.deepcopy(payload)
+            return StartRecord(now)
+
     def accept_result(self, device_id, payload):
         with self.lock:
             now = db_now()
@@ -159,6 +175,7 @@ class MemoryExecutionRepository(MemoryIdentityRepository):
             if existing:
                 if existing["semantic"] != semantic:
                     raise ExecutionRepositoryError("invalid_request")
+                self.running.pop((payload["schedule_id"], payload["detail_id"]), None)
                 return ResultRecord(existing["execution_id"], True, [], now)
 
             manual = None
@@ -176,6 +193,7 @@ class MemoryExecutionRepository(MemoryIdentityRepository):
             execution_id = self.next_execution_id
             self.next_execution_id += 1
             self.logs[key] = {"execution_id": execution_id, "semantic": semantic}
+            self.running.pop((payload["schedule_id"], payload["detail_id"]), None)
             transitions = []
             if manual:
                 status = "done" if payload["result_code"] == 0 else "failed"
@@ -274,6 +292,26 @@ def result_body(**overrides):
     return body
 
 
+def start_body(**overrides):
+    body = {
+        "execution_grp_id": str(EXECUTION_GROUP_ID),
+        "schedule_id": 12,
+        "detail_id": str(DETAIL_ID),
+        "attempt": 1,
+        "started_at": "2026-08-01T02:00:01Z",
+    }
+    body.update(overrides)
+    return body
+
+
+def post_start(client, token, body):
+    return client.post(
+        f'/api/agent/v1/executions/{body["execution_grp_id"]}/start',
+        headers=auth(token),
+        json=body,
+    )
+
+
 def result_headers(token, body):
     return {
         **auth(token),
@@ -357,6 +395,52 @@ def test_claim_and_sweep_are_concurrency_safe(execution_app):
     assert sorted(swept) == [0, 1]
     assert repository.manuals[41]["status"] == "wait"
     assert repository.manuals[41]["claim_token"] is None
+
+
+def test_start_then_finish_tracks_and_clears_running_state(execution_app):
+    client, _, repository, first, second = execution_app
+    body = start_body()
+
+    started = post_start(client, first["access_token"], body)
+    assert started.status_code == 200
+    assert started.json()["data"] == {"accepted": True}
+    key = (12, DETAIL_ID.bytes)
+    assert repository.running[key]["execution_grp_id"] == EXECUTION_GROUP_ID.bytes
+
+    replacement_group = uuid.uuid4()
+    replaced = post_start(
+        client,
+        first["access_token"],
+        start_body(execution_grp_id=str(replacement_group), attempt=2),
+    )
+    assert replaced.status_code == 200
+    assert repository.running[key]["execution_grp_id"] == replacement_group.bytes
+
+    denied = post_start(
+        client,
+        second["access_token"],
+        start_body(execution_grp_id=str(uuid.uuid4())),
+    )
+    assert denied.status_code == 404
+
+    finished = post_result(client, first["access_token"], result_body())
+    assert finished.status_code == 200
+    assert key not in repository.running
+
+    # A delayed/retried start followed by a duplicate result is also self-healing.
+    assert post_start(client, first["access_token"], body).status_code == 200
+    duplicate = post_result(client, first["access_token"], result_body())
+    assert duplicate.status_code == 200
+    assert duplicate.json()["data"]["duplicate"] is True
+    assert key not in repository.running
+
+    # Existing agents that report a result without a start signal remain compatible.
+    direct = post_result(
+        client,
+        first["access_token"],
+        result_body(execution_grp_id=str(uuid.uuid4()), attempt=2),
+    )
+    assert direct.status_code == 200
 
 
 def test_regular_results_transitions_and_idempotency(execution_app):
@@ -525,6 +609,12 @@ def test_result_scope_contract_event_validation_and_human_auth(execution_app):
     )
     for method, path, json_body, headers in (
         ("post", "/api/agent/v1/manual-runs/41/claim", None, auth(human_jwt)),
+        (
+            "post",
+            f"/api/agent/v1/executions/{EXECUTION_GROUP_ID}/start",
+            start_body(),
+            auth(human_jwt),
+        ),
         (
             "post",
             f"/api/agent/v1/executions/{EXECUTION_GROUP_ID}/results",

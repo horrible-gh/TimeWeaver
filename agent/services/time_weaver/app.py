@@ -388,7 +388,31 @@ def execute_task(
     if manual_id is None:
         running_tasks[group_id] = True
 
+    if execution_grp_id is None:
+        with execution_lock:
+            status = group_execution_status.get(group_id)
+            if status is None:
+                raise RuntimeError("execution context is missing")
+            execution_grp_id = str(status["context_id"])
+
     started_at = datetime.datetime.now(timezone.utc)
+    if api_client is not None:
+        try:
+            api_client.report_execution_start(
+                str(execution_grp_id),
+                {
+                    "execution_grp_id": str(execution_grp_id),
+                    "schedule_id": int(group_id),
+                    "detail_id": str(detail_id),
+                    "attempt": 1,
+                    "started_at": started_at.isoformat().replace("+00:00", "Z"),
+                },
+            )
+        except Exception:
+            Logger.warn(
+                f"[execute_task] start signal failed Group={group_id}, Detail={detail_id}"
+            )
+
     result = -1
     message = None
     try:
@@ -400,12 +424,6 @@ def execute_task(
         )
     finished_at = datetime.datetime.now(timezone.utc)
 
-    if execution_grp_id is None:
-        with execution_lock:
-            status = group_execution_status.get(group_id)
-            if status is None:
-                raise RuntimeError("execution context is missing")
-            execution_grp_id = str(status["context_id"])
     try:
         environment = get_environment_info(device_name)
     except Exception:
