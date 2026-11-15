@@ -1,34 +1,16 @@
-import {
-  AGENT_TASK_NAME,
-  DEFAULT_INSTALL_DIR,
-  ENROLLMENT_TOKEN_ENV,
-} from "@/dashboard/constants/enrollment";
-
-function quotePowerShell(value) {
-  return String(value).replace(/"/g, '`"');
+// Commands intentionally contain no token. The Go setup wizard requests it
+// through hidden input; no machine-wide environment or scheduled task is needed.
+export function buildCommandBundle(method) {
+  return method === "linux" ? ["bash setup.sh"] : [".\\setup.ps1"];
 }
 
-export function buildCommandBundle(method, token, installDir = DEFAULT_INSTALL_DIR) {
-  const safeMethod = method === "system_task" ? method : "interactive";
-  const safeToken = quotePowerShell(token);
-  if (safeMethod === "system_task") {
-    return [
-      `[Environment]::SetEnvironmentVariable("${ENROLLMENT_TOKEN_ENV}", "${safeToken}", "Machine")`,
-      `schtasks /end /tn "${AGENT_TASK_NAME}"`,
-      `schtasks /run /tn "${AGENT_TASK_NAME}"`,
-    ];
-  }
-  return [
-    `$env:${ENROLLMENT_TOKEN_ENV} = "${safeToken}"`,
-    `cd "${quotePowerShell(installDir)}"`,
-    ".\\run-agent.cmd",
-  ];
+export function buildRunCommand(method) {
+  return method === "linux" ? "bash run.sh" : ".\\run.ps1";
 }
 
-export function buildCleanupCommand(method) {
-  return method === "system_task"
-    ? `[Environment]::SetEnvironmentVariable("${ENROLLMENT_TOKEN_ENV}", $null, "Machine")`
-    : null;
+// Kept for EnrollmentWatchStep: interactive setup leaves no token to clean up.
+export function buildCleanupCommand() {
+  return null;
 }
 
 export function bundleToText(lines = []) {
