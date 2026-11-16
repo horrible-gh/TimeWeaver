@@ -230,14 +230,55 @@ func envValue(value string) (string, error) {
 		if tail != "" && !strings.HasPrefix(tail, "#") {
 			break
 		}
-		if quote == '\'' {
-			return strings.NewReplacer(`\\`, `\`, `\'`, `'`).Replace(value[1:i]), nil
-		}
-		result, err := strconv.Unquote(value[:i+1])
-		if err != nil {
-			return "", errors.New("unsupported escape sequence")
-		}
-		return result, nil
+		return decodeQuoted(value[1:i], quote), nil
 	}
 	return "", errors.New("unterminated quoted value or unexpected trailing text")
+}
+
+// python-dotenv decodes only its documented quote escapes, not Go's \x/\u
+// escapes. Unknown escapes must remain literal, especially in credentials.
+func decodeQuoted(value string, quote byte) string {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		if value[i] != '\\' || i+1 == len(value) {
+			out.WriteByte(value[i])
+			continue
+		}
+		next := value[i+1]
+		decoded, known := next, next == '\\' || next == '\''
+		if quote == '"' {
+			switch next {
+			case '"':
+				known = true
+			case 'a':
+				decoded = '\a'
+				known = true
+			case 'b':
+				decoded = '\b'
+				known = true
+			case 'f':
+				decoded = '\f'
+				known = true
+			case 'n':
+				decoded = '\n'
+				known = true
+			case 'r':
+				decoded = '\r'
+				known = true
+			case 't':
+				decoded = '\t'
+				known = true
+			case 'v':
+				decoded = '\v'
+				known = true
+			}
+		}
+		if known {
+			out.WriteByte(decoded)
+			i++
+		} else {
+			out.WriteByte(value[i])
+		}
+	}
+	return out.String()
 }
