@@ -184,6 +184,10 @@ jobs:
           TIMEWEAVER_RUNTIME_INTEROP: '1'
           TW_AGENT_CONTRACT_VALIDATOR: ${{ github.workspace }}/artifacts/agent-runtime-validator
         run: go test -race -count=1 -v ./internal/agentapi -run TestPythonRuntimeInterop
+      - name: Cross-deliver execution requests with the frozen Python service
+        env:
+          TIMEWEAVER_EXECUTION_INTEROP: '1'
+        run: go test -race -count=1 -v ./internal/agentapi -run TestPythonExecutionInterop
       - name: Retain resolved dependency locks
         if: always()
         uses: actions/upload-artifact@v4
