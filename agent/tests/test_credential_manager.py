@@ -132,9 +132,11 @@ def test_transient_read_failure_preserves_credential_and_does_not_enroll(tmp_pat
 
 def test_corrupt_credential_file_is_discarded_and_needs_enrollment(tmp_path):
     path = tmp_path / "credential.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("not valid json", encoding="utf-8")
     store = CredentialStore(path)
+    # Corrupt a privately stored file so this exercises JSON validation, not
+    # a preceding permissions failure from write_text's default file mode.
+    store.write(stored())
+    path.write_text("not valid json", encoding="utf-8")
     transport = MockTransport()
     api = AgentApiClient("https://timeweaver.invalid", transport=transport, retries=0)
     manager = CredentialManager(api, path, store=store, now=lambda: NOW)
