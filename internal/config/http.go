@@ -66,7 +66,7 @@ func loadHTTP(get func(string, string) string) (HTTPSettings, error) {
 	if err != nil {
 		return s, err
 	}
-	queue, err := integer("BLOCKING_DB_QUEUE_CAPACITY", 2*workers, 0, 4096)
+	queue, err := integer("BLOCKING_DB_QUEUE_CAPACITY", 2*(s.Concurrency/3), 0, 4096)
 	if err != nil {
 		return s, err
 	}

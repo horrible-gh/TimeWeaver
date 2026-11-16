@@ -30,3 +30,16 @@ func TestHTTPSettingsRejectUnsafeValues(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestWorkerOverrideDoesNotChangeLegacyQueueDefault(t *testing.T) {
+	// Python computes both defaults at class definition time; changing only the
+	// worker env var must not silently resize the unspecified queue.
+	s, err := Load(settingsFile(t, "BLOCKING_DB_WORKER_COUNT=1\n"), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := 1 + 2*(DefaultHTTPSettings().Concurrency/3)
+	if s.HTTP.Concurrency != want {
+		t.Fatalf("admission %d, want %d", s.HTTP.Concurrency, want)
+	}
+}
