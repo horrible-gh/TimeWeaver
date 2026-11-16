@@ -53,7 +53,7 @@ def main():
         # Exercise the actual profile menu; it must revoke server state, not just
         # remove a browser value as the legacy UI did.
         page.locator(".user-trigger").click()
-        page.get_by_text("Logout", exact=True).click()
+        page.get_by_role("menuitem", name="Logout", exact=True).click()
         page.wait_for_url("**/login")
         assert context.request.get(base + "/auth/me").status == 401
         assert not [c for c in context.cookies() if c["name"] == "tw_session"]
