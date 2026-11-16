@@ -4,6 +4,7 @@ from schemas.tasks import TaskInsertRequest, TaskUpdateRequest, TaskGetRequest, 
 from routers.login.auth import verify_token
 from services.blocking import BlockingQueueFull, RETRY_AFTER, run_blocking
 from services.task_contract import normalize_task_row
+from services.agent.capabilities import supports_recursive_housekeep
 import LogAssist.log as logger
 import uuid
 
@@ -50,6 +51,25 @@ def _normalize_task_row(row: dict) -> dict:
             },
         )
     return normalized
+
+def _require_recursive_agent(txn, row):
+    if not row["house_keep_recursive"]:
+        return
+    device = txn.fetch_one(
+        "SELECT d.agent_capabilities FROM schedule_group sg "
+        "JOIN devices d ON d.device_id = sg.target_device "
+        "WHERE sg.schedule_id = %s",
+        (row["schedule_id"],),
+    )
+    if not device or not supports_recursive_housekeep(device.get("agent_capabilities")):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "agent_upgrade_required",
+                "message": "Start an updated TimeWeaver-Agent on the target device first",
+            },
+        )
+
 
 @router.get("/get_tasks", dependencies=[Depends(verify_token)])
 async def get_Tasks(task: TaskGetRequest = Depends()):
@@ -102,6 +122,7 @@ async def insert_task(task: TaskInsertRequest):
         row.get("target_date_format"),  # target_date_format
         row.get("destination_date_format"),  # destination_date_format
         row.get("house_keep_days"),  # house_keep_days
+        row["house_keep_recursive"],
         row.get("creator"),  # creator
     )
     task_query = sqloader.load_sql("time_weaver.json", "tasks.insert_task")
@@ -111,6 +132,7 @@ async def insert_task(task: TaskInsertRequest):
     # get_tasks LEFT JOINs task_detail so the orphan shows up as an empty task.
     def write_task():
         with db_instance.begin_transaction() as txn:
+            _require_recursive_agent(txn, row)
             txn.execute(detail_query, schedule_detail_data)
             return txn.execute(task_query, task_data)
 
@@ -167,6 +189,7 @@ async def update_tasks(task: TaskUpdateRequest):
         "target_date_format": row.get("target_date_format"),
         "destination_date_format": row.get("destination_date_format"),
         "house_keep_days": row.get("house_keep_days"),
+        "house_keep_recursive": row["house_keep_recursive"],
         "modifier": row.get("modifier"),
         "detail_id": row.get("detail_id"),
     }
@@ -182,6 +205,7 @@ async def update_tasks(task: TaskUpdateRequest):
         task_data["target_date_format"],
         task_data["destination_date_format"],
         task_data["house_keep_days"],
+        task_data["house_keep_recursive"],
         task_data["modifier"],
         task_data["detail_id"],
     )
@@ -189,6 +213,7 @@ async def update_tasks(task: TaskUpdateRequest):
 
     def write_task():
         with db_instance.begin_transaction() as txn:
+            _require_recursive_agent(txn, row)
             txn.execute(detail_query, schedule_detail_tuple)
             return txn.execute(task_query, task_tuple)
 

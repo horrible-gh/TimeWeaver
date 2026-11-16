@@ -30,4 +30,12 @@ def normalize_task_row(row: dict) -> dict:
 
     for field in FORBIDDEN_TASK_FIELDS.get(normalized.get("task_type"), set()):
         normalized[field] = None
+    # Only housekeep tasks can opt in. Old rows/clients stay non-recursive.
+    value = normalized.get("house_keep_recursive", False)
+    if isinstance(value, str):
+        value = value.strip().lower()
+    normalized["house_keep_recursive"] = (
+        normalized.get("task_type") == "housekeep"
+        and value in (True, 1, "1", "true")
+    )
     return normalized

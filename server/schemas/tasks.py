@@ -29,6 +29,7 @@ class TaskInsertRequest(BaseModel):
     target_date_format: str | None = None
     destination_date_format: str | None = None
     house_keep_days: int | None = None
+    house_keep_recursive: bool = False
     creator: str | None = None
 
     is_immediate: bool | str = False
@@ -62,6 +63,7 @@ class TaskUpdateRequest(BaseModel):
     target_date_format: str | None = None
     destination_date_format: str | None = None
     house_keep_days: int | None = None
+    house_keep_recursive: bool = False
     modifier: str | None = None
 
 class ScheduleGetRequest(BaseModel):

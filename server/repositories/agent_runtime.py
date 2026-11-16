@@ -33,6 +33,7 @@ class AgentRuntimeRepository:
         device_id: int,
         agent_version: str,
         applied_revision: str | None,
+        capabilities: str = "",
     ) -> HeartbeatRecord:
         with self.db.begin_transaction() as txn:
             db_now = txn.fetch_one("SELECT UTC_TIMESTAMP() AS db_now")["db_now"]
@@ -41,11 +42,12 @@ class AgentRuntimeRepository:
                 UPDATE devices
                    SET last_heartbeat_at = %s,
                        version = %s,
-                       applied_revision = %s
+                       applied_revision = %s,
+                       agent_capabilities = %s
                  WHERE device_id = %s
                    AND status = 'active'
                 """,
-                (db_now, agent_version, applied_revision, device_id),
+                (db_now, agent_version, applied_revision, capabilities, device_id),
             )
             if affected != 1:
                 # MySQL can report zero changed rows when two identical
@@ -108,7 +110,7 @@ class AgentRuntimeRepository:
                        td.source_path, td.error_on_missing_source,
                        td.destination_path, td.date_format,
                        td.target_date_format, td.destination_date_format,
-                       td.house_keep_days
+                       td.house_keep_days, td.house_keep_recursive
                   FROM schedule_group sg
                   JOIN schedule_detail sd
                     ON sd.schedule_id = sg.schedule_id

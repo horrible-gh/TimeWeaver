@@ -44,6 +44,7 @@ SELECT
     , td.target_date_format
     , td.destination_date_format
     , td.house_keep_days
+    , td.house_keep_recursive
 FROM
     schedule_detail sd
 JOIN schedule_group sg

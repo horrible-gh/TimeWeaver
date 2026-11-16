@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 
 from routers.agent.auth import verify_agent_token
+from services.agent.capabilities import needs_recursive_housekeep, supports_recursive_housekeep
 from schemas.agent_runtime import HeartbeatEnvelope, HeartbeatRequest, SnapshotEnvelope
 from services.agent.identity_service import DeviceIdentity
 from services.agent.runtime_service import (
@@ -50,6 +51,7 @@ def _validate_schema_version(value):
 @router.post("/heartbeat", response_model=HeartbeatEnvelope)
 async def heartbeat(
     request: HeartbeatRequest,
+    capabilities: str | None = Header(default=None, alias="X-TW-Agent-Capabilities", max_length=1024),
     x_tw_agent_version: str | None = Header(default=None, alias="X-TW-Agent-Version", max_length=50),
     x_tw_schema_version: str | None = Header(default=None, alias="X-TW-Schema-Version"),
     principal: DeviceIdentity = Depends(verify_agent_token),
@@ -57,7 +59,7 @@ async def heartbeat(
 ):
     _ = (x_tw_agent_version, x_tw_schema_version)
     try:
-        data = await run_blocking(service.heartbeat, principal, request)
+        data = await run_blocking(service.heartbeat, principal, request, capabilities)
     except AgentRuntimeError as exc:
         _raise(exc)
     except BlockingQueueFull as exc:
@@ -69,6 +71,7 @@ async def heartbeat(
 async def snapshot(
     response: Response,
     if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+    capabilities: str | None = Header(default=None, alias="X-TW-Agent-Capabilities", max_length=1024),
     x_tw_schema_version: str | None = Header(default=None, alias="X-TW-Schema-Version"),
     principal: DeviceIdentity = Depends(verify_agent_token),
     service: AgentRuntimeService = Depends(get_runtime_service),
@@ -80,6 +83,15 @@ async def snapshot(
         _raise(exc)
     except BlockingQueueFull as exc:
         _queue_full(exc)
+    # Check before 304: an older binary must not reuse a cached recursive plan.
+    if needs_recursive_housekeep(result.data) and not supports_recursive_housekeep(capabilities):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "agent_upgrade_required",
+                "message": "Update TimeWeaver-Agent to use recursive housekeeping",
+            },
+        )
     if if_none_match == result.etag:
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": result.etag})
     response.headers["ETag"] = result.etag

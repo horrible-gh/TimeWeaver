@@ -13,6 +13,7 @@ from repositories.agent_runtime import (
 from schemas.agent_runtime import HeartbeatRequest
 from services.agent.identity_service import DeviceIdentity
 from services.task_contract import normalize_task_row
+from services.agent.capabilities import HOUSEKEEP_RECURSIVE, supports_recursive_housekeep
 
 
 SCHEMA_VERSION = "1"
@@ -98,12 +99,14 @@ class AgentRuntimeService:
         self,
         principal: DeviceIdentity,
         request: HeartbeatRequest,
+        capabilities: str | None = None,
     ) -> dict:
         try:
             result = self.repository.record_heartbeat(
                 principal.device_id,
                 request.agent_version,
                 request.applied_revision,
+                HOUSEKEEP_RECURSIVE if supports_recursive_housekeep(capabilities) else "",
             )
         except RuntimeRepositoryError as exc:
             self._raise_repository_error(exc)
@@ -193,6 +196,7 @@ class AgentRuntimeService:
                                 "destination_date_format"
                             ),
                             "house_keep_days": row.get("house_keep_days"),
+                            "house_keep_recursive": row.get("house_keep_recursive", False),
                         }
                     ),
                 }

@@ -38,13 +38,14 @@ class MemoryAgentRepository(MemoryIdentityRepository):
         self.details = []
         self.manuals = []
 
-    def record_heartbeat(self, device_id, agent_version, applied_revision):
+    def record_heartbeat(self, device_id, agent_version, applied_revision, capabilities=""):
         device = self.devices.get(device_id)
         if not device or device["status"] != "active":
             raise RuntimeRepositoryError("device_revoked")
         device.update(
             version=agent_version,
             applied_revision=applied_revision,
+            agent_capabilities=capabilities,
             last_heartbeat_at=utcnow(),
         )
         return type("Heartbeat", (), {"db_now": device["last_heartbeat_at"]})()

@@ -50,6 +50,7 @@ class SnapshotTaskData(BaseModel):
     target_date_format: str | None
     destination_date_format: str | None
     house_keep_days: int | None
+    house_keep_recursive: bool = False
 
 
 class SnapshotDetailData(BaseModel):

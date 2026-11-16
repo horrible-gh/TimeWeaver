@@ -139,6 +139,13 @@
           <input type="number" v-model="formControl.house_keep_days" :placeholder="$t('task_house_keep_days') + $t('msg_enter')" min="0" max="999" @input="formControl.house_keep_days = $event.target.value.slice(0, 3)" />
         </div>
 
+        <div v-if="formControl.task_type === 'housekeep'" class="field half">
+          <label class="housekeep-recursive">
+            <input type="checkbox" v-model="formControl.house_keep_recursive" />
+            <span>{{ $t('task_house_keep_recursive') }}</span>
+          </label>
+        </div>
+
         <div class="field half">
           <label>{{ $t('task_status') }}</label>
           <select v-model="formControl.status">
@@ -225,6 +232,7 @@ import ModalComponent from "../../misc/ModalComponent.vue"; // ✅ 공통 모달
 import BoardPagination from "../../misc/BoardPagination.vue";
 import { useI18n } from "vue-i18n";
 import { parseServerTime } from "@/dashboard/utils/deviceStatus";
+import { housekeepOptions } from "@/dashboard/utils/housekeeping";
 const { t } = useI18n(); // ✅ i18n 함수 가져오기
 
 const posts = ref([]); // ✅ 초기값 빈 배열
@@ -248,8 +256,12 @@ const formControl = ref({
   status: "active",
   creator: schedule_id,
   modifier:schedule_id,
+  house_keep_recursive: false,
 });
 const scheduleList = ref([]);
+watch(() => formControl.value.task_type, (type) => {
+  if (type !== "housekeep") formControl.value.house_keep_recursive = false;
+});
 
 // ✅ 스케줄 목록 가져오기
 const fetchScheduleList = async () => {
@@ -309,6 +321,7 @@ const openAddScheduleModal = () => {
     status: "active",
     archive_type: null,
     task_type: "command",
+    house_keep_recursive: false,
     error_on_missing_source: "1",
     creator: userId.value || "Guest",  // ✅ 수정
     modifier: userId.value || "Guest"  // ✅ 수정
@@ -319,7 +332,7 @@ const openAddScheduleModal = () => {
 // ✅ 그룹 수정 모달 열기
 const openEditModal = (schedule) => {
   isEditMode.value = true;
-  Object.assign(formControl.value, schedule, {
+  Object.assign(formControl.value, schedule, housekeepOptions(schedule), {
     is_immediate: "1",
     modifier: userId.value || "Guest",  // ✅ 수정
     creator: schedule.creator || userId.value  // 기존 creator 유지
@@ -330,6 +343,7 @@ const openEditModal = (schedule) => {
 // ✅ 그룹 저장 (추가 또는 수정)
 const saveTasks = async () => {
   try {
+    Object.assign(formControl.value, housekeepOptions(formControl.value));
     // ✅ 요청 데이터 확인 (디버깅)
     console.log("전송 데이터:", JSON.stringify(formControl.value, null, 2));
     if (isEditMode.value) {
@@ -341,7 +355,8 @@ const saveTasks = async () => {
     closeModal();
   } catch (error) {
     console.error("그룹 저장 실패:", error);
-    alert(t('msg_save_failed'));
+    const code = error.response?.data?.detail?.code;
+    alert(t(code === "agent_upgrade_required" ? "msg_housekeep_agent_upgrade" : "msg_save_failed"));
   }
 };
 
@@ -470,8 +485,8 @@ const statusBadgeClass = (status) => ({
 </script>
 
 <!--
-  No <style scoped> block (TR0013 section 4.4 rule 7 / TR0017 DeviceList
-  convention). `.panel` / `.panel-head` / `.toolbar` / `.select` / `.btn` /
+  Shared layout stays in components.css; local styles only size the checkbox.
+  `.panel` / `.panel-head` / `.toolbar` / `.select` / `.btn` /
   `.table-scroll` / `.badge` / `.row-actions` / `.mini` / `.panel-foot` /
   `.form-grid` / `.field` come from components.css. The pre-renewal
   `.board-container` / `.board-table` / `.filters` / `.add-button` /
@@ -479,3 +494,22 @@ const statusBadgeClass = (status) => ({
   `.button-group` / `.modal-form` / `.grid-form` / `.form-field` /
   `.form-group-inline` names are gone, so this screen no longer needs list.css.
 -->
+
+<style scoped>
+.housekeep-recursive {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+}
+.housekeep-recursive input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  min-height: 0;
+  margin: 0;
+}
+.housekeep-recursive span {
+  color: inherit;
+}
+</style>
