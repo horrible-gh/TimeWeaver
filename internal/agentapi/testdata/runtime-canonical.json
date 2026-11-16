@@ -1,0 +1,73 @@
+{
+  "data": {
+    "revision": "ignored",
+    "generated_at": "2026-11-16T00:00:00Z",
+    "device": {
+      "device_id": 42,
+      "device_name": "test",
+      "status": "active",
+      "known_agent_version": null
+    },
+    "schedules": [
+      {
+        "schedule_id": 12,
+        "name": "group",
+        "cron": {
+          "year": "*",
+          "month": "*",
+          "day_of_week": "*",
+          "day": "*",
+          "hour": "*",
+          "minute": "*",
+          "second": "*"
+        },
+        "is_error_stop": true,
+        "details": [
+          {
+            "detail_id": "11111111-1111-1111-1111-111111111111",
+            "schedule_name": null,
+            "cron": {
+              "year": "*",
+              "month": "*",
+              "day_of_week": "*",
+              "day": "*",
+              "hour": "*",
+              "minute": "*",
+              "second": "*"
+            },
+            "is_error_stop": false,
+            "sequence": 10,
+            "exec_sequence": 1,
+            "retry_count": 0,
+            "task": {
+              "task_type": "command",
+              "command": "echo \ud55c\uae00 \u65e5\u672c\u8a9e \ud83d\ude00 <>& \" \\ \\u2028 \u2028 \u2029\n\t\u0000",
+              "archive_type": null,
+              "source_path": null,
+              "error_on_missing_source": true,
+              "destination_path": null,
+              "date_format": "%Y%m%d",
+              "target_date_format": null,
+              "destination_date_format": null,
+              "house_keep_days": null,
+              "house_keep_recursive": false
+            }
+          }
+        ]
+      }
+    ],
+    "manual_runs": [
+      {
+        "manual_id": 2,
+        "schedule_id": 12,
+        "detail_id": "11111111-1111-1111-1111-111111111111",
+        "status": "wait",
+        "is_immediate": false,
+        "schedule_datetime": "2026-11-16T01:00:00Z",
+        "claimable": true
+      }
+    ]
+  },
+  "canonical": "{\"device\":{\"device_id\":42,\"device_name\":\"test\",\"known_agent_version\":null,\"status\":\"active\"},\"manual_runs\":[{\"claimable\":true,\"detail_id\":\"11111111-1111-1111-1111-111111111111\",\"is_immediate\":false,\"manual_id\":2,\"schedule_datetime\":\"2026-11-16T01:00:00Z\",\"schedule_id\":12,\"status\":\"wait\"}],\"schedules\":[{\"cron\":{\"day\":\"*\",\"day_of_week\":\"*\",\"hour\":\"*\",\"minute\":\"*\",\"month\":\"*\",\"second\":\"*\",\"year\":\"*\"},\"details\":[{\"cron\":{\"day\":\"*\",\"day_of_week\":\"*\",\"hour\":\"*\",\"minute\":\"*\",\"month\":\"*\",\"second\":\"*\",\"year\":\"*\"},\"detail_id\":\"11111111-1111-1111-1111-111111111111\",\"exec_sequence\":1,\"is_error_stop\":false,\"retry_count\":0,\"schedule_name\":null,\"sequence\":10,\"task\":{\"archive_type\":null,\"command\":\"echo \ud55c\uae00 \u65e5\u672c\u8a9e \ud83d\ude00 <>& \\\" \\\\ \\\\u2028 \u2028 \u2029\\n\\t\\u0000\",\"date_format\":\"%Y%m%d\",\"destination_date_format\":null,\"destination_path\":null,\"error_on_missing_source\":true,\"house_keep_days\":null,\"house_keep_recursive\":false,\"source_path\":null,\"target_date_format\":null,\"task_type\":\"command\"}}],\"is_error_stop\":true,\"name\":\"group\",\"schedule_id\":12}]}",
+  "sha256": "86c87ad6b6a20de8b89ac80c93d1ec0f4beea970582316346ebcdae29c908def"
+}
