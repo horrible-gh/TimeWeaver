@@ -27,6 +27,7 @@ type Database struct {
 }
 
 type Settings struct {
+	HTTP            HTTPSettings  `json:"http"`
 	Context         string        `json:"context"`
 	ListenHost      string        `json:"listen_host"`
 	ListenPort      int           `json:"listen_port"`
@@ -146,6 +147,9 @@ func Load(filename string, lookup func(string) (string, bool)) (Settings, error)
 		return Settings{}, errors.New("DB_TYPE must be mysql, sqlite, sqlite3 or local")
 	}
 	result.Database = db
+	if result.HTTP, err = loadHTTP(get); err != nil {
+		return Settings{}, err
+	}
 	return result, nil
 }
 
