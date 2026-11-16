@@ -14,7 +14,7 @@ import sys
 import types
 from urllib.error import HTTPError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 import jwt
 import pymysql
@@ -53,6 +53,12 @@ def main():
     connection = pymysql.connect(host=host, port=3306, user="root", password=password,
                                  database=database, charset="utf8mb4", autocommit=True)
 
+    class NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    opener = build_opener(NoRedirect())
+
     def request(path, body=None, token=None, expected=200):
         headers = {"Content-Type": "application/json"}
         if token:
@@ -60,7 +66,7 @@ def main():
         req = Request(base + path, headers=headers,
                       data=None if body is None else json.dumps(body).encode())
         try:
-            response = urlopen(req, timeout=10)
+            response = opener.open(req, timeout=10)
         except HTTPError as exc:
             response = exc
         with response:

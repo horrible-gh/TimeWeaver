@@ -86,7 +86,7 @@ jobs:
         shell: bash
         run: |
           go mod tidy
-          git diff --exit-code -- go.mod
+          git diff --exit-code -- go.mod go.sum
       - run: go test ./...
       - run: go vet ./...
       - name: Validate the real embedded Vue bundle
@@ -148,7 +148,7 @@ jobs:
       - name: Verify committed dependency locks
         run: |
           go mod tidy
-          git diff --exit-code -- go.mod
+          git diff --exit-code -- go.mod go.sum
       - name: Wait for the disposable database
         shell: bash
         run: |

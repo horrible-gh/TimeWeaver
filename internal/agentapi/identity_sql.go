@@ -12,7 +12,7 @@ func dbNow(ctx context.Context, tx *sql.Tx) (time.Time, error) {
 	err := tx.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP()").Scan(&now)
 	return now.UTC(), err
 }
-func (s *Identity) enroll(ctx context.Context, token []byte, name string, version *string, refresh []byte) (credentialIssue, error) {
+func (s *Identity) enrollOnce(ctx context.Context, token []byte, name string, version *string, refresh []byte) (credentialIssue, error) {
 	var result credentialIssue
 	tx, err := s.db.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -21,7 +21,7 @@ func (s *Identity) enroll(ctx context.Context, token []byte, name string, versio
 	defer tx.Rollback()
 	now, err := dbNow(ctx, tx)
 	if err != nil {
-		return result, failure("unavailable")
+		return result, identityStatementError(err)
 	}
 	var enrollment []byte
 	var expected sql.NullString
@@ -34,7 +34,7 @@ func (s *Identity) enroll(ctx context.Context, token []byte, name string, versio
 		return result, failure("enrollment_token_invalid")
 	}
 	if err != nil {
-		return result, failure("unavailable")
+		return result, identityStatementError(err)
 	}
 	if used.Valid || revoked.Valid || !expiry.After(now) {
 		return result, failure("enrollment_token_invalid")
@@ -50,7 +50,7 @@ func (s *Identity) enroll(ctx context.Context, token []byte, name string, versio
 		return result, failure("enrollment_token_invalid")
 	}
 	if err != nil {
-		return result, failure("unavailable")
+		return result, identityStatementError(err)
 	}
 	if status != "active" {
 		return result, failure("enrollment_token_invalid")
@@ -70,7 +70,7 @@ func (s *Identity) enroll(ctx context.Context, token []byte, name string, versio
 		}
 	}
 	if err != nil {
-		return result, failure("unavailable")
+		return result, identityStatementError(err)
 	}
 	result, err = replaceCredential(ctx, tx, deviceID, name, refresh, now)
 	if err != nil {
@@ -79,23 +79,23 @@ func (s *Identity) enroll(ctx context.Context, token []byte, name string, versio
 	res, err := tx.ExecContext(ctx, `UPDATE agent_enrollment_token SET used_at=?,used_by_device_id=?
  WHERE enrollment_id=? AND used_at IS NULL AND revoked_at IS NULL AND expires_at>?`, now, deviceID, enrollment, now)
 	if err != nil {
-		return credentialIssue{}, failure("unavailable")
+		return credentialIssue{}, identityStatementError(err)
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return credentialIssue{}, failure("unavailable")
+		return credentialIssue{}, identityStatementError(err)
 	}
 	if affected != 1 {
 		return credentialIssue{}, failure("enrollment_token_invalid")
 	}
 	// Do not retry a failed commit: it may have succeeded on the server. Replaying
 	// registration/rotation after an uncertain commit can invalidate the new token.
-	if err = tx.Commit(); err != nil {
-		return credentialIssue{}, failure("unavailable")
+	if err = identityCommitError(tx.Commit()); err != nil {
+		return credentialIssue{}, err
 	}
 	return result, nil
 }
-func (s *Identity) rotate(ctx context.Context, current, next []byte) (credentialIssue, error) {
+func (s *Identity) rotateOnce(ctx context.Context, current, next []byte) (credentialIssue, error) {
 	var result credentialIssue
 	tx, err := s.db.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -104,7 +104,7 @@ func (s *Identity) rotate(ctx context.Context, current, next []byte) (credential
 	defer tx.Rollback()
 	now, err := dbNow(ctx, tx)
 	if err != nil {
-		return result, failure("unavailable")
+		return result, identityStatementError(err)
 	}
 	var deviceID int64
 	var expiry time.Time
@@ -114,7 +114,7 @@ func (s *Identity) rotate(ctx context.Context, current, next []byte) (credential
 		return result, invalidRefresh()
 	}
 	if err != nil {
-		return result, failure("unavailable")
+		return result, identityStatementError(err)
 	}
 	if revoked.Valid || !expiry.After(now) {
 		return result, invalidRefresh()
@@ -125,7 +125,7 @@ func (s *Identity) rotate(ctx context.Context, current, next []byte) (credential
 		return result, failure("device_inactive")
 	}
 	if err != nil {
-		return result, failure("unavailable")
+		return result, identityStatementError(err)
 	}
 	if status != "active" {
 		return result, failure("device_inactive")
@@ -134,8 +134,8 @@ func (s *Identity) rotate(ctx context.Context, current, next []byte) (credential
 	if err != nil {
 		return result, err
 	}
-	if err = tx.Commit(); err != nil {
-		return credentialIssue{}, failure("unavailable")
+	if err = identityCommitError(tx.Commit()); err != nil {
+		return credentialIssue{}, err
 	}
 	return result, nil
 }
@@ -147,15 +147,15 @@ func invalidRefresh() *APIError {
 func replaceCredential(ctx context.Context, tx *sql.Tx, deviceID int64, name string, hash []byte, now time.Time) (credentialIssue, error) {
 	result := credentialIssue{DeviceIdentity: DeviceIdentity{DeviceID: deviceID, DeviceName: name}, IssuedAt: now, ExpiresAt: now.Add(refreshTTL)}
 	if _, err := tx.ExecContext(ctx, "UPDATE agent_device_credential SET revoked_at=? WHERE device_id=? AND revoked_at IS NULL", now, deviceID); err != nil {
-		return credentialIssue{}, failure("unavailable")
+		return credentialIssue{}, identityStatementError(err)
 	}
 	res, err := tx.ExecContext(ctx, "INSERT INTO agent_device_credential(device_id,token_hash,issued_at,expires_at) VALUES (?,?,?,?)", deviceID, hash, now, result.ExpiresAt)
 	if err != nil {
-		return credentialIssue{}, failure("unavailable")
+		return credentialIssue{}, identityStatementError(err)
 	}
 	result.CredentialID, err = res.LastInsertId()
 	if err != nil {
-		return credentialIssue{}, failure("unavailable")
+		return credentialIssue{}, identityStatementError(err)
 	}
 	return result, nil
 }

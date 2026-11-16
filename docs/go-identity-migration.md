@@ -16,7 +16,9 @@ identity API were entirely unimplemented. It is NOT an operational release.
 - Enrollment and rotation preserve the existing MySQL/MariaDB transaction model,
   SHA-256 refresh digests, 15-minute access tokens and 90-day refresh credentials.
   Rotation/re-enrollment revokes prior credentials; disabled devices fail closed.
-  Ambiguous commit failures are NOT automatically retried.
+  Statement-level InnoDB deadlock 1213 (whole-transaction rollback) is retried
+  at most twice after rollback; lock timeouts and ambiguous commit failures
+  are NOT automatically retried. Each retry rechecks the original token.
 - HTTP admission is bounded; rate limits are bounded in-memory token buckets.
   Forwarded peer identity is accepted only from explicitly trusted proxies.
   Server composition must supply its configured limits and trusted proxy list.
