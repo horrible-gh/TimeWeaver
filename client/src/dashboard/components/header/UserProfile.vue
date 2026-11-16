@@ -24,22 +24,20 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
+import { logout } from "@api";
+import { sessionMessages } from "../../../../session.mjs";
+const { locale } = useI18n();
 import DropdownContent from "@/dashboard/components/header/sub/DropdownContent.vue";
 
 // ✅ Dropdown menu list
 const menuList = [
   { label: "Home", action: () => {window.location.href = "/dashboard";} },
   {
-    label: "Test",
-    action: () => {
-      localStorage.removeItem("access_token"); // ✅ Remove token
-    }
-  },
-  {
     label: "Logout",
-    action: () => {
-      localStorage.removeItem("access_token"); // ✅ Remove token
-      window.location.href = "/login"; // ✅ Force redirect to login page
+    action: async () => {
+      try { await logout(); window.location.href = "/login"; }
+      catch { alert((sessionMessages[locale.value] || sessionMessages.en).logout); }
     }
   },
 ];

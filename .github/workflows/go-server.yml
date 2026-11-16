@@ -161,9 +161,19 @@ jobs:
             sleep 2
           done
           exit 1
-      - run: go test -race -count=1 -v ./internal/store ./internal/agentapi ./internal/server
+      - run: go test -race -count=1 -v ./internal/store ./internal/agentapi ./internal/server ./internal/access
       - run: go build -o artifacts/timeweaver-store ./cmd/timeweaver
-      - run: python -m pip install sqloader==0.2.18 'PyMySQL[rsa]==1.1.1' sqlparse==0.5.3 pyjwt==2.10.1 pydantic==2.10.6
+      - run: python -m pip install sqloader==0.2.18 'PyMySQL[rsa]==1.1.1' sqlparse==0.5.3 pyjwt==2.10.1 pydantic==2.10.6 passlib==1.7.4 playwright==1.56.0
+      - name: Verify legacy-compatible human password hashes
+        env:
+          TIMEWEAVER_ACCESS_INTEROP: '1'
+        run: go test -count=1 -v ./internal/access -run TestPasslibPasswordCompatibility
+      - name: Install test-only browser
+        run: python -m playwright install chromium
+      - name: Exercise human sessions through the real embedded Vue UI
+        env:
+          TIMEWEAVER_BROWSER_ACCESS: '1'
+        run: go test -race -count=1 -timeout=120s -v ./internal/server -run TestBrowserSessionFlow
       - name: Compare Python and Go migrations on disposable databases
         run: python scripts/test-go-store-compat.py artifacts/timeweaver-store
       - name: Cross-check identity with the frozen Python service

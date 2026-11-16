@@ -6,4 +6,4 @@ if (!context || !/^\/[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*$/.test(context) ||
     context.split("/").some(part => part === "." || part === "..")) {
   throw new Error("TimeWeaver API context was not supplied by the server");
 }
-export default { API_SERVER_URL: window.location.origin + context };
+export default { API_SERVER_URL: window.location.origin + context, AUTH_MODE: "session" };

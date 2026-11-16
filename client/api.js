@@ -1,115 +1,60 @@
 import axios from "axios";
-import config from "@config"; // ✅ Use Webpack alias
+import config from "@config";
 import { ref } from "vue";
+import { createCookieSession } from "./session.mjs";
 
-const API_BASE_URL = `${config.API_SERVER_URL}`;
-axios.defaults.withCredentials = true;
+export const sessionMode = config.AUTH_MODE === "session";
+const apiClient = axios.create({ baseURL: config.API_SERVER_URL, withCredentials: true });
+const cookieSession = sessionMode ? createCookieSession(async (url, options) =>
+  (await apiClient.request({ url, ...options })).data, localStorage) : null;
+let redirecting = false;
 
-// Create Axios instance
-const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    "Content-Type": "application/x-www-form-urlencoded", // ✅ Keep default value
-  },
+apiClient.interceptors.response.use(response => response, error => {
+  const url = error.config?.url || "";
+  if (error.response?.status === 401 && !["/login", "/auth/password"].includes(url)) {
+    cookieSession?.clear();
+    localStorage.removeItem("access_token"); localStorage.removeItem("user");
+    if (!redirecting && window.location.pathname !== "/login" && window.location.pathname !== "/") {
+      redirecting = true; window.location.href = "/login";
+    }
+  }
+  return Promise.reject(error);
 });
 
-// ✅ State flag to prevent duplicate redirects
-let isRedirecting = false;
-
-/**
- *  ✅ Add interceptor for 401 errors
- */
-apiClient.interceptors.response.use(
-  (response) => response, // Return successful responses as-is
-  (error) => {
-    if (error.response && (error.response.status === 401)) {
-      console.warn("⚠️ 401 authentication error. Redirecting to the login page.");
-
-      if (!isRedirecting) {
-        isRedirecting = true; // ✅ Prevent duplicate redirects
-        localStorage.removeItem("access_token"); // ✅ Remove token
-        sessionStorage.clear(); // ✅ Clear session data
-        window.location.href = "/login"; // ✅ Force redirect to login page
-      }
-    }
-    return Promise.reject(error);
+async function request(method, url, data, type = "default", params) {
+  const headers = { "Content-Type": type === "json" ? "application/json" : "application/x-www-form-urlencoded" };
+  if (sessionMode) {
+    if (method !== "get" && url !== "/login") Object.assign(headers, await cookieSession.headers());
+  } else {
+    const token = localStorage.getItem("access_token");
+    if (token) headers.Authorization = `Bearer ${token}`;
   }
-);
-
-/**
- * ✅ Get token and set headers
- */
-const getAuthHeaders = (type = "default") => {
-  const token = localStorage.getItem("access_token");
-  if (!token) {
-    console.warn("⚠️ Authentication token is missing.");
-    return {}; // Return empty headers when token is missing
+  return (await apiClient.request({ method, url, data, params, headers })).data;
+}
+export const getRequest = (url, params = {}, type = "default") => request("get", url, undefined, type, params);
+export const postRequest = (url, data, type = "default") => request("post", url, data, type);
+export const putRequest = (url, data, type = "default") => request("put", url, data, type);
+export const deleteRequest = (url, params = {}) => request("delete", url, undefined, "default", params);
+export async function login(username, password) {
+  cookieSession?.clear();
+  const data = await postRequest("/login", { username, password });
+  if (sessionMode) cookieSession.accept(data);
+  else {
+    localStorage.setItem("access_token", data.access_token);
+    localStorage.setItem("user", JSON.stringify(data.user));
   }
-
-  return {
-    "Authorization": `Bearer ${token}`,
-    ...(type === "json"
-      ? { "Content-Type": "application/json" }
-      : { "Content-Type": "application/x-www-form-urlencoded" }),
-  };
-};
-
-/**
- * ✅ API request function (POST)
- */
-export const postRequest = async (url, data, type = "default") => {
-  try {
-    const headers = getAuthHeaders(type);
-    const response = await apiClient.post(url, data, { headers });
-    return response.data;
-  } catch (error) {
-    console.error("POST request error:", error);
-    throw error;
-  }
-};
-
-/**
- * ✅ API request function (GET)
- */
-export const getRequest = async (url, params = {}, type = "default") => {
-  try {
-    const headers = getAuthHeaders(type);
-    const response = await apiClient.get(url, { params, headers });
-    return response.data;
-  } catch (error) {
-    console.error("GET request error:", error);
-    throw error;
-  }
-};
-
-/**
- * ✅ API request function (PUT)
- */
-export const putRequest = async (url, data, type = "default") => {
-  try {
-    const headers = getAuthHeaders(type);
-    const response = await apiClient.put(url, data, { headers });
-    return response.data;
-  } catch (error) {
-    console.error("PUT request error:", error);
-    throw error;
-  }
-};
-
-/**
- * ✅ API request function (DELETE)
- */
-export const deleteRequest = async (url, params = {}) => {
-  try {
-    const headers = getAuthHeaders();
-    const response = await apiClient.delete(url, { params, headers });
-    return response.data;
-  } catch (error) {
-    console.error("DELETE request error:", error);
-    throw error;
-  }
-};
-
+  return data;
+}
+export const ensureSession = () => sessionMode ? cookieSession.read() : Promise.resolve(null);
+export async function logout() {
+  try { await postRequest("/logout"); }
+  catch (error) { if (error.response?.status !== 401) throw error; }
+  cookieSession?.clear(); localStorage.removeItem("access_token"); localStorage.removeItem("user");
+}
+export async function changePassword(current, next) {
+  await postRequest("/auth/password", { current_password: current, new_password: next }, "json");
+  cookieSession.clear();
+}
 
 export function useSort(data) {
   const sortKey = ref("");

@@ -2,104 +2,90 @@
   <div class="auth">
     <div class="auth-card panel">
       <div class="auth-brand">
-        <span class="brand-mark">
-          <img src="@/assets/img/dashboard/logo-timeweaver.png" alt="TimeWeaver" />
-        </span>
-        <strong>TimeWeaver</strong>
-        <span>{{ $t('title') }}</span>
+        <span class="brand-mark"><img src="@/assets/img/dashboard/logo-timeweaver.png" alt="TimeWeaver" /></span>
+        <strong>TimeWeaver</strong><span>{{ changing ? text.change : $t('title') }}</span>
       </div>
-
-      <form class="form-grid" @submit.prevent="login">
-        <div class="field full">
+      <form class="form-grid" @submit.prevent="submit">
+        <div class="field full" v-if="!changing">
           <label for="auth-id">ID</label>
-          <input
-            id="auth-id"
-            type="text"
-            name="id"
-            v-model="id"
-            placeholder="ID"
-            @keypress.enter="$refs.password.focus()"
-          />
+          <input id="auth-id" name="username" v-model="id" autocomplete="username" placeholder="ID" required />
         </div>
-
         <div class="field full">
-          <label for="auth-password">{{ $t('password') }}</label>
-          <input
-            id="auth-password"
-            ref="password"
-            type="password"
-            name="pwd"
-            v-model="password"
-            :placeholder="$t('password')"
-            @keypress.enter="login"
-          />
+          <label for="auth-password">{{ changing ? text.current : $t('password') }}</label>
+          <input id="auth-password" name="password" type="password" v-model="password" autocomplete="current-password" required />
         </div>
-
-        <div class="field full" v-if="error">
-          <small class="error">{{ error }}</small>
-        </div>
-
+        <template v-if="changing">
+          <div class="field full">
+            <label for="auth-new-password">{{ text.next }}</label>
+            <input id="auth-new-password" type="password" v-model="nextPassword" autocomplete="new-password" required />
+          </div>
+          <div class="field full">
+            <label for="auth-confirm">{{ text.confirm }}</label>
+            <input id="auth-confirm" type="password" v-model="confirmation" autocomplete="new-password" required />
+          </div>
+        </template>
+        <div class="field full" v-if="notice"><small role="status">{{ notice }}</small></div>
+        <div class="field full" v-if="error"><small class="error" role="alert">{{ error }}</small></div>
         <div class="field full auth-actions">
-          <button type="button" class="btn primary" :disabled="isLoading" @click="login">
+          <button type="submit" class="btn primary" :disabled="isLoading">
             <i v-if="isLoading" class="ph ph-circle-notch auth-spinner"></i>
-            <span v-else>{{ $t('login') }}</span>
+            <span v-else>{{ changing ? text.change : $t('login') }}</span>
           </button>
-          <button type="button" class="btn" @click="register">
-            {{ $t('join') }}
-          </button>
+          <button v-if="!sessionMode" type="button" class="btn" @click="register">{{ $t('join') }}</button>
         </div>
       </form>
-
-      <div class="auth-foot">
-        <button type="button" class="text-btn" @click="forgot">
-          {{ $t('forgot') }}
-        </button>
+      <div class="auth-foot" v-if="!sessionMode">
+        <button type="button" class="text-btn" @click="forgot">{{ $t('forgot') }}</button>
       </div>
     </div>
   </div>
 </template>
-
 <script>
-import { postRequest } from "@api";
-
+import { login, ensureSession, changePassword, sessionMode } from "@api";
+import { sessionMessages } from "../../../session.mjs";
 export default {
   name: 'LoginForm',
-  data() {
-    return {
-      id: "",
-      password: "",
-      isLoading: false,
-      error: "",
-    };
+  data: () => ({ id: '', password: '', nextPassword: '', confirmation: '', changing: false, isLoading: false, error: '', notice: '', sessionMode }),
+  computed: { text() { return sessionMessages[this.$i18n.locale] || sessionMessages.en; } },
+  async mounted() {
+    if (sessionMode && new URLSearchParams(window.location.search).get('password') === 'required') {
+      try {
+        const data = await ensureSession();
+        this.id = data.user.user_id;
+        this.changing = data.user.must_change_password;
+        if (this.changing) this.notice = this.text.required;
+      } catch { this.error = this.text.unavailable; }
+    }
   },
   methods: {
-    async login() {
-      this.error = "";
+    async submit() {
+      if (this.isLoading) return;
+      this.error = '';
+      if (this.changing && this.nextPassword !== this.confirmation) { this.error = this.text.mismatch; return; }
+      this.isLoading = true;
       try {
-        const response = await postRequest("/login", {
-          username: this.id,
-          password: this.password,
-        });
-
-        const token = response.access_token;
-        localStorage.setItem("access_token", token);
-        const user = response.user;
-        localStorage.setItem("user", JSON.stringify(user)); // ✅ Convert object to a JSON string before saving
-        console.log("Login succeeded:", response);
-        window.location.href = "/dashboard";
+        if (this.changing) {
+          await changePassword(this.password, this.nextPassword);
+          this.changing = false; this.notice = this.text.changed;
+          this.password = ''; this.nextPassword = ''; this.confirmation = '';
+          window.history.replaceState(null, '', '/login');
+        } else {
+          const data = await login(this.id, this.password);
+          this.password = '';
+          if (sessionMode && data.user.must_change_password) {
+            this.changing = true; this.notice = this.text.required;
+          } else { window.location.href = '/dashboard'; }
+        }
       } catch (error) {
-        console.error("Login failed:", error);
-        this.error = this.$t('login_failed');
-      }
+        const code = error.response?.data?.detail?.code;
+        if (code === 'login_limited') this.error = this.text.limited;
+        else if (code === 'password_policy' || code === 'password_unchanged') this.error = this.text.policy;
+        else if (!error.response || error.response.status >= 500) this.error = this.text.unavailable;
+        else this.error = this.$t('login_failed');
+      } finally { this.isLoading = false; }
     },
-    register() {
-      console.log("Register clicked");
-      alert("Go to the registration page");
-    },
-    forgot() {
-      console.log("Forgot password clicked");
-      alert("Show password recovery page");
-    },
-  }
+    register() { alert('Go to the registration page'); },
+    forgot() { alert('Show password recovery page'); },
+  },
 };
 </script>

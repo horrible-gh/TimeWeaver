@@ -6,7 +6,7 @@ import DevicesOverviewForm from "@/dashboard/components/contents/devices/Devices
 import SchedulesOverviewForm from "@/dashboard/components/contents/schedules/SchedulesOverview.vue";  // Main page
 import TasksOverviewForm from "@/dashboard/components/contents/tasks/TasksOverview.vue";  // Main page
 import ManualExecutionOverviewForm from "@/dashboard/components/contents/manual_execution/ManualExecutionHistory.vue";  // Main page
-import { postRequest } from "@api";
+import { ensureSession, logout, sessionMode } from "@api";
 
 const routes = [
   { path: "/", component: DashboardForm },
@@ -23,24 +23,24 @@ const router = createRouter({
   routes,
 });
 
-router.beforeEach((to, from, next) => {
-  const isAuthenticated = !!localStorage.getItem("access_token");
-  console.log('[Router] Navigation:', from.fullPath, '→', to.fullPath, 'Auth:', isAuthenticated);
-
+router.beforeEach(async (to) => {
   if (to.path === "/logout") {
-    postRequest("/logout");
-    localStorage.clear();
-    sessionStorage.clear();
-    window.location.href = "/login";
-  } else if (!isAuthenticated && to.path !== "/login") {
-    alert("Login is required.");
-    window.location.href = "/login";
-  } else {
-    next();
+    await logout(); window.location.href = "/login"; return false;
   }
+  if (sessionMode) {
+    try {
+      const current = await ensureSession();
+      if (current.user.must_change_password) {
+        window.location.href = "/login?password=required"; return false;
+      }
+      return true;
+    } catch { return false; }
+  }
+  if (!localStorage.getItem("access_token")) {
+    window.location.href = "/login"; return false;
+  }
+  return true;
 });
-
-
 
 export default router;
 
