@@ -115,7 +115,8 @@ jobs:
 
   store-mysql:
     needs: [baseline, frontend]
-    runs-on: ubuntu-latest
+    # Pin the browser runner to an OS supported by the pinned Playwright build.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -169,7 +170,7 @@ jobs:
           TIMEWEAVER_ACCESS_INTEROP: '1'
         run: go test -count=1 -v ./internal/access -run TestPasslibPasswordCompatibility
       - name: Install test-only browser
-        run: python -m playwright install chromium
+        run: python -m playwright install --with-deps chromium
       - name: Exercise human sessions through the real embedded Vue UI
         env:
           TIMEWEAVER_BROWSER_ACCESS: '1'
