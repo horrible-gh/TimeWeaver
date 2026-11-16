@@ -43,7 +43,15 @@ def test_devices_group_id_five_and_multi_placeholder_insert_are_valid(
             creator="binding-test",
         )))
 
-        rows = asyncio.run(module.get_devices(DeviceGetRequest(group_id=5)))
+        # A direct route call does not resolve Depends(verify_token). Seed the
+        # authenticated user and pass its identity, as the scoped route expects.
+        wrapper.execute_query(
+            "INSERT INTO users (user_id, name, password, group_id) VALUES (%s, %s, %s, %s)",
+            ("binding-test-user", "Binding test", "unused-test-password", 5),
+        )
+        rows = asyncio.run(module.get_devices(
+            DeviceGetRequest(group_id=5), user_id="binding-test-user"
+        ))
 
         assert [row["device_name"] for row in rows] == ["binding-contract-device"]
     finally:
