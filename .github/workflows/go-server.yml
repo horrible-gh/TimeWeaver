@@ -82,8 +82,11 @@ jobs:
         with:
           name: embedded-vue
           path: internal/webui/assets/dist/
-      - name: Resolve pinned database dependencies
-        run: go mod tidy
+      - name: Verify committed dependency locks
+        shell: bash
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
       - run: go test ./...
       - run: go vet ./...
       - name: Validate the real embedded Vue bundle
@@ -142,7 +145,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: go mod tidy
+      - name: Verify committed dependency locks
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
       - name: Wait for the disposable database
         shell: bash
         run: |
@@ -153,7 +159,7 @@ jobs:
           exit 1
       - run: go test -race -count=1 -v ./internal/store
       - run: go build -o artifacts/timeweaver-store ./cmd/timeweaver
-      - run: python -m pip install sqloader==0.2.18 PyMySQL==1.1.1 sqlparse==0.5.3
+      - run: python -m pip install sqloader==0.2.18 'PyMySQL[rsa]==1.1.1' sqlparse==0.5.3
       - name: Compare Python and Go migrations on disposable databases
         run: python scripts/test-go-store-compat.py artifacts/timeweaver-store
       - name: Retain resolved dependency locks

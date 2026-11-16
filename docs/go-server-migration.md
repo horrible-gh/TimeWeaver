@@ -46,7 +46,7 @@ and a branch CI job retaining a source snapshot and inventory as verification
 artifacts. The guard never imports the Python app or opens a database.
 
 Not yet complete: runtime response fixtures, production DB inventory, cross-server
-token/snapshot tests, Go database/API implementation, session/RBAC implementation,
+token/snapshot tests, complete database/API implementation, session/RBAC implementation,
 and operational cutover tests. Static inventory must not be described as runtime compatibility.
 
 Run from a full Git checkout:
@@ -113,3 +113,65 @@ CI checks the untouched legacy sources, standalone and embedded Vue builds,
 Go 1.26 tests on Windows/Linux, Linux race checks, actual embedded assets and
 CGO-free Windows/Linux amd64/arm64 compilation. Native OS-login, real DB migration,
 full-browser workflows and agent execution are still separate future gates.
+
+## Store foundation and migration preflight
+
+Implemented after the initial UI/config slice:
+
+- `internal/store` embeds all 54 legacy SQL files byte-for-byte. The original
+  `server/` and `agent/` remain untouched. Tests verify both copies, all 31 MySQL
+  and 7 SQLite migration files, and 39 MySQL query keys.
+- SQL splitting respects quotes, escaped quotes and comments; placeholder
+  conversion does not alter string literals or date formats. Unsupported
+  compound SQL and malformed constructs fail before execution.
+- MySQL connections use `database/sql`, pinned driver versions and committed
+  `go.sum`. Connection errors expose codes rather than credentials/query values.
+- `migrate status` opens an existing database read-only, reports pending/unknown/
+  unfinished migrations, and does not create tracking tables. A missing SQLite
+  file is an error, not an invitation to create an empty replacement database.
+- `migrate up` requires `--allow-write` and works only for the MySQL dialect in
+  this slice. It must be used only after a backup and stopping the Python server.
+  An untracked, nonempty database is refused rather than treated as a fresh install.
+- Files execute on one pinned connection, preserving user variables and PREPARE.
+  The legacy `migrations(filename, applied_at)` contract is unchanged. A separate
+  `tw_migration_attempt` journal records a durable start before executing SQL.
+  Failed/interrupted work blocks automatic replay; MySQL DDL is not falsely
+  described as fully rollback-safe. There is no force/automatic repair command.
+- A database advisory lock serializes Go migrators only. The Python migrator does
+  not participate: this is not permission to run old and new migrators together.
+- SQLite read-only inspection and connection protection are tested, but the
+  missing legacy bootstrap/query dialect is still incomplete. SQLite `up` fails
+  BEFORE opening/creating a database. Full SQLite support remains a release gate.
+
+```sh
+# Reads the actual DB but creates no tables or missing SQLite file.
+go run ./cmd/timeweaver migrate status --env server/.env
+# Writes only after explicit operator acknowledgement; use a DB copy first.
+go run ./cmd/timeweaver migrate up --env copied-server.env --allow-write
+```
+
+`check` remains configuration-only; use `migrate status` for the database history.
+Neither command proves complete API readiness. `serve` remains disabled. No
+operational database or running agent has been changed by this work.
+
+### MariaDB versus native MySQL
+
+The existing Python CI uses MariaDB 11.4. On that engine the new CI compares every
+legacy table definition with sqloader 0.2.18, verifies retained user hashes,
+devices, schedules, tasks, execution history and binary token digests, and checks
+that both migrators recognize each other's applied filenames without replay.
+
+Native MySQL 8.4 rejects the frozen `groups_001.sql`: bare `groups` is a reserved
+identifier. The Go execution path quotes that table name in table positions while
+leaving source bytes/checksums and string literals untouched. The test explicitly
+reproduces the untouched Python bootstrap failure on native MySQL rather than
+silently modifying the reference and claiming strict parity there. Native MySQL
+then verifies Go bootstrap, all query preparation, constraints and no-replay data
+preservation. Python can read the completed migration history; this is NOT proof
+that the old Python APIs work on native MySQL or that RBAC rollback is safe.
+
+Both disposable database jobs include partial-DDL failure/retry blocking,
+connection pinning, read-only reconnection enforcement and untracked-data refusal.
+Windows/Linux Go tests also exercise real SQLite files. This slice does not yet
+include the schema guard repair port, Agent API transactions, live token exchange,
+or production DB inventory.

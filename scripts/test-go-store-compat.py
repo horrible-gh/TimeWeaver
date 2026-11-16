@@ -34,6 +34,9 @@ def main():
                               charset="utf8mb4", autocommit=True,
                               cursorclass=pymysql.cursors.DictCursor)
     admin = pymysql.connect(**connection_options)
+    with admin.cursor() as cursor:
+        cursor.execute("SELECT VERSION() AS version")
+        mariadb = "MariaDB" in cursor.fetchone()["version"]
     names = ["tw_compat_" + secrets.token_hex(10) for _ in range(2)]
     databases = []
     try:
@@ -87,17 +90,41 @@ def main():
             status = go(names[1], "status")
             assert not status["history_exists"] and status["pending"] == 31
             assert snapshot(names[1]) == {}, "read-only preflight changed empty database"
-            python_migrate(names[0])
+            if mariadb:
+                python_migrate(names[0])
+            else:
+                # Do not silently 'fix' the reference or claim MySQL parity with
+                # a Python bootstrap that does not work there. Keep that failure
+                # as an explicit regression, separate from Go compatibility.
+                try:
+                    python_migrate(names[0])
+                except Exception as exc:
+                    message = str(exc)
+                    assert "groups_001.sql" in message and "1064" in message, message
+                    print("PASS: untouched Python bootstrap reproduces MySQL 8.4 groups syntax failure")
+                else:
+                    raise AssertionError("MySQL baseline changed; review the reserved-name workaround")
             assert go(names[1])["pending"] == 0
-            left, right = snapshot(names[0], True), snapshot(names[1], True)
-            mismatches = sorted(key for key in left.keys() | right.keys()
-                                if left.get(key) != right.get(key))
-            assert not mismatches, "schema differs: " + ", ".join(mismatches)
-            print("PASS: every legacy table definition and migration-history schema matches")
+            if mariadb:
+                left, right = snapshot(names[0], True), snapshot(names[1], True)
+                mismatches = sorted(key for key in left.keys() | right.keys()
+                                    if left.get(key) != right.get(key))
+                assert not mismatches, "schema differs: " + ", ".join(mismatches)
+                print("PASS: MariaDB legacy table definitions and migration-history schema match")
+            else:
+                tables = snapshot(names[1], True)
+                required = {"groups", "users", "devices", "schedule_group", "schedule_detail",
+                            "task_detail", "manual_execution", "execution_log",
+                            "agent_enrollment_token", "agent_credential"}
+                assert required <= tables.keys(), "Go bootstrap is missing required tables"
+                assert "fk_users_group" in tables["users"]
+                assert "fk_schedule_group_group" in tables["schedule_group"]
+                print("PASS: MySQL Go bootstrap completes with quoted legacy groups identifier")
+            preserved_database = names[0] if mariadb else names[1]
 
             # Seed representative data, including binary credential digests. Go
             # must not rerun the admin seed or rotate/replace any identity rows.
-            with pymysql.connect(database=names[0], **connection_options) as connection:
+            with pymysql.connect(database=preserved_database, **connection_options) as connection:
                 with connection.cursor() as cursor:
                     cursor.execute("UPDATE users SET name='custom-admin', password='preserve-this-hash' WHERE user_id='timeweaver'")
                     cursor.execute("INSERT INTO devices(device_id,device_name) VALUES(7,'retained-agent')")
@@ -106,10 +133,10 @@ def main():
                     cursor.execute("INSERT INTO task_detail(detail_id,command) VALUES(UNHEX(%s),'echo retained')", ("11" * 16,))
                     cursor.execute("INSERT INTO execution_log(execution_grp_id,schedule_id,detail_id,start_time,result_code) VALUES(UNHEX(%s),12,UNHEX(%s),UTC_TIMESTAMP(),0)", ("22" * 16, "11" * 16))
                     cursor.execute("INSERT INTO agent_enrollment_token(enrollment_id,token_hash,device_name,group_id,expires_at) VALUES(UNHEX(%s),UNHEX(%s),'retained-agent',0,UTC_TIMESTAMP()+INTERVAL 1 DAY)", ("33" * 16, "44" * 32))
-            before = snapshot(names[0])
-            assert go(names[0])["pending"] == 0
-            assert snapshot(names[0]) == before, "Go changed existing Python data"
-            print("PASS: Python-created data, history, hash and binary token digest unchanged by Go")
+            before = snapshot(preserved_database)
+            assert go(preserved_database)["pending"] == 0
+            assert snapshot(preserved_database) == before, "Go changed existing data"
+            print("PASS: existing data, history, hash and binary token digest unchanged by Go")
             before = snapshot(names[1])
             python_migrate(names[1])
             assert snapshot(names[1]) == before, "Python replayed Go migrations"

@@ -61,6 +61,14 @@ func Migrations(dialect string) ([]Migration, error) {
 		if len(statements) == 0 {
 			return nil, fmt.Errorf("empty migration %s", path.Base(name))
 		}
+		if dialect == "mysql" {
+			for i, statement := range statements {
+				statements[i], err = mysqlLegacySQL(statement)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
 		digest := sha256.Sum256(data)
 		out = append(out, Migration{path.Base(name), hex.EncodeToString(digest[:]), statements})
 	}
@@ -224,7 +232,7 @@ func SplitSQL(text, dialect string) ([]string, error) {
 			if w == "DELIMITER" || w == "TRIGGER" || w == "PROCEDURE" || w == "FUNCTION" {
 				return errors.New("compound SQL is unsupported")
 			}
-			if w == "BEGIN" && bare != "BEGIN" && !strings.EqualFold(bare, "BEGIN TRANSACTION") && !strings.EqualFold(bare, "BEGIN IMMEDIATE") {
+			if w == "BEGIN" && !strings.EqualFold(bare, "BEGIN") && !strings.EqualFold(bare, "BEGIN TRANSACTION") && !strings.EqualFold(bare, "BEGIN IMMEDIATE") {
 				return errors.New("compound BEGIN is unsupported")
 			}
 		}
@@ -263,6 +271,9 @@ func BindSQL(text, dialect string) (string, error) {
 			continue
 		}
 		out.WriteByte(text[i])
+	}
+	if d == "mysql" {
+		return mysqlLegacySQL(out.String())
 	}
 	return out.String(), nil
 }
