@@ -1,0 +1,37 @@
+name: Go server migration
+on:
+  push:
+    branches: [feature/go-server-unified]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: go-migration-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test the baseline guard
+        run: python -m unittest discover -s scripts/tests -p 'test_go_baseline.py' -v
+      - name: Freeze legacy files and inventory routes without starting a server
+        run: |
+          mkdir -p artifacts
+          python scripts/check-go-baseline.py > artifacts/legacy-contracts.json
+      - name: Record exact source used for migration verification
+        run: git archive --format=zip --output=artifacts/timeweaver-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: go-migration-baseline
+          path: artifacts/
+          retention-days: 7
