@@ -115,7 +115,7 @@ def main():
                 tables = snapshot(names[1], True)
                 required = {"groups", "users", "devices", "schedule_group", "schedule_detail",
                             "task_detail", "manual_execution", "execution_log",
-                            "agent_enrollment_token", "agent_credential"}
+                            "agent_enrollment_token", "agent_device_credential"}
                 assert required <= tables.keys(), "Go bootstrap is missing required tables"
                 assert "fk_users_group" in tables["users"]
                 assert "fk_schedule_group_group" in tables["schedule_group"]
@@ -133,6 +133,7 @@ def main():
                     cursor.execute("INSERT INTO task_detail(detail_id,command) VALUES(UNHEX(%s),'echo retained')", ("11" * 16,))
                     cursor.execute("INSERT INTO execution_log(execution_grp_id,schedule_id,detail_id,start_time,result_code) VALUES(UNHEX(%s),12,UNHEX(%s),UTC_TIMESTAMP(),0)", ("22" * 16, "11" * 16))
                     cursor.execute("INSERT INTO agent_enrollment_token(enrollment_id,token_hash,device_name,group_id,expires_at) VALUES(UNHEX(%s),UNHEX(%s),'retained-agent',0,UTC_TIMESTAMP()+INTERVAL 1 DAY)", ("33" * 16, "44" * 32))
+                    cursor.execute("INSERT INTO agent_device_credential(device_id,token_hash,issued_at,expires_at) VALUES(7,UNHEX(%s),UTC_TIMESTAMP(),UTC_TIMESTAMP()+INTERVAL 90 DAY)", ("55" * 32,))
             before = snapshot(preserved_database)
             assert go(preserved_database)["pending"] == 0
             assert snapshot(preserved_database) == before, "Go changed existing data"
