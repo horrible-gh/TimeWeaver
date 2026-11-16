@@ -46,8 +46,8 @@ and a branch CI job retaining a source snapshot and inventory as verification
 artifacts. The guard never imports the Python app or opens a database.
 
 Not yet complete: runtime response fixtures, production DB inventory, cross-server
-token/snapshot tests, Go database implementation, UI embedding, and operational
-cutover tests. Static inventory must not be described as runtime compatibility.
+token/snapshot tests, Go database/API implementation, session/RBAC implementation,
+and operational cutover tests. Static inventory must not be described as runtime compatibility.
 
 Run from a full Git checkout:
 
@@ -60,3 +60,56 @@ Legacy SQL and Python sources are frozen while their behavior is being ported.
 New implementation belongs outside `server/` and `agent/`. Do not weaken the
 baseline guard merely to make a failing migration test pass. No Python code is
 removed before replacement and rollback verification have both been completed.
+
+## Initial Go implementation
+
+The Go module targets Go 1.26. The initial code provides a read-only configuration
+loader, the compiled-Vue HTTP handler, and a guarded migration CLI. `serve` is
+explicitly disabled until the API/database implementation is ready; there is no
+fake health endpoint and no accidental production cutover.
+
+- `config.Load` reads an explicit env file and honors environment overrides. It
+  does not connect to or create a database. Relative SQLite paths are anchored to
+  the env file's directory; an explicit absolute path is preferred at cutover.
+  Plain, single-quoted, double-quoted and `export KEY=...` dotenv values work.
+  Duplicate keys, multiline values and `${...}` interpolation fail explicitly
+  instead of silently resolving to a different database or secret.
+- `AgentSigningKey` preserves the current Python derivation, including the case
+  where the configured agent secret equals the user secret. This unit check is
+  not a complete cross-server JWT interoperability test.
+- `webui.New` validates both Vue entry points and their local referenced assets.
+  It injects the API CONTEXT at response time, serves deep links without
+  redirects, keeps API misses out of SPA fallback, rejects unsafe paths, and
+  caches only content-hashed assets as immutable. Unhashed CSS remains revalidated.
+- `TW_EMBEDDED_BUILD=1` selects `client/config.embedded.js` regardless of a local
+  developer `client/config.js`, and writes to `internal/webui/assets/dist/`.
+  Ordinary standalone Vue builds keep their existing configuration and output.
+- Generated UI files are not committed. The tracked placeholder sits outside
+  `dist/`, so a clean frontend build does not delete tracked files. A missing or
+  partial bundle makes `assets-check` fail.
+- Existing external font/icon URLs remain unchanged in this first slice; an
+  embedded UI does not yet imply fully offline asset loading.
+
+Native build commands (Node is needed only on the build machine):
+
+```sh
+bash scripts/build-go.sh
+# Windows PowerShell: .\scripts\build-go.ps1
+```
+
+Read-only commands:
+
+```sh
+go run ./cmd/timeweaver version
+go run ./cmd/timeweaver check --env server/.env
+go run ./cmd/timeweaver assets-check --context /timeweaver_svr
+```
+
+`check` reports **configuration-only** validation, `database_connected: false`
+and `server_implemented: false`. It is not the final design's database preflight
+command yet. Build outputs are migration CLIs, not deployable API servers.
+
+CI checks the untouched legacy sources, standalone and embedded Vue builds,
+Go 1.26 tests on Windows/Linux, Linux race checks, actual embedded assets and
+CGO-free Windows/Linux amd64/arm64 compilation. Native OS-login, real DB migration,
+full-browser workflows and agent execution are still separate future gates.

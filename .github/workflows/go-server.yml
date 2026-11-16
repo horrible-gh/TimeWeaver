@@ -35,3 +35,75 @@ jobs:
           name: go-migration-baseline
           path: artifacts/
           retention-days: 7
+  frontend:
+    needs: baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Client regression tests
+        run: node --test client/tests/embedded-config.test.cjs client/tests/*.test.mjs
+      - run: npm ci --prefix client
+      - name: Preserve the existing standalone build
+        run: npm run build --prefix client
+      - name: Compile Vue for the embedded Go UI
+        env:
+          TW_EMBEDDED_BUILD: '1'
+        run: npm run build --prefix client
+      - uses: actions/upload-artifact@v4
+        with:
+          name: embedded-vue
+          path: internal/webui/assets/dist/
+          retention-days: 7
+  go:
+    needs: frontend
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      TW_REQUIRE_EMBEDDED_UI: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: embedded-vue
+          path: internal/webui/assets/dist/
+      - run: go test ./...
+      - run: go vet ./...
+      - name: Validate the real embedded Vue bundle
+        run: go run ./cmd/timeweaver assets-check --context /timeweaver_svr
+      - name: Race and formatting checks
+        if: runner.os == 'Linux'
+        run: |
+          go test -race ./...
+          test -z "$(gofmt -l cmd internal)"
+      - name: Cross-build migration CLIs (not production servers)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            os="${target%/*}"; arch="${target#*/}"; suffix=""
+            if [ "$os" = windows ]; then suffix=".exe"; fi
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -o "artifacts/timeweaver-$os-$arch$suffix" ./cmd/timeweaver
+          done
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: go-migration-cli
+          path: artifacts/
+          retention-days: 7

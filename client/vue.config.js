@@ -9,12 +9,15 @@ const fs = require("fs");
 // with "Module not found". Fall back to the committed config.sample.js
 // (same env-derived default) so the app always compiles out of the box;
 // a real config.js, when present, still takes priority.
+const embeddedBuild = process.env.TW_EMBEDDED_BUILD === "1";
 const localConfigPath = path.resolve(__dirname, "config.js");
-const configPath = fs.existsSync(localConfigPath)
-    ? localConfigPath
-    : path.resolve(__dirname, "config.sample.js");
+const configPath = embeddedBuild
+    ? path.resolve(__dirname, "config.embedded.js")
+    : fs.existsSync(localConfigPath) ? localConfigPath : path.resolve(__dirname, "config.sample.js");
 
 module.exports = defineConfig({
+    outputDir: embeddedBuild ? path.resolve(__dirname, "../internal/webui/assets/dist") : "dist",
+    productionSourceMap: !embeddedBuild,
     devServer: {
       port: 10808,  // Change to the desired port number
       host: "0.0.0.0", // Allow internal and external access
