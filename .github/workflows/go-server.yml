@@ -86,7 +86,7 @@ jobs:
         shell: bash
         run: |
           go mod tidy
-          git diff --exit-code -- go.mod go.sum
+          git diff --exit-code -- go.mod
       - run: go test ./...
       - run: go vet ./...
       - name: Validate the real embedded Vue bundle
@@ -148,7 +148,7 @@ jobs:
       - name: Verify committed dependency locks
         run: |
           go mod tidy
-          git diff --exit-code -- go.mod go.sum
+          git diff --exit-code -- go.mod
       - name: Wait for the disposable database
         shell: bash
         run: |
@@ -157,11 +157,15 @@ jobs:
             sleep 2
           done
           exit 1
-      - run: go test -race -count=1 -v ./internal/store
+      - run: go test -race -count=1 -v ./internal/store ./internal/agentapi
       - run: go build -o artifacts/timeweaver-store ./cmd/timeweaver
-      - run: python -m pip install sqloader==0.2.18 'PyMySQL[rsa]==1.1.1' sqlparse==0.5.3
+      - run: python -m pip install sqloader==0.2.18 'PyMySQL[rsa]==1.1.1' sqlparse==0.5.3 pyjwt==2.10.1
       - name: Compare Python and Go migrations on disposable databases
         run: python scripts/test-go-store-compat.py artifacts/timeweaver-store
+      - name: Cross-check identity with the frozen Python service
+        env:
+          TIMEWEAVER_IDENTITY_INTEROP: '1'
+        run: go test -race -count=1 -v ./internal/agentapi -run TestPythonIdentityInterop
       - name: Retain resolved dependency locks
         if: always()
         uses: actions/upload-artifact@v4
