@@ -18,7 +18,7 @@ var commit = "unknown"
 
 func run(args []string, out, diagnostics io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(diagnostics, "Usage: timeweaver version | check --env FILE | assets-check [--context PATH]")
+		fmt.Fprintln(diagnostics, "Usage: timeweaver version | check --env FILE | assets-check [--context PATH] | migrate status|up --env FILE")
 		return 2
 	}
 	switch args[0] {
@@ -29,6 +29,8 @@ func run(args []string, out, diagnostics io.Writer) int {
 		}
 		fmt.Fprintf(out, "TimeWeaver %s (%s); migration build, not a production server\n", version, commit)
 		return 0
+	case "migrate":
+		return runMigrate(args[1:], out, diagnostics)
 	case "serve":
 		fmt.Fprintln(diagnostics, "serve is disabled: database, dashboard and agent API migration are not complete")
 		return 2
