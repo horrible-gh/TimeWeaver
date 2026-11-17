@@ -38,7 +38,7 @@
           :errors="formErrors"
           :canIssue="canIssue"
           :flowState="flowState"
-          @update-group="form.groupId = $event"
+          @update-group="selectGroup"
           @update-ttl="form.ttlHours = $event"
           @update-mode="setDeviceMode"
           @update-device="form.deviceName = $event"
@@ -140,6 +140,10 @@ const {
 } = props.flow;
 const { t } = useI18n();
 const showCommand = ref(false);
+function selectGroup(groupId) {
+  if (Number(groupId) !== Number(form.groupId) && form.deviceMode === "existing") form.deviceName = "";
+  form.groupId = groupId;
+}
 watch(flowState, () => { if (flowState.value !== "waiting") showCommand.value = false; });
 
 const steps = [
@@ -157,7 +161,7 @@ const selectedGroupName = computed(() => {
   // Order matters: Number(null) is 0, so the not-yet-chosen case has to be
   // tested before the hidden-group-0 case or it renders as "Unknown".
   if (form.groupId == null) return "—";
-  if (Number(form.groupId) === 0) return "Unknown";
+  if (Number(form.groupId) === 0) return t("device_default_group");
   const group = props.groups.find((item) => Number(item.group_id) === Number(form.groupId));
   return group ? group.group_name : form.groupId;
 });

@@ -48,14 +48,14 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in paged" :key="item.enrollment_id">
+            <tr v-for="item in paged" :key="item.enrollment_id" :data-enrollment="item.enrollment_id">
               <td class="mono" :title="String(item.enrollment_id)">{{ shortId(item.enrollment_id) }}</td>
               <td>{{ item.device_name || '—' }}</td>
               <td>{{ groupLabel(item.group_id) }}</td>
               <td>{{ formatDate(item.created_at) }}</td>
               <td>{{ formatDate(item.expires_at) }}</td>
               <td><span class="status-text" :class="item.status">{{ $t('enroll_status_' + item.status) }}</span></td>
-              <td>{{ item.used_device_name || item.used_device_id || '—' }}</td>
+              <td>{{ item.used_device_name || item.used_by_device_id || item.used_device_id || '—' }}</td>
               <td>
                 <button v-if="item.status === 'unused'" class="btn danger" @click="revoke(item)">
                   {{ $t('btn_revoke') }}
@@ -119,7 +119,7 @@ const rangeEnd = computed(() => Math.min(currentPage.value * TOKEN_PAGE_SIZE, fi
 
 function shortId(value) { return String(value || "").slice(0, 8); }
 function groupLabel(groupId) {
-  if (Number(groupId) === 0) return "Unknown";
+  if (Number(groupId) === 0) return t("device_default_group");
   const group = props.groups.find((item) => Number(item.group_id) === Number(groupId));
   return group ? group.group_name : groupId;
 }

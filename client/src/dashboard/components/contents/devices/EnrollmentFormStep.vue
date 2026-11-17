@@ -7,6 +7,7 @@
       <div class="field half">
         <label>{{ $t('enroll_label_group') }} <span>*</span></label>
         <select
+          id="enrollment-group"
           :value="form.groupId"
           :disabled="groups.length === 0"
           @change="$emit('update-group', Number($event.target.value))"
@@ -20,7 +21,7 @@
 
       <div class="field half">
         <label>{{ $t('enroll_label_ttl') }} <span>*</span></label>
-        <select :value="form.ttlHours" @change="$emit('update-ttl', Number($event.target.value))">
+        <select id="enrollment-ttl" :value="form.ttlHours" @change="$emit('update-ttl', Number($event.target.value))">
           <option v-for="hours in TTL_OPTIONS" :key="hours" :value="hours">{{ ttlLabel(hours) }}</option>
         </select>
         <small v-if="errors.ttlHours" class="error">{{ $t(errors.ttlHours) }}</small>
@@ -54,6 +55,7 @@
         <label>{{ $t('enroll_label_device_name') }} <span>*</span></label>
         <select
           v-if="isExisting"
+          id="enrollment-existing-device"
           :value="form.deviceName"
           :disabled="existingDevices.length === 0"
           @change="$emit('update-device', $event.target.value)"
@@ -65,6 +67,7 @@
         </select>
         <input
           v-else
+          id="enrollment-device-name"
           :value="form.deviceName"
           type="text"
           :maxlength="DEVICE_NAME_MAX_LEN"
@@ -92,6 +95,7 @@
 <script setup>
 import { computed, defineEmits, defineProps } from "vue";
 import { useI18n } from "vue-i18n";
+import { devicesForGroup } from "@/dashboard/utils/devicePermissions.mjs";
 import { DEVICE_NAME_MAX_LEN, TTL_OPTIONS } from "@/dashboard/constants/enrollment";
 
 const props = defineProps({
@@ -107,20 +111,8 @@ const { t } = useI18n();
 
 const isExisting = computed(() => props.form.deviceMode === "existing");
 
-// Reissue targets are picked, never typed: enroll reuses the existing device_id
-// only on an exact device_name match, so a free-text field is what orphans a
-// device's schedules (NR0012-0003 section 3.3). Rows without a group_id are kept
-// because the device endpoint only ever returns the caller's own group anyway.
-const existingDevices = computed(() => {
-  const groupId = props.form.groupId;
-  const rows = props.devices.filter((device) => (
-    device
-    && device.device_name
-    && (groupId == null || device.group_id == null || Number(device.group_id) === Number(groupId))
-  ));
-  return rows.slice().sort((a, b) => String(a.device_name).localeCompare(String(b.device_name)));
-});
-
+// Reissue is limited to active devices in the explicitly selected group.
+const existingDevices = computed(() => devicesForGroup(props.devices, props.form.groupId));
 function ttlLabel(hours) {
   const days = hours / 24;
   return hours > 24 && hours % 24 === 0

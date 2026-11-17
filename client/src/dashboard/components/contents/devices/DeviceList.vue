@@ -25,7 +25,7 @@
         <button class="btn" :aria-label="$t('btn_refresh')" @click="$emit('refresh')">
           <i class="ph ph-arrow-clockwise"></i> {{ $t('btn_refresh') }}
         </button>
-        <button v-if="!sessionMode" class="btn" :title="$t('hint_add_device_manual')" @click="openAddDeviceModal">
+        <button v-if="canAdd" class="btn" :disabled="busy" :title="$t('hint_add_device_manual')" @click="openAddDeviceModal">
           <i class="ph ph-plus"></i> {{ $t('btn_add_device_manual') }}
         </button>
         <button
@@ -39,6 +39,7 @@
       </div>
     </div>
 
+    <div v-if="actionError && !isModalOpen" class="security-callout error" role="alert">{{ $t(actionError) }}</div>
     <div v-if="loading" class="empty-state">{{ $t('msg_loading') }}</div>
     <div v-else-if="error" class="empty-state">
       <p>{{ $t('msg_list_load_failed') }}</p>
@@ -77,13 +78,14 @@
               <th @click="sort('last_heartbeat_at')">
                 {{ $t('list_label_last_heartbeat_at') }}<span class="sort-arrow">{{ sortMark('last_heartbeat_at') }}</span>
               </th>
-              <th v-if="!sessionMode || showEnrollment">{{ $t('list_label_actions') }}</th>
+              <th v-if="hasActions">{{ $t('list_label_actions') }}</th>
             </tr>
           </thead>
           <tbody>
             <tr
               v-for="device in view.rows"
               :key="device.device_id"
+              :data-device="device.device_id"
               :class="{ 'row-new': String(device.device_id) === String(highlightDeviceId) }"
               :style="{ '--highlight-duration': NEW_DEVICE_HIGHLIGHT_MS + 'ms' }"
             >
@@ -101,10 +103,10 @@
               <td>{{ device.version || '—' }}</td>
               <td :title="device.last_login_at || ''">{{ relative(device.last_login_at) }}</td>
               <td :title="device.last_heartbeat_at || ''">{{ relative(device.last_heartbeat_at) }}</td>
-              <td v-if="!sessionMode || showEnrollment">
+              <td v-if="hasActions">
                 <div class="row-actions">
                   <button
-                    v-if="showEnrollment"
+                    v-if="showEnrollment && (!sessionMode || device.status === 'active')"
                     class="mini"
                     :aria-label="$t('btn_reissue_for_device')"
                     :title="$t('hint_reissue_for_device', { name: device.device_name })"
@@ -112,10 +114,10 @@
                   >
                     <i class="ph ph-key"></i>
                   </button>
-                  <button v-if="!sessionMode" class="mini" :aria-label="$t('btn_edit')" @click="openEditDeviceModal(device)">
+                  <button v-if="canEdit(device)" :disabled="busy" class="mini" :aria-label="$t('btn_edit')" @click="openEditDeviceModal(device)">
                     <i class="ph ph-pencil-simple"></i>
                   </button>
-                  <button v-if="!sessionMode" class="mini" :aria-label="$t('btn_remove')" @click="removeDevice(device.device_id)">
+                  <button v-if="canEdit(device)" :disabled="busy" class="mini" :aria-label="$t('btn_remove')" @click="removeDevice(device.device_id)">
                     <i class="ph ph-trash"></i>
                   </button>
                 </div>
@@ -139,25 +141,32 @@
 
   <ModalComponent
     :isOpen="isModalOpen"
+    :busy="busy"
     :title="isEditMode ? $t('list_label_device') + ' ' + $t('btn_edit') : $t('list_label_device') + ' ' + $t('btn_add')"
     :confirmText="$t('btn_save')"
     @close="closeModal"
     @confirm="saveDevice"
   >
     <div class="form-grid">
+      <div v-if="sessionMode && !isEditMode" class="field full">
+        <label for="device-group">{{ $t('list_label_group') }}</label>
+        <select id="device-group" v-model.number="deviceForm.group_id">
+          <option v-for="group in editableGroups" :key="group.group_id" :value="group.group_id">{{ group.group_name }}</option>
+        </select>
+      </div>
       <div class="field full">
         <label>{{ $t('list_label_device') }} <span>*</span></label>
-        <input v-model="deviceForm.device_name" type="text" :placeholder="$t('msg_enter_device_name')" />
+        <input id="device-name" maxlength="255" v-model="deviceForm.device_name" type="text" :placeholder="$t('msg_enter_device_name')" />
       </div>
       <div class="field full">
         <label>{{ $t('list_label_status') }}</label>
-        <select v-model="deviceForm.status">
+        <select id="device-status" v-model="deviceForm.status">
           <option value="active">{{ $t('label_active') }}</option>
           <option value="inactive">{{ $t('label_inactive') }}</option>
         </select>
       </div>
     </div>
-    <div v-if="actionError" class="security-callout error">
+    <div v-if="actionError" class="security-callout error" role="alert">
       <i class="ph ph-warning-circle"></i>
       <span>{{ $t(actionError) }}</span>
     </div>
@@ -167,6 +176,7 @@
 <script setup>
 import { computed, defineEmits, defineProps, onUnmounted, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { canEditGroup } from "@/dashboard/utils/devicePermissions.mjs";
 import { deleteRequest, postRequest, putRequest, sessionMode } from "@api";
 import BoardPagination from "@/dashboard/components/misc/BoardPagination.vue";
 import ModalComponent from "@/dashboard/components/misc/ModalComponent.vue";
@@ -175,6 +185,7 @@ import { computeLiveness, livenessReason, relativeTime, visibleDevices } from "@
 
 const props = defineProps({
   devices: { type: Array, default: () => [] },
+  groups: { type: Array, default: () => [] },
   loading: Boolean,
   error: { type: [Boolean, Object], default: false },
   groupName: { type: [String, Number], default: "" },
@@ -188,6 +199,10 @@ const { t } = useI18n();
 let user = {};
 try { user = JSON.parse(localStorage.getItem("user") || "{}"); } catch (error) { user = {}; }
 const userGroupId = user.group_id == null ? "" : user.group_id;
+const editableGroups = computed(() => props.groups.filter(g => g.status === "active" && canEditGroup(user, g.group_id)));
+const canAdd = computed(() => !sessionMode || editableGroups.value.length > 0);
+function canEdit(device) { return !sessionMode || device.can_edit === true; }
+const hasActions = computed(() => props.showEnrollment || !sessionMode || props.devices.some(canEdit));
 const rawSearch = ref("");
 const search = ref("");
 const statusFilter = ref("all");
@@ -254,12 +269,13 @@ function resetFilters() {
 const isModalOpen = ref(false);
 const isEditMode = ref(false);
 const actionError = ref(null);
+const busy = ref(false);
 const deviceForm = reactive({ group_id: user.group_id, device_name: "", status: "active", creator: user.user_id, modifier: user.user_id });
 
 function openAddDeviceModal() {
   isEditMode.value = false;
   actionError.value = false;
-  Object.assign(deviceForm, { group_id: user.group_id, device_name: "", status: "active", creator: user.user_id, modifier: user.user_id });
+  Object.assign(deviceForm, { device_id: undefined, group_id: sessionMode ? (editableGroups.value.find(g => g.group_id === user.group_id) || editableGroups.value[0])?.group_id : user.group_id, device_name: "", status: "active", creator: user.user_id, modifier: user.user_id });
   isModalOpen.value = true;
 }
 function openEditDeviceModal(device) {
@@ -268,13 +284,18 @@ function openEditDeviceModal(device) {
   Object.assign(deviceForm, device, { modifier: user.user_id, creator: device.creator || user.user_id });
   isModalOpen.value = true;
 }
-function closeModal() { isModalOpen.value = false; }
+function closeModal() { if (!busy.value) isModalOpen.value = false; }
 async function saveDevice() {
+  if (busy.value) return;
+  if (!String(deviceForm.device_name || "").trim()) { actionError.value = "msg_device_name_required"; return; }
   actionError.value = null;
+  busy.value = true;
   try {
-    if (isEditMode.value) await putRequest("/dashboard/devices/update_device", deviceForm, "json");
-    else await postRequest("/dashboard/devices/insert_device", deviceForm, "json");
-    closeModal();
+    const body = sessionMode ? { device_name: deviceForm.device_name.trim(), status: deviceForm.status,
+      ...(isEditMode.value ? { device_id: deviceForm.device_id } : { group_id: deviceForm.group_id }) } : deviceForm;
+    if (isEditMode.value) await putRequest("/dashboard/devices/update_device", body, "json");
+    else await postRequest("/dashboard/devices/insert_device", body, "json");
+    isModalOpen.value = false;
     emit("saved");
   } catch (error) {
     const detail = error && error.response && error.response.data
@@ -283,17 +304,20 @@ async function saveDevice() {
     actionError.value = error && error.response && error.response.status === 409
       && detail && detail.code === "device_name_conflict"
       ? "msg_device_name_conflict"
-      : "msg_save_failed";
-  }
+      : error?.response?.status === 403 ? "device_permission_denied" : "msg_save_failed";
+  } finally { busy.value = false; }
 }
 async function removeDevice(deviceId) {
-  if (!window.confirm(t("msg_delete_device_name"))) return;
+  if (busy.value || !window.confirm(t("msg_delete_device_name"))) return;
+  busy.value = true;
+  actionError.value = null;
   try {
     await deleteRequest(`/dashboard/devices/remove_device/${deviceId}`);
     emit("removed");
   } catch (error) {
-    actionError.value = "msg_save_failed";
-  }
+    actionError.value = error?.response?.data?.detail?.code === "device_in_use" ? "device_in_use"
+      : error?.response?.status === 403 ? "device_permission_denied" : "msg_save_failed";
+  } finally { busy.value = false; }
 }
 </script>
 

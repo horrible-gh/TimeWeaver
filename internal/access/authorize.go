@@ -25,6 +25,14 @@ func (s *Service) WithGroup(ctx context.Context, token, csrf string, group int64
 	})
 }
 
+// WithMutation authenticates a human mutation in the same transaction as its
+// writes. The callback MUST resolve each resource's actual group from storage
+// and call User.Can, or require the global administrator role. Never authorize
+// an existing resource using a client-supplied group identifier.
+func (s *Service) WithMutation(ctx context.Context, token, csrf string, fn func(*sql.Tx, User) error) error {
+	return s.withRequest(ctx, token, csrf, true, false, fn)
+}
+
 func (s *Service) withRequest(ctx context.Context, token, csrf string, write, admin bool, fn func(*sql.Tx, User) error) error {
 	if !validToken(token) {
 		return failure(401, "unauthenticated")

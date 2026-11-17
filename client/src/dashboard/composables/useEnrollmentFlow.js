@@ -23,6 +23,7 @@ import {
 } from "@/dashboard/constants/enrollment";
 import { issueEnrollment, listEnrollments, mapError } from "@/dashboard/api/enrollment";
 import { parseServerTime } from "@/dashboard/utils/deviceStatus";
+import { devicesForGroup } from "@/dashboard/utils/devicePermissions.mjs";
 
 export function useEnrollmentFlow(options = {}) {
   const flowState = ref("idle");
@@ -60,7 +61,7 @@ export function useEnrollmentFlow(options = {}) {
     const value = unref(options.devices);
     return Array.isArray(value) ? value : [];
   };
-  const existingDeviceNames = () => deviceList()
+  const existingDeviceNames = () => devicesForGroup(deviceList(), form.groupId)
     .map((device) => String(device.device_name || ""))
     .filter((name) => name.length > 0);
   const usesImplicitHiddenGroup = () => (
@@ -264,7 +265,8 @@ export function useEnrollmentFlow(options = {}) {
 
   async function reflectDeviceList() {
     if (
-      Number(currentUserGroupId()) !== 0
+      !options.crossGroupAccess
+      && Number(currentUserGroupId()) !== 0
       && Number(form.groupId) !== Number(currentUserGroupId())
     ) {
       listReflectState.value = "out_of_scope";
@@ -273,7 +275,7 @@ export function useEnrollmentFlow(options = {}) {
     let attempt = 0;
     while (attempt <= LIST_REFRESH_RETRY_MAX && !disposed) {
       try {
-        const result = options.refreshDevices ? await options.refreshDevices(form.deviceName) : null;
+        const result = options.refreshDevices ? await options.refreshDevices(form.deviceName, form.groupId) : null;
         if (result && result.found) {
           listReflectState.value = "done";
           return;

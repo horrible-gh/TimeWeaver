@@ -36,6 +36,7 @@
     <DeviceSummary :devices="devices" :now="now" :loading="devicesLoading" />
     <DeviceList
       :devices="devices"
+      :groups="groups"
       :loading="devicesLoading"
       :error="devicesError"
       :groupName="currentGroupName"
@@ -74,7 +75,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { getRequest, sessionMode } from "@api";
+import { getRequest, sessionMode, ensureSession } from "@api";
 import DeviceList from "@/dashboard/components/contents/devices/DeviceList.vue";
 import DeviceSummary from "@/dashboard/components/contents/devices/DeviceSummary.vue";
 import EnrollmentPanel from "@/dashboard/components/contents/devices/EnrollmentPanel.vue";
@@ -107,7 +108,7 @@ try {
 const { t } = useI18n();
 const userValid = computed(() => Boolean(user));
 const userGroupId = ref(user ? user.group_id : null);
-const canEnroll = computed(() => roleState.value === "admin" || roleState.value === "indeterminate");
+const canEnroll = computed(() => roleState.value === "admin" || (!sessionMode && roleState.value === "indeterminate"));
 const currentGroupName = computed(() => {
   if (Number(userGroupId.value) === 0) return t("label_all_groups");
   const group = groups.value.find((item) => Number(item.group_id) === Number(userGroupId.value));
@@ -121,7 +122,7 @@ function unwrapList(response) {
   return null;
 }
 
-async function loadDevices(targetName = null) {
+async function loadDevices(targetName = null, targetGroup = null) {
   if (!user) return { found: false };
   devicesLoading.value = true;
   devicesError.value = null;
@@ -130,7 +131,7 @@ async function loadDevices(targetName = null) {
     const rows = unwrapList(response);
     if (!rows) throw new Error("Invalid device list response");
     devices.value = rows;
-    const found = targetName ? rows.find((item) => item.device_name === targetName) : null;
+    const found = targetName ? rows.find((item) => item.device_name === targetName && (targetGroup == null || Number(item.group_id) === Number(targetGroup))) : null;
     if (found) {
       highlightDeviceId.value = found.device_id;
       window.clearTimeout(highlightTimer);
@@ -150,6 +151,9 @@ async function loadGroups() {
     const response = await getRequest("/dashboard/groups/get_groups");
     const rows = unwrapList(response) || [];
     groups.value = rows.filter((group) => group.status === "active");
+    if (sessionMode && (user?.role === "admin" || user?.groups?.some(g => Number(g.group_id) === 0))) {
+      groups.value.unshift({ group_id: 0, group_name: t("device_default_group"), status: "active" });
+    }
   } catch (error) {
     groups.value = [];
   }
@@ -171,7 +175,16 @@ async function loadHistory() {
 }
 
 async function probeAdmin() {
-  if (sessionMode) { roleState.value = "readOnly"; await loadGroups(); return; }
+  if (sessionMode) {
+    try {
+      const current = await ensureSession();
+      user = current.user;
+      roleState.value = user.role === "admin" ? "admin" : "nonAdmin";
+      await loadGroups();
+      await loadHistory();
+    } catch (error) { roleState.value = "indeterminate"; }
+    return;
+  }
   roleState.value = "unknown";
   historyLoading.value = true;
   historyError.value = null;
@@ -220,6 +233,7 @@ const flow = useEnrollmentFlow({
   devices,
   userGroupId,
   refreshDevices: loadDevices,
+  crossGroupAccess: sessionMode,
   reloadGroups: loadGroups,
   onForbidden: handleForbidden,
   onHistoryChange: loadHistory,

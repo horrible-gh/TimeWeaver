@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -25,7 +24,9 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/horrible-gh/TimeWeaver/internal/access"
 	"github.com/horrible-gh/TimeWeaver/internal/config"
+	"github.com/horrible-gh/TimeWeaver/internal/dashboard"
 	"github.com/horrible-gh/TimeWeaver/internal/store"
 	"github.com/horrible-gh/TimeWeaver/internal/webui"
 )
@@ -221,15 +222,30 @@ func TestGoAgentEndToEnd(t *testing.T) {
 	if err = os.WriteFile(configPath, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	random := make([]byte, 32)
-	if _, err = rand.Read(random); err != nil {
+	// The real agent now consumes material created by the human management
+	// service, instead of an independently seeded enrollment table row.
+	if _, err = db.RepairCriticalSchema(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	token := "enr_" + hex.EncodeToString(random)
-	digest := sha256.Sum256([]byte(token))
-	if _, err = db.DB.Exec(`INSERT INTO agent_enrollment_token(enrollment_id,token_hash,device_name,group_id,expires_at) VALUES(?,?,'surface-agent',0,UTC_TIMESTAMP()+INTERVAL 1 DAY)`, random[:16], digest[:]); err != nil {
+	if _, err = db.DB.Exec("UPDATE users SET password=? WHERE user_id='timeweaver'", deviceTestHash); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = access.Initialize(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	human, err := access.New(context.Background(), db, 30*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, session, err := human.Login(context.Background(), "timeweaver", deviceTestPassword, "127.0.0.1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, err := dashboard.New(human).IssueEnrollment(context.Background(), session, principal.CSRF, dashboard.EnrollmentInput{GroupID: gid(0), Name: dname("surface-agent"), TTLHours: 24})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := issue.Token
 	env := []string{}
 	for _, entry := range os.Environ() {
 		if !strings.HasPrefix(entry, "TW_SURFACE_ENROLLMENT=") {

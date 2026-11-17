@@ -2,87 +2,140 @@
 package dashboard
 
 import (
-	"database/sql"
 	"encoding/json"
+	"io"
+	"mime"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/horrible-gh/TimeWeaver/internal/access"
 )
 
-type Device struct {
-	GroupID       int64   `json:"group_id"`
-	ID            int64   `json:"device_id"`
-	Name          string  `json:"device_name"`
-	GroupName     string  `json:"group_name"`
-	Status        string  `json:"status"`
-	Version       *string `json:"version"`
-	LastLogin     *string `json:"last_login_at"`
-	LastHeartbeat *string `json:"last_heartbeat_at"`
-	Revision      *string `json:"applied_revision"`
-}
-
-func nullableString(v sql.NullString) *string {
-	if !v.Valid {
-		return nil
+func decode(w http.ResponseWriter, r *http.Request, out any) error {
+	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || media != "application/json" {
+		return fail(415, "unsupported_media_type")
 	}
-	return &v.String
-}
-func nullableDate(v sql.NullTime) *string {
-	if !v.Valid {
-		return nil
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	dec.DisallowUnknownFields()
+	if err = dec.Decode(out); err != nil {
+		return fail(422, "invalid_request")
 	}
-	s := v.Time.UTC().Format(time.RFC3339Nano)
-	return &s
+	var extra any
+	if dec.Decode(&extra) != io.EOF {
+		return fail(422, "invalid_request")
+	}
+	return nil
+}
+func reply(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+func envelope(value any) any {
+	return struct {
+		Version string    `json:"schema_version"`
+		Time    time.Time `json:"server_time"`
+		Data    any       `json:"data"`
+	}{"1", time.Now().UTC(), value}
 }
 func NewHTTP(service *access.Service, guard *access.HTTP, base string) http.Handler {
+	s := New(service)
 	return guard.Guard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := strings.TrimSuffix(r.URL.Path, "/")
-		if path != base+"/dashboard/devices/get_devices" && path != base+"/dashboard/schedule/get_devices" {
-			access.ReplyError(w, &access.Error{Status: 404, Code: "not_found"})
+		path := strings.TrimPrefix(strings.TrimSuffix(r.URL.Path, "/"), base)
+		allowed := ""
+		switch path {
+		case "/dashboard/devices/get_devices", "/dashboard/schedule/get_devices":
+			allowed = "GET"
+		case "/dashboard/devices/insert_device":
+			allowed = "POST"
+		case "/dashboard/devices/update_device":
+			allowed = "PUT"
+		case "/dashboard/agent-enrollment-tokens":
+			allowed = "GET, POST"
+		default:
+			if strings.HasPrefix(path, "/dashboard/devices/remove_device/") || strings.HasPrefix(path, "/dashboard/agent-enrollment-tokens/") {
+				allowed = "DELETE"
+			}
+		}
+		if allowed == "" {
+			access.ReplyError(w, fail(404, "not_found"))
 			return
 		}
-		if r.Method != "GET" {
-			w.Header().Set("Allow", "GET")
-			access.ReplyError(w, &access.Error{Status: 405, Code: "method_not_allowed"})
+		if !strings.Contains(", "+allowed+", ", ", "+r.Method+", ") {
+			w.Header().Set("Allow", allowed)
+			access.ReplyError(w, fail(405, "method_not_allowed"))
 			return
 		}
-		token, _ := access.Credentials(r)
-		items := []Device{}
-		err := service.WithRead(r.Context(), token, func(tx *sql.Tx, u access.User) error {
-			filter, args, err := u.GroupFilter("d.group_id", "viewer")
-			if err != nil {
-				return err
+		token, csrf := access.Credentials(r)
+		ctx := r.Context()
+		var result any
+		var err error
+		status := 200
+		switch path {
+		case "/dashboard/devices/get_devices", "/dashboard/schedule/get_devices":
+			result, err = s.Devices(ctx, token)
+		case "/dashboard/devices/insert_device", "/dashboard/devices/update_device":
+			in := DeviceInput{Status: "active"}
+			if err = decode(w, r, &in); err == nil {
+				var id int64
+				id, err = s.SaveDevice(ctx, token, csrf, in, r.Method == "POST")
+				result = map[string]any{"ok": true, "device_id": id}
 			}
-			// Legacy group_id remains accepted but cannot enlarge the server scope.
-			rows, err := tx.QueryContext(r.Context(), "SELECT d.group_id,d.device_id,d.device_name,g.group_name,d.status,d.version,d.last_login_at,d.last_heartbeat_at,d.applied_revision FROM devices d JOIN `groups` g ON g.group_id=d.group_id WHERE d.device_id>0 AND "+filter+" ORDER BY d.device_id", args...)
-			if err != nil {
-				return err
-			}
-			defer rows.Close()
-			for rows.Next() {
-				var d Device
-				var version, revision sql.NullString
-				var login, heartbeat sql.NullTime
-				if err = rows.Scan(&d.GroupID, &d.ID, &d.Name, &d.GroupName, &d.Status, &version, &login, &heartbeat, &revision); err != nil {
-					return err
+		case "/dashboard/agent-enrollment-tokens":
+			if r.Method == "GET" {
+				var group *int64
+				if values, ok := r.URL.Query()["group_id"]; ok {
+					var n int64
+					if len(values) != 1 {
+						err = fail(422, "invalid_request")
+					} else {
+						n, err = strconv.ParseInt(values[0], 10, 32)
+						if err != nil || n < 0 {
+							err = fail(422, "invalid_request")
+						} else {
+							group = &n
+						}
+					}
 				}
-				d.Version = nullableString(version)
-				d.Revision = nullableString(revision)
-				d.LastLogin = nullableDate(login)
-				d.LastHeartbeat = nullableDate(heartbeat)
-				items = append(items, d)
+				if err == nil {
+					var items []EnrollmentItem
+					items, err = s.Enrollments(ctx, token, group)
+					result = envelope(map[string]any{"items": items})
+				}
+			} else {
+				in := EnrollmentInput{TTLHours: 24}
+				if err = decode(w, r, &in); err == nil {
+					var issue EnrollmentIssue
+					issue, err = s.IssueEnrollment(ctx, token, csrf, in)
+					result = envelope(issue)
+					status = 201
+				}
 			}
-			return rows.Err()
-		})
+		default:
+			if strings.HasPrefix(path, "/dashboard/devices/remove_device/") {
+				var id int64
+				id, err = strconv.ParseInt(strings.TrimPrefix(path, "/dashboard/devices/remove_device/"), 10, 32)
+				if err != nil {
+					err = fail(422, "invalid_request")
+				} else {
+					err = s.DeleteDevice(ctx, token, csrf, id)
+				}
+				result = map[string]bool{"ok": true}
+			} else {
+				var revoke EnrollmentRevocation
+				revoke, err = s.RevokeEnrollment(ctx, token, csrf, strings.TrimPrefix(path, "/dashboard/agent-enrollment-tokens/"))
+				result = envelope(revoke)
+			}
+		}
 		if err != nil {
 			access.ReplyError(w, err)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		_ = json.NewEncoder(w).Encode(items)
+		reply(w, status, result)
 	}))
 }
