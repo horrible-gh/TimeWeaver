@@ -76,6 +76,8 @@ func executionError(code string) *APIError {
 		return &APIError{404, code, "Execution target not found for this device", nil}
 	case "already_claimed":
 		return &APIError{409, code, "Manual run is already claimed", nil}
+	case "not_due":
+		return &APIError{409, code, "Manual run is not due", nil}
 	case "claim_expired":
 		return &APIError{410, code, "Manual-run claim is missing, invalid, or expired", nil}
 	case "invalid_request":

@@ -243,7 +243,7 @@ func TestMySQLScheduleTaskHTTP(t *testing.T) {
 		{"PUT", "/dashboard/tasks/get_tasks", "{}", 405},
 		{"DELETE", "/dashboard/tasks/remove_task/not-uuid", "", 422},
 		{"DELETE", "/dashboard/schedule/remove_schedule/-1", "", 422},
-		{"POST", "/dashboard/schedule/insert_manual_schedule", "{}", 404},
+		{"POST", "/dashboard/schedule/insert_manual_schedule", "{}", 422},
 	} {
 		r := httptest.NewRequest(tc.method, "http://127.0.0.1"+base+tc.path, strings.NewReader(tc.body))
 		r.RemoteAddr = "127.0.0.1:42"

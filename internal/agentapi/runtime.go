@@ -114,6 +114,14 @@ func runtimeRevoked() *APIError {
 	return &APIError{Status: 403, Code: "device_revoked", Message: "Device credential has been revoked"}
 }
 func utcSecond(t time.Time) time.Time { return t.UTC().Truncate(time.Second) }
+
+// The pinned agent dispatches every claimable manual row; it does not apply
+// schedule_datetime itself. The server's database clock owns this boundary.
+// A null/zero scheduled time must not turn a reserved run into an immediate one.
+func manualRunDue(immediate bool, scheduled, now time.Time) bool {
+	return immediate || !scheduled.IsZero() && !scheduled.After(now)
+}
+
 func supportsRecursive(value string) bool {
 	for _, v := range strings.Split(value, ",") {
 		if strings.TrimSpace(v) == recursiveHousekeep {

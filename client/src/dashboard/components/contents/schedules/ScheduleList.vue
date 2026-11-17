@@ -1,5 +1,6 @@
 <template>
   <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
+  <p v-if="noticeMessage" role="status">{{ noticeMessage }}</p>
   <div class="metric-grid">
     <article class="metric">
       <div class="metric-top">
@@ -91,7 +92,7 @@
                 <button v-if="!sessionMode || post.can_edit" :disabled="saving" class="mini" :aria-label="$t('btn_edit')" @click="openEditModal(post)">
                   <i class="ph ph-pencil-simple"></i>
                 </button>
-                <button v-if="!sessionMode" class="mini" :aria-label="$t('btn_run')" @click="openManualRunEditModal(post)">
+                <button v-if="!sessionMode || post.can_run" :disabled="saving" class="mini" :aria-label="$t('btn_run')" @click="openManualRunEditModal(post)">
                   <i class="ph ph-play"></i>
                 </button>
                 <button v-if="!sessionMode || post.can_edit" :disabled="saving" class="mini" :aria-label="$t('btn_remove')" @click="deleteRecord(post.schedule_id)">
@@ -206,11 +207,13 @@
   <!-- ✅ 수동실행 모달 사용 -->
   <ModalComponent
     :isOpen="isManualRunModalOpen"
+    :busy="saving"
     :title="$t('manual_run_title')"
     :confirmText="$t('btn_run')"
     @close="closeManualRunModal"
     @confirm="manualRun"
   >
+    <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
     <div class="form-grid">
       <div class="field full">
         <label>{{ $t('schedule_name') }}</label>
@@ -218,13 +221,13 @@
       </div>
 
       <div class="field half">
-        <label>{{ $t('manual_run_method') }}</label>
-        <select v-model="formControlManualRun.is_immediate">
+        <label for="manual-run-method">{{ $t('manual_run_method') }}</label>
+        <select id="manual-run-method" v-model="formControlManualRun.is_immediate" :disabled="saving">
           <option value="0">{{ $t('manual_run_immediate_no') }}</option>
           <option value="1">{{ $t('manual_run_immediate_yes') }}</option>
         </select>
       </div>
-      <div class="field half">
+      <div v-if="!sessionMode" class="field half">
         <label>{{ $t('manual_run_status') }}</label>
         <select v-model="formControlManualRun.status">
           <option value="active">{{ $t('manual_run_status_active') }}</option>
@@ -233,8 +236,8 @@
       </div>
 
       <div class="field full">
-        <label>{{ $t('manual_run_set_time') }}</label>
-        <input type="datetime-local" v-model="formControlManualRun.schedule_datetime" :disabled="formControlManualRun.is_immediate === '1'">
+        <label for="manual-run-datetime">{{ $t('manual_run_set_time') }}</label>
+        <input id="manual-run-datetime" type="datetime-local" step="1" v-model="formControlManualRun.schedule_datetime" :disabled="saving || formControlManualRun.is_immediate === '1'">
       </div>
 
       <input type="hidden" v-model="formControlManualRun.schedule_id" />
@@ -266,7 +269,9 @@ import BoardPagination from "../../misc/BoardPagination.vue";
 
 import { cronDefaults, formBool, schedulePayload, scheduleError } from "@/dashboard/utils/schedulePayload.mjs";
 import { canEditGroup, devicesForGroup } from "@/dashboard/utils/devicePermissions.mjs";
+import { manualCreatePayload, manualError, localTimeValue } from "@/dashboard/utils/manualPayload.mjs";
 const saving = ref(false);
+const noticeMessage = ref('');
 const errorMessage = ref("");
 const principal = ref(null);
 const { t } = useI18n(); // ✅ i18n 함수 가져오기
@@ -409,41 +414,33 @@ const rangeStart = computed(() => (filteredPosts.value.length === 0 ? 0 : (curre
 const rangeEnd = computed(() => Math.min(currentPage.value * perPage.value, filteredPosts.value.length));
 
 const isManualRunModalOpen = ref(false);
-const isManualRunEditMode = ref(false);
-const formControlManualRun = ref({ group_id : 0, status: "active", creator: group_id,  modifier:group_id });
+const formControlManualRun = ref({});
 
-// ✅ 수동실행 모달 열기
 const openManualRunEditModal = (schedule) => {
-  isManualRunEditMode.value = true;
-  Object.assign(formControlManualRun.value, schedule);
-  formControlManualRun.value.schedule_datetime =
-    new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
-      .toISOString()
-      .slice(0, 16);
-  formControlManualRun.value.is_immediate = "1"
-  formControlManualRun.value.status = "wait"
-  formControlManualRun.value.creator = userId.value || group_id // 기존 creator 유지
-  formControlManualRun.value.modifier = userId.value || group_id // 기존 creator 유지
-
+  if (saving.value || (sessionMode && !schedule.can_run)) return;
+  errorMessage.value = ''; noticeMessage.value = '';
+  formControlManualRun.value = {
+    ...(sessionMode ? { schedule_id: schedule.schedule_id, name: schedule.name } : schedule),
+    schedule_datetime: localTimeValue(new Date(Date.now() + 5 * 60000)),
+    is_immediate: '1', status: 'wait', creator: userId.value || group_id, modifier: userId.value || group_id,
+  };
   isManualRunModalOpen.value = true;
 };
 
-
-// ✅ 모달 닫기
 const closeManualRunModal = () => {
-  isManualRunModalOpen.value = false;
+  if (!saving.value) isManualRunModalOpen.value = false;
 };
 
-// ✅ 수동실행
 const manualRun = async () => {
+  if (saving.value) return;
+  saving.value = true; errorMessage.value = ''; noticeMessage.value = '';
   try {
-    // ✅ 요청 데이터 확인 (디버깅)
-
-    await postRequest(`/dashboard/schedule/insert_manual_schedule`, formControlManualRun.value, "json");
-    closeManualRunModal();
-  } catch (error) {
-    console.error("그룹 저장 실패:", error);
-  }
+    const payload = sessionMode ? manualCreatePayload(formControlManualRun.value, 'schedule') : formControlManualRun.value;
+    await postRequest('/dashboard/schedule/insert_manual_schedule', payload, 'json');
+    isManualRunModalOpen.value = false;
+    noticeMessage.value = t('manual_request_created');
+  } catch (error) { errorMessage.value = t(manualError(error)); }
+  finally { saving.value = false; }
 };
 
 // ✅ 필터링 상태

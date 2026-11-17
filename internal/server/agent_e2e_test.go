@@ -110,7 +110,8 @@ func TestGoAgentEndToEnd(t *testing.T) {
 		t.Fatal("shared health/business pool accepted")
 	}
 	var lostAck atomic.Bool
-	var manualDeliveries, unchangedSnapshots atomic.Int64
+	var manualID atomic.Int64
+	var manualDeliveries, unchangedSnapshots, snapshotReads atomic.Int64
 	transport := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/results") {
 			raw, e := io.ReadAll(io.LimitReader(r.Body, 1<<20))
@@ -127,7 +128,7 @@ func TestGoAgentEndToEnd(t *testing.T) {
 			_ = json.Unmarshal(raw, &data)
 			rec := httptest.NewRecorder()
 			app.ServeHTTP(rec, r)
-			if data.ManualID != nil && *data.ManualID == 41 {
+			if data.ManualID != nil && *data.ManualID == manualID.Load() {
 				manualDeliveries.Add(1)
 				// Deliberately lose the first successful ACK AFTER the result committed.
 				if rec.Code == 200 && lostAck.CompareAndSwap(false, true) {
@@ -148,6 +149,9 @@ func TestGoAgentEndToEnd(t *testing.T) {
 		if strings.HasSuffix(r.URL.Path, "/snapshot") {
 			rec := httptest.NewRecorder()
 			app.ServeHTTP(rec, r)
+			if rec.Code == 200 || rec.Code == 304 {
+				snapshotReads.Add(1)
+			}
 			if rec.Code == 304 {
 				unchangedSnapshots.Add(1)
 			}
@@ -268,18 +272,13 @@ func TestGoAgentEndToEnd(t *testing.T) {
 	if err = db.DB.QueryRow("SELECT device_id FROM devices WHERE device_name='surface-agent'").Scan(&deviceID); err != nil {
 		t.Fatal(err)
 	}
-	execSQL := func(query string, args ...any) {
-		t.Helper()
-		if _, e := db.DB.Exec(query, args...); e != nil {
-			t.Fatal(e)
-		}
-	}
-	// Build both schedules and their paired task rows through the human service.
-	// Only the still-unported manual queue is seeded directly in this fixture.
+	// Build the schedules, paired tasks and manual requests through the human
+	// management service before the real agent consumes them.
 	management := dashboard.New(human)
+	var reservationID int64
 	due := time.Now().UTC().Add(10 * time.Second)
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
-	for i, filename := range []string{"manual.txt", "scheduled.txt"} {
+	for i, filename := range []string{"manual.txt", "scheduled.txt", "reserved.txt"} {
 		input := dashboard.ScheduleInput{GroupID: 0, DeviceID: deviceID, Name: filename, Status: "active", CronInput: dashboard.CronInput{Year: "2000"}}
 		if i == 1 {
 			input.CronInput = dashboard.CronInput{Year: due.Format("2006"), Month: due.Format("1"), Day: due.Format("2"), Hour: due.Format("15"), Minute: due.Format("4"), Second: due.Format("5")}
@@ -294,7 +293,23 @@ func TestGoAgentEndToEnd(t *testing.T) {
 			t.Fatal(e)
 		}
 		if i == 0 {
-			execSQL(`INSERT INTO manual_execution(manual_id,detail_id,is_immediate,status,schedule_datetime) VALUES(41,UNHEX(REPLACE(?,'-','')),1,'wait',UTC_TIMESTAMP())`, tid)
+			ids, err := management.QueueManual(context.Background(), session, principal.CSRF, dashboard.ManualInput{DetailID: tid, Immediate: true})
+			if err != nil || len(ids) != 1 {
+				t.Fatalf("human manual request: %v, %v", ids, err)
+			}
+			manualID.Store(ids[0])
+		} else if i == 2 {
+			// The reservation and all early-execution assertions use the database
+			// clock, independently of the runner's timezone or wall-clock offset.
+			var databaseNow time.Time
+			if err := db.DB.QueryRow("SELECT UTC_TIMESTAMP()").Scan(&databaseNow); err != nil {
+				t.Fatal(err)
+			}
+			ids, err := management.QueueManual(context.Background(), session, principal.CSRF, dashboard.ManualInput{DetailID: tid, ScheduleDatetime: databaseNow.UTC().Add(15 * time.Second).Format(time.RFC3339)})
+			if err != nil || len(ids) != 1 {
+				t.Fatalf("human reserved request: %v, %v", ids, err)
+			}
+			reservationID = ids[0]
 		}
 	}
 	wait := func(label string, condition func() bool) {
@@ -368,14 +383,46 @@ func TestGoAgentEndToEnd(t *testing.T) {
 		return stop
 	}
 	stop := startAgent()
-	wait("scheduled/manual results and outbox drain", func() bool {
-		return count("SELECT COUNT(*) FROM execution_log WHERE result_code=0") == 2 && lostAck.Load() && manualDeliveries.Load() >= 2 && unchangedSnapshots.Load() > 0 && healthyEmpty()
+	observedBeforeDue := false
+	wait("reservation becomes due without an early claim or execution", func() bool {
+		var now, reserved time.Time
+		var status string
+		var results, running int64
+		if err := db.DB.QueryRow(`SELECT UTC_TIMESTAMP(),me.schedule_datetime,me.status,
+ (SELECT COUNT(*) FROM execution_log el WHERE el.manual_id=me.manual_id),
+ (SELECT COUNT(*) FROM execution_running er WHERE er.detail_id=me.detail_id)
+ FROM manual_execution me WHERE me.manual_id=?`, reservationID).Scan(&now, &reserved, &status, &results, &running); err != nil {
+			t.Fatal(err)
+		}
+		if !now.Before(reserved) {
+			return true
+		}
+		if status != "wait" || results != 0 || running != 0 {
+			t.Fatalf("reservation executed before database due time: status=%s results=%d running=%d", status, results, running)
+		}
+		if snapshotReads.Load() >= 2 {
+			observedBeforeDue = true
+		}
+		return false
+	})
+	if !observedBeforeDue {
+		t.Fatal("reservation was not observed before due time after real agent snapshot polling")
+	}
+	wait("scheduled/immediate/reserved results and outbox drain", func() bool {
+		return count("SELECT COUNT(*) FROM execution_log WHERE result_code=0") == 3 && lostAck.Load() && manualDeliveries.Load() >= 2 && unchangedSnapshots.Load() > 0 && healthyEmpty()
 	})
 	stop()
-	if count("SELECT COUNT(*) FROM execution_log") != 2 || count("SELECT COUNT(*) FROM execution_running") != 0 || count("SELECT COUNT(*) FROM manual_execution WHERE manual_id=41 AND status='done'") != 1 {
+	if count("SELECT COUNT(*) FROM execution_log") != 3 || count("SELECT COUNT(*) FROM execution_running") != 0 || count(fmt.Sprintf("SELECT COUNT(*) FROM manual_execution WHERE manual_id IN (%d,%d) AND status='done'", manualID.Load(), reservationID)) != 2 {
 		t.Fatal("duplicate execution or incomplete transition")
 	}
-	for _, name := range []string{"manual.txt", "scheduled.txt"} {
+	if count(fmt.Sprintf("SELECT COUNT(*) FROM execution_log el JOIN manual_execution me ON me.manual_id=el.manual_id WHERE me.manual_id=%d AND el.start_time>=me.schedule_datetime", reservationID)) != 1 {
+		t.Fatal("reserved execution did not start at or after the stored UTC due time")
+	}
+	history, err := management.ExecutionHistory(context.Background(), session, "", "")
+	if err != nil || len(history) != 3 {
+		t.Fatalf("real agent results missing from human history: %d, %v", len(history), err)
+	}
+	for _, name := range []string{"manual.txt", "scheduled.txt", "reserved.txt"} {
 		b, e := os.ReadFile(filepath.Join(dir, name))
 		if e != nil || string(b) != "executed\n" {
 			t.Fatal("task was lost or executed twice", name)
@@ -389,11 +436,11 @@ func TestGoAgentEndToEnd(t *testing.T) {
 		return count("SELECT MAX(credential_id) FROM agent_device_credential") > before && healthyEmpty()
 	})
 	stopAgain()
-	if count("SELECT COUNT(*) FROM execution_log") != 2 {
+	if count("SELECT COUNT(*) FROM execution_log") != 3 {
 		t.Fatal("restart re-executed a completed job")
 	}
 	if count("SELECT COUNT(*) FROM agent_enrollment_token WHERE used_at IS NOT NULL") != 1 {
 		t.Fatal("unexpected re-enrollment")
 	}
-	t.Log("PASS: real pinned agent enrollment, heartbeat, scheduled/manual commands, lost-ACK retry, single result persistence, credential restart, unified UI/favicon and graceful shutdown")
+	t.Log("PASS: real pinned agent with human-created enrollment, schedules, tasks and immediate/reserved requests; no early reservation claim, scheduled/manual commands, human history, lost-ACK retry, single result persistence, credential restart, unified UI/favicon and graceful shutdown")
 }

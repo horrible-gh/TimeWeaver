@@ -28,11 +28,15 @@ func (s *Service) Tasks(ctx context.Context, token string) ([]map[string]any, er
 		if err != nil {
 			return err
 		}
-		if strings.Count(q, "WHERE sd.deleted_at IS NULL") != 1 || strings.Count(q, "LEFT JOIN task_detail td") != 1 || strings.Count(q, "sg.name schedule_group_name") != 1 {
+		if strings.Count(q, "WHERE sd.deleted_at IS NULL") != 1 || strings.Count(q, "LEFT JOIN task_detail td") != 1 || strings.Count(q, "sg.name schedule_group_name") != 1 || strings.Count(q, "SELECT el.detail_id,") != 1 || strings.Count(q, "GROUP BY el.detail_id") != 1 || strings.Count(q, "ON el.detail_id = td.detail_id") != 1 {
 			return fail(503, "unavailable")
 		}
-		q = strings.Replace(q, "sg.name schedule_group_name", "sg.group_id, d.group_id AS device_group_id, sg.name schedule_group_name", 1)
-		q = strings.Replace(q, "LEFT JOIN task_detail td", "JOIN devices d ON d.device_id=sg.target_device LEFT JOIN task_detail td", 1)
+		// A legacy task move must not disclose the old parent's last execution.
+		q = strings.Replace(q, "SELECT el.detail_id,", "SELECT el.schedule_id, el.detail_id,", 1)
+		q = strings.Replace(q, "GROUP BY el.detail_id", "GROUP BY el.schedule_id, el.detail_id", 1)
+		q = strings.Replace(q, "ON el.detail_id = td.detail_id", "ON el.detail_id = td.detail_id AND el.schedule_id = sd.schedule_id", 1)
+		q = strings.Replace(q, "sg.name schedule_group_name", "sg.group_id, d.group_id AS device_group_id, (sg.status='active' AND d.status='active' AND g.status='active' AND dg.status='active' AND sd.status='active' AND td.detail_id IS NOT NULL) AS runnable, sg.name schedule_group_name", 1)
+		q = strings.Replace(q, "LEFT JOIN task_detail td", "JOIN devices d ON d.device_id=sg.target_device JOIN `groups` g ON g.group_id=sg.group_id JOIN `groups` dg ON dg.group_id=d.group_id LEFT JOIN task_detail td", 1)
 		q = strings.Replace(q, "WHERE sd.deleted_at IS NULL", "WHERE sd.deleted_at IS NULL AND ("+scope+")", 1)
 		rows, err := tx.QueryContext(ctx, q, args...)
 		if err != nil {
@@ -69,7 +73,9 @@ func (s *Service) Tasks(ctx context.Context, token string) ([]map[string]any, er
 				return fail(503, "unavailable")
 			}
 			row["can_edit"] = u.Can(group, "editor") && u.Can(dg, "editor")
+			row["can_run"] = u.Can(group, "operator") && u.Can(dg, "operator") && row["runnable"] == int64(1)
 			delete(row, "device_group_id")
+			delete(row, "runnable")
 			out = append(out, row)
 		}
 		if err = rows.Err(); err != nil {

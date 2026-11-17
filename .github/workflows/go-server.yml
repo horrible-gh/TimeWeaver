@@ -174,7 +174,7 @@ jobs:
       - name: Exercise human sessions through the real embedded Vue UI
         env:
           TIMEWEAVER_BROWSER_ACCESS: '1'
-        run: go test -race -count=1 -timeout=360s -v ./internal/server -run 'TestBrowser(Session|Administration|Devices|Schedules)Flow'
+        run: go test -race -count=1 -timeout=480s -v ./internal/server -run 'TestBrowser(Session|Administration|Devices|Schedules|Manual)Flow'
       - name: Compare Python and Go migrations on disposable databases
         run: python scripts/test-go-store-compat.py artifacts/timeweaver-store
       - name: Cross-check identity with the frozen Python service

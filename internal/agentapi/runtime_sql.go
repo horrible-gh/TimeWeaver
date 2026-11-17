@@ -272,7 +272,8 @@ func (s *Runtime) loadManuals(ctx context.Context, conn *sql.Conn, deviceID int6
 		}
 		m.Immediate = immediate.Int64 != 0
 		m.ScheduledAt = utcSecond(m.ScheduledAt)
-		m.Claimable = m.Status == "wait" || (m.Status == "processing" && claim.Valid && !claim.Time.After(data.GeneratedAt))
+		m.Claimable = manualRunDue(m.Immediate, m.ScheduledAt, data.GeneratedAt) &&
+			(m.Status == "wait" || (m.Status == "processing" && claim.Valid && !claim.Time.After(data.GeneratedAt)))
 		data.ManualRuns = append(data.ManualRuns, m)
 	}
 	if rows.Err() != nil {

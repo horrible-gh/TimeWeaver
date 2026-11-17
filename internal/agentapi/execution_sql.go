@@ -26,10 +26,12 @@ type executionTarget struct {
 	groupStop, detailStop bool
 }
 type manualRecord struct {
-	detail []byte
-	status string
-	token  sql.NullString
-	expiry sql.NullTime
+	detail    []byte
+	status    string
+	token     sql.NullString
+	expiry    sql.NullTime
+	immediate sql.NullBool
+	scheduled sql.NullTime
 }
 
 // Statement deadlocks alone are retried after the entire transaction has been
@@ -143,7 +145,7 @@ func lockExecutionTarget(ctx context.Context, tx *sql.Tx, deviceID, expectedSche
 }
 func lockManual(ctx context.Context, tx *sql.Tx, id int64) (manualRecord, error) {
 	var r manualRecord
-	err := tx.QueryRowContext(ctx, `SELECT detail_id,status,claim_token,claim_expires_at FROM manual_execution WHERE manual_id=? FOR UPDATE`, id).Scan(&r.detail, &r.status, &r.token, &r.expiry)
+	err := tx.QueryRowContext(ctx, `SELECT detail_id,status,claim_token,claim_expires_at,is_immediate,schedule_datetime FROM manual_execution WHERE manual_id=? FOR UPDATE`, id).Scan(&r.detail, &r.status, &r.token, &r.expiry, &r.immediate, &r.scheduled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, executionError("not_found")
 	}
@@ -183,6 +185,11 @@ func (s *Execution) claim(ctx context.Context, deviceID, manualID int64, token s
 		}
 		if manual.status != "wait" {
 			return result, executionError("already_claimed")
+		}
+		// A cached or custom agent cannot claim a future reservation early. This
+		// check uses the locked row and database clock, not snapshot/client time.
+		if !manualRunDue(manual.immediate.Bool, manual.scheduled.Time, now) {
+			return result, executionError("not_due")
 		}
 		expires := now.Add(claimTTL)
 		if _, err = tx.ExecContext(ctx, `UPDATE manual_execution SET status='processing',claim_token=?,claim_expires_at=?,modified_at=? WHERE manual_id=?`, token, expires, now, manualID); err != nil {

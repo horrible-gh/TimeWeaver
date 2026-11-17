@@ -1,4 +1,5 @@
 <template>
+  <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
   <div class="panel">
     <div class="panel-head">
       <div class="panel-title">
@@ -19,6 +20,7 @@
           <option v-for="status in uniqueStatuses" :key="status" :value="status">{{ status }}</option>
         </select>
         <button class="btn" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
+        <button class="btn" :disabled="saving || isLoading" @click="fetchPosts">{{ $t('btn_refresh') }}</button>
       </div>
     </div>
 
@@ -36,28 +38,31 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="post in paginatedPosts" :key="post.manual_id">
+          <tr v-for="post in paginatedPosts" :key="post.manual_id" :data-manual="post.manual_id">
             <td>{{ post.manual_id }}</td>
             <td>{{ post.name }}</td>
             <td>{{ post.schedule_name }}</td>
-            <td>{{ post.is_immediate === 1 ? $t('manual_run_immediate_yes') : $t('manual_run_immediate_no') }}</td>
+            <td>{{ formBool(post.is_immediate) ? $t('manual_run_immediate_yes') : $t('manual_run_immediate_no') }}</td>
             <td>{{ formatDate(post.schedule_datetime) }}</td>
             <td><span class="badge" :class="statusBadgeClass(post.status)">{{ post.status }}</span></td>
             <td>
               <div class="row-actions">
-                <button v-if="post.status === 'processing'" class="mini" :aria-label="$t('btn_abandon')" @click="abandonManualExecution(post)">
-                  <i class="ph ph-x-circle"></i>
-                </button>
-                <button v-else-if="post.edit_enable === '1'" class="mini" :aria-label="$t('btn_edit')" @click="openEditModal(post)">
-                  <i class="ph ph-pencil-simple"></i>
-                </button>
-                <span v-else>-</span>
+                <template v-if="sessionMode">
+                  <button v-if="post.can_edit" :disabled="saving" class="mini" :aria-label="$t('btn_edit')" @click="openEditModal(post)"><i class="ph ph-pencil-simple"></i></button>
+                  <button v-if="post.can_cancel" :disabled="saving" class="mini" :aria-label="$t('manual_cancel')" @click="abandonManualExecution(post)"><i class="ph ph-x-circle"></i></button>
+                  <span v-if="!post.can_edit && !post.can_cancel">-</span>
+                </template>
+                <template v-else>
+                  <button v-if="post.status === 'processing'" :disabled="saving" class="mini" :aria-label="$t('btn_abandon')" @click="abandonManualExecution(post)"><i class="ph ph-x-circle"></i></button>
+                  <button v-else-if="post.edit_enable === '1'" :disabled="saving" class="mini" :aria-label="$t('btn_edit')" @click="openEditModal(post)"><i class="ph ph-pencil-simple"></i></button>
+                  <span v-else>-</span>
+                </template>
               </div>
             </td>
           </tr>
         </tbody>
       </table>
-      <div v-else class="empty-state">{{ $t('schedules_list_no_datas') }}</div>
+      <div v-else class="empty-state">{{ $t(isLoading ? 'msg_loading' : 'schedules_list_no_datas') }}</div>
     </div>
 
     <div class="panel-foot" v-if="paginatedPosts.length > 0">
@@ -68,11 +73,13 @@
     <!-- ✅ 모달 컴포넌트 사용 -->
     <ModalComponent
       :isOpen="isModalOpen"
+      :busy="saving"
       :title="$t('manual_run_title') + ' ' + $t('btn_edit')"
       :confirmText="$t('btn_save')"
       @close="closeModal"
       @confirm="saveManualExecution"
     >
+      <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
       <div class="form-grid">
         <div class="field full">
           <label>{{ $t('list_label_group') }}</label>
@@ -85,14 +92,14 @@
         </div>
 
         <div class="field half">
-          <label>{{ $t('manual_run_method') }}</label>
-          <select v-model="formControl.is_immediate">
+          <label for="manual-edit-method">{{ $t('manual_run_method') }}</label>
+          <select id="manual-edit-method" v-model="formControl.is_immediate" :disabled="saving">
             <option value="0">{{ $t('manual_run_immediate_no') }}</option>
             <option value="1">{{ $t('manual_run_immediate_yes') }}</option>
           </select>
         </div>
 
-        <div class="field half">
+        <div v-if="!sessionMode" class="field half">
           <label>{{ $t('list_label_status') }}</label>
           <select v-model="formControl.status">
             <option value="active">{{ $t('manual_run_status_active') }}</option>
@@ -102,8 +109,8 @@
         </div>
 
         <div class="field full">
-          <label>{{ $t('manual_run_set_time') }}</label>
-          <input type="datetime-local" v-model="formControl.schedule_datetime" :disabled="formControl.is_immediate === '1'">
+          <label for="manual-edit-datetime">{{ $t('manual_run_set_time') }}</label>
+          <input id="manual-edit-datetime" type="datetime-local" step="1" v-model="formControl.schedule_datetime" :disabled="saving || formControl.is_immediate === '1'">
         </div>
 
         <input type="hidden" v-model="formControl.manual_id" />
@@ -126,12 +133,16 @@ export default {
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
-import { getRequest, putRequest } from "@api";
+import { getRequest, putRequest, sessionMode } from "@api";
 import BoardPagination from '../../misc/BoardPagination.vue';
 import ModalComponent from "../../misc/ModalComponent.vue";
 import { useI18n } from "vue-i18n";
 import { parseServerTime } from "@/dashboard/utils/deviceStatus";
-const { t } = useI18n();
+import { formBool } from "@/dashboard/utils/schedulePayload.mjs";
+import { manualUpdatePayload, manualCancelPayload, manualError, localTimeValue } from "@/dashboard/utils/manualPayload.mjs";
+const { t, locale } = useI18n();
+const saving = ref(false);
+const errorMessage = ref('');
 
 const posts = ref([]);
 const isLoading = ref(true);
@@ -159,11 +170,14 @@ onMounted(() => {
 
 // API에서 데이터 가져오기
 const fetchPosts = async () => {
+  isLoading.value = true; errorMessage.value = '';
   try {
     const response = await getRequest("/dashboard/manual_execution/get_manual_execution_list");
     posts.value = response || [];
+    currentPage.value = 1;
   } catch (error) {
-    console.error("데이터를 가져오는 중 오류 발생:", error);
+    posts.value = [];
+    errorMessage.value = t(manualError(error));
   } finally {
     isLoading.value = false;
   }
@@ -175,7 +189,7 @@ onMounted(fetchPosts);
 const formatDate = (dateString) => {
   const date = parseServerTime(dateString);
   if (!date) return "-";
-  return date.toLocaleString("ja-JP", {
+  return date.toLocaleString(locale.value, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -187,35 +201,28 @@ const formatDate = (dateString) => {
 
 // 수정 모달 열기
 const openEditModal = (post) => {
-  Object.assign(formControl.value, post, {
-    modifier: userId.value
-  });
-
-  // datetime-local 형식으로 변환
+  if (saving.value || (sessionMode && !post.can_edit)) return;
+  errorMessage.value = '';
+  formControl.value = { ...post, is_immediate: formBool(post.is_immediate) ? '1' : '0', modifier: userId.value };
   const parsedDatetime = parseServerTime(post.schedule_datetime);
-  if (parsedDatetime) {
-    formControl.value.schedule_datetime = new Date(parsedDatetime.getTime() - parsedDatetime.getTimezoneOffset() * 60000)
-      .toISOString()
-      .slice(0, 16);
-  }
-
+  formControl.value.schedule_datetime = parsedDatetime ? localTimeValue(parsedDatetime) : '';
   isModalOpen.value = true;
 };
 
-// 저장
 const saveManualExecution = async () => {
+  if (saving.value) return;
+  saving.value = true; errorMessage.value = '';
   try {
-    await putRequest("/dashboard/manual_execution/update_manual_execution", formControl.value, "json");
+    const payload = sessionMode ? manualUpdatePayload(formControl.value) : formControl.value;
+    await putRequest('/dashboard/manual_execution/update_manual_execution', payload, 'json');
+    isModalOpen.value = false;
     await fetchPosts();
-    closeModal();
-  } catch (error) {
-    console.error("저장 실패:", error);
-  }
+  } catch (error) { errorMessage.value = t(manualError(error)); }
+  finally { saving.value = false; }
 };
 
-// 모달 닫기
 const closeModal = () => {
-  isModalOpen.value = false;
+  if (!saving.value) isModalOpen.value = false;
 };
 
 // 필터 초기화
@@ -293,15 +300,14 @@ watch([selectedGroup, selectedSchedule, selectedStatus], () => {
 
 // ✅ 수동실행 포기
 const abandonManualExecution = async (post) => {
-  if (confirm(t('msg_abandon_manual_execution'))) {
-    try {
-      post.modifier = userId
-      await putRequest("/dashboard/manual_execution/abandon_manual_execution", post, "json");
-      await fetchPosts();
-    } catch (error) {
-      console.error("수동실행 업데이트 실패:", error);
-    }
-  }
+  if (saving.value || (sessionMode && !post.can_cancel) || !confirm(t(sessionMode ? 'manual_confirm_cancel' : 'msg_abandon_manual_execution'))) return;
+  saving.value = true; errorMessage.value = '';
+  try {
+    const payload = sessionMode ? manualCancelPayload(post) : { ...post, modifier: userId.value };
+    await putRequest('/dashboard/manual_execution/abandon_manual_execution', payload, 'json');
+    await fetchPosts();
+  } catch (error) { errorMessage.value = t(manualError(error)); }
+  finally { saving.value = false; }
 };
 
 // ✅ 상태값 → 배지 색 매핑 (active=online, wait=warning, inactive=offline, processing=info)

@@ -97,7 +97,7 @@ def main():
                 lm = limited.request.get(base + '/auth/me').json()
                 refused = limited.request.delete(base + '/dashboard/tasks/remove_task/' + tid, headers={'Origin': origin, 'X-CSRF-Token': lm['csrf_token']})
                 assert refused.status == 403
-            expect(lp.get_by_role('button', name='Run', exact=True)).to_have_count(0)
+            expect(lp.get_by_role('button', name='Run', exact=True)).to_have_count(0 if role == 'viewer' else 1)
             limited.close()
 
         page.goto(origin + '/dashboard/schedules')

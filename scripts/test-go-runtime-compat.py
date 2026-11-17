@@ -4,6 +4,7 @@
 Never imports the application's config.py or reads its .env/DB_DATABASE. The
 optional validator binary uses the separately pinned Go agent's actual decoder.
 """
+import copy
 import hashlib
 import json
 import os
@@ -155,7 +156,7 @@ def main():
             (4, "processing", None, "2001-01-01 00:00:00", first),
             (3, "processing", "2099-01-01 00:00:00", "2001-01-01 00:00:00", first),
             (2, "processing", "2000-01-01 00:00:00", "2001-01-01 00:00:00", first),
-            (1, "wait", None, "2099-01-01 00:00:00", first),
+            (1, "wait", None, "2002-01-01 00:00:00", first),
             (5, "done", None, "2001-01-01 00:00:00", first),
             (6, "wait", None, "2001-01-01 00:00:00", (7).to_bytes(16, "big")),
             (7, "wait", None, "2001-01-01 00:00:00", (6).to_bytes(16, "big")),
@@ -189,6 +190,40 @@ def main():
         assert changed_etag != etag
         sql("UPDATE manual_execution SET claim_expires_at='2000-01-01 00:00:00' WHERE manual_id=3")
         assert compare()[1] != changed_etag
+        # Deliberate safety correction: the pinned agent dispatches every
+        # claimable row without examining schedule_datetime. The frozen Python
+        # marks a future reservation claimable. Go must differ only in that
+        # field and its derived revision/ETag; the entire other payload remains
+        # compared. Due and immediate fixtures above/below keep exact parity.
+        sql("UPDATE manual_execution SET schedule_datetime='2099-01-01 00:00:00' WHERE manual_id=1")
+        future, future_headers = request("/snapshot", token=current["access_token"],
+                                         headers={"X-TW-Agent-Capabilities": "housekeep_recursive_v1"})
+        reference = runtime.snapshot(principal)
+        corrected = copy.deepcopy(reference.data)
+        reserved = [m for m in corrected["manual_runs"] if m["manual_id"] == 1]
+        assert len(reserved) == 1 and reserved[0]["status"] == "wait" and not reserved[0]["is_immediate"]
+        assert reserved[0]["claimable"] is True, "Frozen reference behavior unexpectedly changed"
+        reserved[0]["claimable"] = False
+        future_digest = hashlib.sha256(canonical_snapshot_bytes(corrected)).hexdigest()
+        corrected["revision"] = "sha256:" + future_digest
+        expected = SnapshotEnvelope(server_time=reference.generated_at, data=corrected).model_dump(mode="json")
+        assert future["schema_version"] == expected["schema_version"] == "1"
+        assert future["server_time"] == future["data"]["generated_at"]
+        assert {k: v for k, v in future["data"].items() if k != "generated_at"} == {
+            k: v for k, v in expected["data"].items() if k != "generated_at"
+        }, "Future reservation changed unrelated snapshot fields"
+        assert future_headers["ETag"] == 'W/"' + future_digest[:16] + '"'
+        if validator:
+            decoded = subprocess.run([validator], input=json.dumps({
+                "envelope": future, "etag": future_headers["ETag"],
+                "identity": {"device_id": current["device_id"], "device_name": current["device_name"]},
+            }), text=True, capture_output=True, timeout=10)
+            assert decoded.returncode == 0, "Pinned agent rejected due-gated snapshot: " + decoded.stderr
+        # Immediate=true still dispatches despite a stale/future stored date,
+        # preserving the existing meaning and full reference equality.
+        sql("UPDATE manual_execution SET is_immediate=1 WHERE manual_id=1")
+        immediate, _ = compare()
+        assert next(m for m in immediate["data"]["manual_runs"] if m["manual_id"] == 1)["claimable"] is True
         # Removing the task half of a visible detail fails the WHOLE snapshot.
         sql("DELETE FROM task_detail WHERE detail_id=%s", (first,))
         data, _ = request("/snapshot", token=current["access_token"], expected=500)
@@ -196,7 +231,8 @@ def main():
         sql("UPDATE devices SET status='inactive' WHERE device_id=%s", (current["device_id"],))
         data, _ = request("/snapshot", token=current["access_token"], headers={"If-None-Match": changed_etag}, expected=403)
         assert data["detail"]["code"] == "device_revoked"
-        print("PASS: frozen Python/Go heartbeat, full snapshot data, Unicode canonical hash, ETag, device scope, task normalization, dense ranks and lease visibility")
+        print("PASS: frozen Python/Go heartbeat, full due/immediate snapshot data, Unicode canonical hash, ETag, device scope, task normalization, dense ranks and lease visibility")
+        print("PASS: future-reservation safety difference limited to claimable and derived revision/ETag; all other snapshot fields compared")
         if validator:
             print("PASS: actual pinned Go-agent DecodeSnapshot accepted all successful snapshot fixtures")
     finally:

@@ -33,6 +33,7 @@ type Schedule struct {
 	GroupName  string `json:"group_name"`
 	DeviceName string `json:"device_name"`
 	CanEdit    bool   `json:"can_edit"`
+	CanRun     bool   `json:"can_run"`
 }
 
 // Both resource and execution-device scopes must be visible. This also protects
@@ -57,8 +58,9 @@ func (s *Service) Schedules(ctx context.Context, token string) ([]Schedule, erro
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT sg.group_id,sg.schedule_id,sg.name,
    COALESCE(sg.year,'*'),COALESCE(sg.month,'*'),COALESCE(sg.day_of_week,'*'),COALESCE(sg.day,'*'),COALESCE(sg.hour,'*'),COALESCE(sg.minute,'*'),COALESCE(sg.second,'*'),
-   COALESCE(sg.is_error_stop,0),sg.status,sg.target_device,d.device_name,d.group_id,g.group_name
+   COALESCE(sg.is_error_stop,0),sg.status,sg.target_device,d.device_name,d.group_id,g.group_name,d.status,g.status,dg.status
    FROM schedule_group sg JOIN devices d ON d.device_id=sg.target_device JOIN `+"`groups`"+` g ON g.group_id=sg.group_id
+   JOIN `+"`groups`"+` dg ON dg.group_id=d.group_id
    WHERE sg.schedule_id>0 AND `+scope+` ORDER BY sg.schedule_id`, args...)
 		if err != nil {
 			return dbError(err)
@@ -68,11 +70,13 @@ func (s *Service) Schedules(ctx context.Context, token string) ([]Schedule, erro
 			var v Schedule
 			var stop bool
 			var dg int64
-			if err = rows.Scan(&v.GroupID, &v.ID, &v.Name, &v.Year, &v.Month, &v.DayOfWeek, &v.Day, &v.Hour, &v.Minute, &v.Second, &stop, &v.Status, &v.DeviceID, &v.DeviceName, &dg, &v.GroupName); err != nil {
+			var deviceStatus, groupStatus, deviceGroupStatus string
+			if err = rows.Scan(&v.GroupID, &v.ID, &v.Name, &v.Year, &v.Month, &v.DayOfWeek, &v.Day, &v.Hour, &v.Minute, &v.Second, &stop, &v.Status, &v.DeviceID, &v.DeviceName, &dg, &v.GroupName, &deviceStatus, &groupStatus, &deviceGroupStatus); err != nil {
 				return dbError(err)
 			}
 			v.ErrorStop = FormBool(stop)
 			v.CanEdit = u.Can(v.GroupID, "editor") && u.Can(dg, "editor")
+			v.CanRun = u.Can(v.GroupID, "operator") && u.Can(dg, "operator") && v.Status == "active" && deviceStatus == "active" && groupStatus == "active" && deviceGroupStatus == "active"
 			out = append(out, v)
 		}
 		if err = rows.Err(); err != nil {

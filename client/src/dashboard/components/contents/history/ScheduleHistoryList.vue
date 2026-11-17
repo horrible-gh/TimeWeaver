@@ -1,4 +1,5 @@
 <template>
+  <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
   <div class="panel">
     <div class="panel-head">
       <div class="panel-title">
@@ -14,13 +15,14 @@
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="schedule in filteredSchedules" :key="schedule" :value="schedule">{{ schedule }}</option>
         </select>
-        <input class="select" type="datetime-local" v-model="selectedStartTime" :aria-label="$t('list_label_start_time')">
-        <input class="select" type="datetime-local" v-model="selectedEndTime" :aria-label="$t('list_label_end_time')">
+        <input id="history-start" class="select" type="datetime-local" step="1" v-model="selectedStartTime" :disabled="isLoading" :aria-label="$t('list_label_start_time')">
+        <input id="history-end" class="select" type="datetime-local" step="1" v-model="selectedEndTime" :disabled="isLoading" :aria-label="$t('list_label_end_time')">
         <select class="select" v-model="selectedResultCode" :aria-label="$t('list_label_exit_code')">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="code in uniqueResultCodes" :key="code" :value="code">{{ code }}</option>
         </select>
-        <button class="btn" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
+        <button v-if="sessionMode" id="history-apply" class="btn primary" :disabled="isLoading" @click="fetchPosts">{{ $t('history_apply') }}</button>
+        <button class="btn" :disabled="isLoading" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
       </div>
     </div>
 
@@ -38,26 +40,26 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="post in paginatedPosts" :key="post.execution_id">
+          <tr v-for="post in paginatedPosts" :key="post.execution_id" :data-execution="post.execution_id">
             <td>{{ post.execution_id }}</td>
             <td>{{ post.sg_name }}</td>
             <td>
-              <span @click="showSchedule(post.task_type,post.command,post.source_path,post.destination_path)" class="message-short">
+              <button class="text-btn message-short" @click="showSchedule(post)">
                 {{ post.schedule_name }}
-              </span>
+              </button>
             </td>
             <td>{{ formatDate(post.start_time) }}</td>
             <td>{{ formatDate(post.end_time) }}</td>
             <td>{{ post.result_code }}</td>
             <td>
-              <span @click="openModal($t('list_label_message'), post.result_message)" class="message-short">
+              <button class="text-btn message-short" @click="openModal($t('list_label_message'), post.result_message)">
                 {{ truncateMessage(post.result_message) }}
-              </span>
+              </button>
             </td>
           </tr>
         </tbody>
       </table>
-      <div v-else class="empty-state">{{ $t('schedules_list_no_datas') }}</div>
+      <div v-else class="empty-state">{{ $t(isLoading ? 'msg_loading' : 'schedules_list_no_datas') }}</div>
     </div>
 
     <div class="panel-foot" v-if="filteredPosts.length > 0">
@@ -68,11 +70,9 @@
     <!-- ✅ Use modal component -->
     <ModalComponent
       :isOpen="isModalOpen"
-      :title="$t('sub_groups')"
+      :title="modalTitle"
       :message="modalMessage"
-      :confirmText="modalConfirmText"
       @close="isModalOpen = false"
-      @confirm="handleConfirm"
     >
     </ModalComponent>
   </div>
@@ -89,178 +89,99 @@ export default {
 </script>
 
 <script setup>
-import { getRequest } from "@api";
-import { ref, computed, onMounted } from 'vue';
+import { getRequest, sessionMode, useSort } from "@api";
+import { ref, computed, onMounted, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import BoardPagination from '../../misc/BoardPagination.vue';
-import ModalComponent from "../../misc/ModalComponent.vue"; // ✅ Import modal component
-import { parseServerTime } from "@/dashboard/utils/deviceStatus";
+import ModalComponent from '../../misc/ModalComponent.vue';
+import { parseServerTime } from '@/dashboard/utils/deviceStatus';
+import { historyQuery, localTimeValue, manualError } from '@/dashboard/utils/manualPayload.mjs';
 
-const posts = ref([]); // ✅ Initial value is an empty array
-const isLoading = ref(true);
+const { t, locale } = useI18n();
+const posts = ref([]);
+const { sortKey, sortOrder, sort } = useSort(posts);
+const isLoading = ref(false);
+const errorMessage = ref('');
 const currentPage = ref(1);
 const perPage = ref(7);
-const sortKey = ref('');
-const sortOrder = ref('asc');
-
-// ✅ Filter state
-const selectedGroup = ref("");
-const selectedSchedule = ref("");
-const selectedStartTime = ref("");
-const selectedEndTime = ref("");
-const selectedResultCode = ref("");
-
+const selectedGroup = ref('');
+const selectedSchedule = ref('');
+const selectedStartTime = ref('');
+const selectedEndTime = ref('');
+const selectedResultCode = ref('');
 const isModalOpen = ref(false);
-const modalTitle = ref("");
-const modalMessage = ref("");
-const modalConfirmText = ref("");
+const modalTitle = ref('');
+const modalMessage = ref('');
 
-const openModal = (title, message, confirmText = "") => {
+const openModal = (title, message) => {
   modalTitle.value = title;
-  modalMessage.value = message;
-  modalConfirmText.value = confirmText;
+  modalMessage.value = message || '-';
   isModalOpen.value = true;
 };
-
-const handleConfirm = () => {
-  alert("Confirm button was clicked.");
-  isModalOpen.value = false;
-};
-
-
-// ✅ Exit message truncation function, show up to 11 characters plus '...'
-const truncateMessage = (message) => {
-  return message && message.length > 11 ? message.substring(0, 11) + "..." : message;
-};
-
-// // ✅ View full exit message by opening modal
-// const showMessage = (message) => {
-//   modalMessage.value = message;
-//   isModalOpen.value = true;
-// };
-
-// ✅ View schedule by opening modal
-const showSchedule = (task_type, command, source_path, destination_path) => {
-  modalMessage.value = "Task type : " + task_type + "\n"
-  if (task_type === "archive" || task_type === "copy") {
-    modalMessage.value += "Source : " + source_path + "\nDestination : " + destination_path;
-  } else if (task_type === "housekeep") {
-    modalMessage.value += "Destination : " + destination_path;
-  } else if (task_type === "command") {
-    modalMessage.value += "Command : " + command;
-  } else {
-    modalMessage.value += "Unknown task type"
+const truncateMessage = message => message && message.length > 40 ? message.slice(0, 40) + '…' : message || '-';
+const showSchedule = post => {
+  const lines = [`${t('task_type')}: ${post.task_type || '-'}`];
+  if (post.task_type === 'archive' || post.task_type === 'copy') {
+    lines.push(`${t('task_source_path')}: ${post.source_path || '-'}`, `${t('task_destination_path')}: ${post.destination_path || '-'}`);
+  } else if (post.task_type === 'housekeep') {
+    lines.push(`${t('task_destination_path')}: ${post.destination_path || '-'}`);
+  } else if (post.task_type === 'command') {
+    lines.push(`${t('task_command')}: ${post.command || '-'}`);
   }
-  isModalOpen.value = true;
+  openModal(post.schedule_name || t('list_label_task'), lines.join('\n'));
+};
+const formatDate = value => {
+  const date = parseServerTime(value);
+  return date ? date.toLocaleString(locale.value, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-';
 };
 
-
-// // ✅ Close modal
-// const closeModal = () => {
-//   isModalOpen.value = false;
-// };
-
-// ✅ Date conversion function
-const formatDate = (dateString) => {
-  const date = parseServerTime(dateString);
-  if (!date) return "-";
-  return date.toLocaleString("ja-JP", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+const setDefaultDates = () => {
+  if (!sessionMode) return;
+  const now = new Date();
+  selectedEndTime.value = localTimeValue(now);
+  selectedStartTime.value = localTimeValue(new Date(now.getTime() - 30 * 86400000));
 };
+setDefaultDates();
 
-// ✅ Fetch data from API
 const fetchPosts = async () => {
+  if (isLoading.value) return;
+  isLoading.value = true; errorMessage.value = '';
   try {
-    const response = await getRequest("/dashboard/schedule/execution_history"); // 🔹 API address changed
-    console.log(response)
-    posts.value = response || []; // ✅ Use an empty array when undefined
+    const params = sessionMode ? historyQuery(selectedStartTime.value, selectedEndTime.value) : {};
+    posts.value = await getRequest('/dashboard/schedule/execution_history', params) || [];
+    currentPage.value = 1;
   } catch (error) {
-    console.error("Error while fetching data:", error);
-  } finally {
-    isLoading.value = false;
-  }
+    posts.value = [];
+    const code = error?.code || error?.response?.data?.detail?.code;
+    errorMessage.value = t(code === 'invalid_datetime' ? 'manual_error_invalid_date_range' : manualError(error));
+  } finally { isLoading.value = false; }
 };
-
-// ✅ Call API when component is mounted
 onMounted(fetchPosts);
 
 const resetFilters = () => {
-  selectedGroup.value = "";
-  selectedSchedule.value = "";
-  selectedStartTime.value = "";
-  selectedEndTime.value = "";
-  selectedResultCode.value = "";
+  selectedGroup.value = ''; selectedSchedule.value = ''; selectedResultCode.value = '';
+  selectedStartTime.value = ''; selectedEndTime.value = '';
+  currentPage.value = 1;
+  if (sessionMode) { setDefaultDates(); fetchPosts(); }
 };
-
-
-// Sorting
-const sort = (key) => {
-  if (sortKey.value === key) {
-    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
-  } else {
-    sortKey.value = key;
-    sortOrder.value = 'asc';
-  }
-  posts.value.sort((a, b) => {
-    const modifier = sortOrder.value === 'asc' ? 1 : -1;
-    if (a[key] < b[key]) return -1 * modifier;
-    if (a[key] > b[key]) return 1 * modifier;
-    return 0;
-  });
-};
-
-
-// ✅ Return unique group list
-const uniqueGroups = computed(() => {
-  return [...new Set(posts.value.map(post => post.sg_name))];
-});
-
-// ✅ Return unique schedule names by selected group
-const filteredSchedules = computed(() => {
-  if (!selectedGroup.value) {
-    return [...new Set(posts.value.map(post => post.schedule_name))];
-  }
-  return [...new Set(posts.value.filter(post => post.sg_name === selectedGroup.value).map(post => post.schedule_name))];
-});
-
-// ✅ Return unique exit code list
-const uniqueResultCodes = computed(() => {
-  return [...new Set(posts.value.map(post => post.result_code))];
-});
-
-
-// ✅ Return filtered data
-const filteredPosts = computed(() => {
-  return posts.value.filter(post => {
-    const matchesGroup = selectedGroup.value ? post.sg_name === selectedGroup.value : true;
-    const matchesSchedule = selectedSchedule.value ? post.schedule_name === selectedSchedule.value : true;
-    const matchesStartTime = selectedStartTime.value ? new Date(post.start_time) >= new Date(selectedStartTime.value) : true;
-    const matchesEndTime = selectedEndTime.value ? new Date(post.end_time) <= new Date(selectedEndTime.value) : true;
-    const matchesResultCode = selectedResultCode.value ? post.result_code === selectedResultCode.value : true;
-
-    return matchesGroup && matchesSchedule && matchesStartTime && matchesEndTime && matchesResultCode;
-  });
-});
-
-// ✅ Pagination
-const paginatedPosts = computed(() => {
-  const start = (currentPage.value - 1) * perPage.value;
-  return filteredPosts.value.slice(start, start + perPage.value);
-});
-
-const changePage = (page) => {
-  currentPage.value = page;
-};
-
-// ✅ Panel foot range text
-const rangeStart = computed(() => (filteredPosts.value.length === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1));
+const uniqueGroups = computed(() => [...new Set(posts.value.map(post => post.sg_name))]);
+const filteredSchedules = computed(() => [...new Set(posts.value.filter(post => !selectedGroup.value || post.sg_name === selectedGroup.value).map(post => post.schedule_name))]);
+const uniqueResultCodes = computed(() => [...new Set(posts.value.map(post => post.result_code))]);
+const filteredPosts = computed(() => posts.value.filter(post => {
+  const matchesGroup = !selectedGroup.value || post.sg_name === selectedGroup.value;
+  const matchesSchedule = !selectedSchedule.value || post.schedule_name === selectedSchedule.value;
+  const matchesResultCode = selectedResultCode.value === '' || String(post.result_code) === String(selectedResultCode.value);
+  // Embedded date filtering belongs to the server; both bounds apply to start_time.
+  // Standalone keeps its existing client-side filtering of the Python response.
+  const matchesStart = sessionMode || !selectedStartTime.value || parseServerTime(post.start_time) >= new Date(selectedStartTime.value);
+  const matchesEnd = sessionMode || !selectedEndTime.value || parseServerTime(post.end_time) <= new Date(selectedEndTime.value);
+  return matchesGroup && matchesSchedule && matchesResultCode && matchesStart && matchesEnd;
+}));
+const paginatedPosts = computed(() => filteredPosts.value.slice((currentPage.value - 1) * perPage.value, currentPage.value * perPage.value));
+const changePage = page => { currentPage.value = page; };
+const rangeStart = computed(() => filteredPosts.value.length === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1);
 const rangeEnd = computed(() => Math.min(currentPage.value * perPage.value, filteredPosts.value.length));
-
+watch([selectedGroup, selectedSchedule, selectedResultCode], () => { currentPage.value = 1; });
 </script>
 
 <!--
