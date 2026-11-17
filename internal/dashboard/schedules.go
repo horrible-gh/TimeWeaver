@@ -85,7 +85,7 @@ func (s *Service) Schedules(ctx context.Context, token string) ([]Schedule, erro
 
 type scheduleLock struct {
 	group, device, deviceGroup int64
-	capabilities              string
+	capabilities               string
 }
 
 func lockSchedule(ctx context.Context, tx *sql.Tx, u access.User, id int64) (scheduleLock, error) {

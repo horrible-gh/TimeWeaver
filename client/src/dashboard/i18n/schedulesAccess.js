@@ -1,5 +1,6 @@
 export default {
  en: {
+  label_error: 'Error',
   schedule_group: 'Group', schedule_sequence: 'Order', schedule_retry: 'Retries',
   schedule_error_invalid_cron: 'Check the schedule fields and their lengths.',
   schedule_error_invalid_task: 'Check the command, paths and retention days.',
@@ -14,6 +15,7 @@ export default {
   schedule_error_forbidden: 'You do not have permission for this action.', schedule_error_invalid_request: 'Check the entered values.',
  },
  ko: {
+  label_error: '오류',
   schedule_group: '그룹', schedule_sequence: '순서', schedule_retry: '재시도',
   schedule_error_invalid_cron: '실행 시각의 값과 길이를 확인하세요.',
   schedule_error_invalid_task: '명령·경로·보관 일수를 확인하세요.',
@@ -28,6 +30,7 @@ export default {
   schedule_error_forbidden: '이 작업에 필요한 권한이 없습니다.', schedule_error_invalid_request: '입력한 값을 확인하세요.',
  },
  ja: {
+  label_error: 'エラー',
   schedule_group: 'グループ', schedule_sequence: '順序', schedule_retry: '再試行',
   schedule_error_invalid_cron: '実行時刻の値と長さを確認してください。',
   schedule_error_invalid_task: 'コマンド・パス・保存日数を確認してください。',

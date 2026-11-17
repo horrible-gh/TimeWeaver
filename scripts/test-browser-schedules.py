@@ -70,7 +70,7 @@ def main():
         expect(page.locator('#task-retry')).to_have_value('2')
         page.locator('#task-task_name').fill('browser-task-edited')
         save()
-        expect(page.get_by_text('browser-task-edited', exact=True)).to_be_visible()
+        expect(page.locator(f'tr[data-task="{tid}"]')).to_contain_text('browser-task-edited')
         # Strict write DTOs do not echo server metadata back into mutations.
         me = ctx.request.get(base + '/auth/me').json()
         listed = ctx.request.get(base + '/dashboard/tasks/get_tasks').json()
@@ -82,7 +82,7 @@ def main():
         for role in ('viewer', 'operator', 'editor'):
             limited, lp = login(role)
             lp.goto(origin + '/dashboard/schedules')
-            expect(lp.get_by_text('browser-renamed', exact=True)).to_be_visible()
+            expect(lp.locator(f'tr[data-schedule="{sid}"]')).to_contain_text('browser-renamed')
             expect(lp.get_by_text('private-eight', exact=True)).to_have_count(0)
             if role != 'editor':
                 expect(lp.get_by_role('button', name='New Schedule', exact=True)).to_have_count(0)
@@ -90,7 +90,7 @@ def main():
             data = limited.request.get(base + '/dashboard/schedule/get_schedule_groups?group_id=8').json()
             assert all(item['group_id'] == 7 for item in data)
             lp.goto(origin + '/dashboard/tasks')
-            expect(lp.get_by_text('browser-task-edited', exact=True)).to_be_visible()
+            expect(lp.locator(f'tr[data-task="{tid}"]')).to_contain_text('browser-task-edited')
             if role != 'editor':
                 expect(lp.get_by_role('button', name='Add', exact=True)).to_have_count(0)
                 expect(lp.get_by_role('button', name='Edit', exact=True)).to_have_count(0)
