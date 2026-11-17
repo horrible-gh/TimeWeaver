@@ -1,4 +1,5 @@
 <template>
+  <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
   <div class="metric-grid">
     <article class="metric">
       <div class="metric-top">
@@ -62,7 +63,7 @@
           <option v-for="status in uniqueStatuses" :key="status" :value="status">{{ status }}</option>
         </select>
         <button class="btn" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
-        <button class="btn primary" @click="openAddScheduleModal">
+        <button v-if="!sessionMode || editableGroups.length" :disabled="saving" class="btn primary" @click="openAddScheduleModal">
           <i class="ph ph-plus"></i> {{ $t('btn_new_schedule') }}
         </button>
       </div>
@@ -80,20 +81,20 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="post in paginatedPosts" :key="post.schedule_id">
+          <tr v-for="post in paginatedPosts" :key="post.schedule_id" :data-schedule="post.schedule_id">
             <td>{{ post.schedule_id }}</td>
             <td>{{ post.device_name }}</td>
             <td>{{ post.name }}</td>
             <td><span class="badge" :class="statusBadgeClass(post.status)">{{ post.status }}</span></td>
             <td>
               <div class="row-actions">
-                <button class="mini" :aria-label="$t('btn_edit')" @click="openEditModal(post)">
+                <button v-if="!sessionMode || post.can_edit" :disabled="saving" class="mini" :aria-label="$t('btn_edit')" @click="openEditModal(post)">
                   <i class="ph ph-pencil-simple"></i>
                 </button>
-                <button class="mini" :aria-label="$t('btn_run')" @click="openManualRunEditModal(post)">
+                <button v-if="!sessionMode" class="mini" :aria-label="$t('btn_run')" @click="openManualRunEditModal(post)">
                   <i class="ph ph-play"></i>
                 </button>
-                <button class="mini" :aria-label="$t('btn_remove')" @click="deleteRecord(post.schedule_id)">
+                <button v-if="!sessionMode || post.can_edit" :disabled="saving" class="mini" :aria-label="$t('btn_remove')" @click="deleteRecord(post.schedule_id)">
                   <i class="ph ph-trash"></i>
                 </button>
               </div>
@@ -113,15 +114,21 @@
   <!-- ✅ 공통 모달 사용 -->
   <ModalComponent
     :isOpen="isModalOpen"
+    :busy="saving"
     :title="isEditMode ? $t('list_label_schedule') + ' ' + $t('btn_edit') : $t('list_label_schedule') + ' ' + $t('btn_add')"
     :confirmText="$t('btn_save')"
     @close="closeModal"
     @confirm="saveSchedule"
   >
+    <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
     <div class="form-grid">
+      <div v-if="sessionMode" class="field full">
+        <label for="schedule-group">{{ $t('schedule_group') }}</label>
+        <select id="schedule-group" v-model="formControl.group_id"><option v-for="g in editableGroups" :key="g.group_id" :value="g.group_id">{{ g.group_name }}</option></select>
+      </div>
       <div class="field full">
         <label>{{ $t('schedule_name') }}</label>
-        <input type="text" v-model="formControl.name" :placeholder="$t('schedule_name') + $t('msg_enter')" />
+        <input id="schedule-name" type="text" v-model="formControl.name" :placeholder="$t('schedule_name') + $t('msg_enter')" />
       </div>
 
       <div class="field">
@@ -138,15 +145,16 @@
       </div>
       <div class="field">
         <label>{{ $t('schedule_dayofweek') }}</label>
-        <select v-model="formControl.day_of_week">
+        <select id="schedule-weekday" v-model="formControl.day_of_week">
+          <option v-if="sessionMode && !['*','0','1','2','3','4','5','6'].includes(String(formControl.day_of_week))" :value="formControl.day_of_week">{{ formControl.day_of_week }}</option>
           <option value="*">{{ $t('schedule_dayofweek_all') }}</option>
-          <option value="0">{{ $t('schedule_dayofweek_sun') }}</option>
-          <option value="1">{{ $t('schedule_dayofweek_mon') }}</option>
-          <option value="2">{{ $t('schedule_dayofweek_tue') }}</option>
-          <option value="3">{{ $t('schedule_dayofweek_wed') }}</option>
-          <option value="4">{{ $t('schedule_dayofweek_thr') }}</option>
-          <option value="5">{{ $t('schedule_dayofweek_fri') }}</option>
-          <option value="6">{{ $t('schedule_dayofweek_sat') }}</option>
+          <option :value="sessionMode ? '6' : '0'">{{ $t('schedule_dayofweek_sun') }}</option>
+          <option :value="sessionMode ? '0' : '1'">{{ $t('schedule_dayofweek_mon') }}</option>
+          <option :value="sessionMode ? '1' : '2'">{{ $t('schedule_dayofweek_tue') }}</option>
+          <option :value="sessionMode ? '2' : '3'">{{ $t('schedule_dayofweek_wed') }}</option>
+          <option :value="sessionMode ? '3' : '4'">{{ $t('schedule_dayofweek_thr') }}</option>
+          <option :value="sessionMode ? '4' : '5'">{{ $t('schedule_dayofweek_fri') }}</option>
+          <option :value="sessionMode ? '5' : '6'">{{ $t('schedule_dayofweek_sat') }}</option>
         </select>
       </div>
 
@@ -160,11 +168,12 @@
       </div>
       <div class="field">
         <label>{{ $t('schedule_second') }}</label>
-        <input type="text" v-model="formControl.second" :placeholder="$t('schedule_second') + $t('msg_enter')" />
+        <input id="schedule-second" type="text" v-model="formControl.second" :placeholder="$t('schedule_second') + $t('msg_enter')" />
       </div>
       <div class="field">
         <label>{{ $t('list_label_status') }}</label>
-        <select v-model="formControl.status">
+        <select id="schedule-status" v-model="formControl.status">
+          <option v-if="formControl.status === 'error'" value="error">{{ $t('label_error') }}</option>
           <option value="active">{{ $t('label_active') }}</option>
           <option value="inactive">{{ $t('label_inactive') }}</option>
           <option value="manual">{{ $t('label_manual') }}</option>
@@ -180,9 +189,9 @@
       </div>
       <div class="field half">
         <label>{{ $t('schedule_device') }}</label>
-        <select v-model="formControl.target_device">
+        <select id="schedule-device" v-model="formControl.target_device">
           <option disabled value="">{{ $t('schedule_device') + $t('msg_enter') }}</option>
-          <option v-for="device in deviceList" :key="device.device_id" :value="device.device_id">
+          <option v-for="device in selectableDevices" :key="device.device_id" :value="device.device_id">
             {{ device.device_name }}
           </option>
         </select>
@@ -250,11 +259,16 @@ export default {
 
 <script setup>
 import { useI18n } from "vue-i18n";
-import { ref, computed, onMounted } from "vue";
-import { getRequest, postRequest, putRequest, deleteRequest, useSort } from "@api";
+import { ref, computed, onMounted, watch } from "vue";
+import { getRequest, postRequest, putRequest, deleteRequest, useSort, sessionMode, ensureSession } from "@api";
 import ModalComponent from "../../misc/ModalComponent.vue"; // ✅ 공통 모달 컴포넌트
 import BoardPagination from "../../misc/BoardPagination.vue";
 
+import { cronDefaults, formBool, schedulePayload, scheduleError } from "@/dashboard/utils/schedulePayload.mjs";
+import { canEditGroup, devicesForGroup } from "@/dashboard/utils/devicePermissions.mjs";
+const saving = ref(false);
+const errorMessage = ref("");
+const principal = ref(null);
 const { t } = useI18n(); // ✅ i18n 함수 가져오기
 
 const posts = ref([]); // ✅ 초기값 빈 배열
@@ -273,11 +287,25 @@ const isModalOpen = ref(false);
 const isEditMode = ref(false);
 const formControl = ref({ group_id : 0, status: "active", creator: group_id,  modifier:group_id });
 const deviceList = ref([]);
+const groupList = ref([]);
+const originalTarget = ref(null);
+const originalGroup = ref(null);
+const editableGroups = computed(() => groupList.value.filter(g => (g.status === 'active' || (isEditMode.value && Number(g.group_id) === originalGroup.value)) && canEditGroup(principal.value, g.group_id)));
+const selectableDevices = computed(() => {
+  if (!sessionMode) return deviceList.value;
+  const items = devicesForGroup(deviceList.value, formControl.value.group_id).filter(d => d.can_edit);
+  const current = deviceList.value.find(d => d.can_edit && Number(d.device_id) === originalTarget.value && Number(d.group_id) === Number(formControl.value.group_id));
+  if (isEditMode.value && current && !items.some(d => d.device_id === current.device_id)) items.push(current);
+  return items;
+});
+watch(() => formControl.value.group_id, () => {
+  if (sessionMode && !selectableDevices.value.some(d => Number(d.device_id) === Number(formControl.value.target_device))) formControl.value.target_device = '';
+});
 
 // ✅ 장치 목록 가져오기
 const fetchDeviceList = async () => {
   try {
-    const response = await getRequest("/dashboard/schedule/get_devices", { group_id: 0 });
+    const response = await getRequest("/dashboard/schedule/get_devices", sessionMode ? {} : { group_id: 0 });
     deviceList.value = response || [];
   } catch (error) {
     console.error("디바이스 리스트 가져오기 실패:", error);
@@ -287,13 +315,18 @@ const fetchDeviceList = async () => {
 // ✅ 스케줄 목록 가져오기
 const fetchScheduleGroups = async () => {
   try {
-    const response = await getRequest("/dashboard/schedule/get_schedule_groups", { 'group_id': 0 });
+    const response = await getRequest("/dashboard/schedule/get_schedule_groups", sessionMode ? {} : { 'group_id': 0 });
     posts.value = response || [];
+    if (sessionMode) {
+      principal.value = (await ensureSession()).user;
+      groupList.value = await getRequest('/dashboard/groups/get_groups');
+      if (canEditGroup(principal.value, 0)) groupList.value = [{ group_id: 0, group_name: t('device_default_group'), status: 'active' }, ...groupList.value.filter(g => g.group_id !== 0)];
+    }
 
     await fetchDeviceList(); // ✅ 디바이스 목록도 불러오기
 
   } catch (error) {
-    console.error("데이터 가져오기 실패:", error);
+    errorMessage.value = t(scheduleError(error));
   } finally {
     isLoading.value = false;
   }
@@ -312,20 +345,23 @@ onMounted(() => {
 
 // ✅ 그룹 추가 모달 열기
 const openAddScheduleModal = () => {
+  if (saving.value) return;
+  errorMessage.value = '';
   isEditMode.value = false;
-  Object.assign(formControl.value, {
-    schedule_name: "",
-    status: "active",
-    creator: userId.value || "Guest",  // ✅ 수정
-    modifier: userId.value || "Guest"  // ✅ 수정
-  });
+  originalTarget.value = null; originalGroup.value = null;
+  formControl.value = { ...cronDefaults(), group_id: sessionMode ? editableGroups.value[0]?.group_id : 0, name: '', target_device: '', status: 'active', is_error_stop: '0', creator: userId.value, modifier: userId.value };
   isModalOpen.value = true;
 };
 
 // ✅ 그룹 수정 모달 열기
 const openEditModal = (schedule) => {
+  if (saving.value || (sessionMode && !schedule.can_edit)) return;
+  errorMessage.value = '';
+  formControl.value = {};
   isEditMode.value = true;
+  originalTarget.value = Number(schedule.target_device); originalGroup.value = Number(schedule.group_id);
   Object.assign(formControl.value, schedule, {
+    is_error_stop: formBool(schedule.is_error_stop) ? "1" : "0",
     modifier: userId.value || "Guest",  // ✅ 수정
     creator: schedule.creator || userId.value  // 기존 creator 유지
   });
@@ -334,36 +370,28 @@ const openEditModal = (schedule) => {
 
 // ✅ 그룹 저장 (추가 또는 수정)
 const saveSchedule = async () => {
+  if (saving.value) return;
+  saving.value = true; errorMessage.value = '';
   try {
-    // ✅ 요청 데이터 확인 (디버깅)
-    console.log("전송 데이터:", JSON.stringify(formControl.value, null, 2));
-    if (isEditMode.value) {
-      await putRequest(`/dashboard/schedule/update_schedule`, formControl.value, "json");
-    } else {
-      await postRequest(`/dashboard/schedule/insert_schedule`, formControl.value, "json");
-    }
+    const payload = sessionMode ? schedulePayload(formControl.value, isEditMode.value) : formControl.value;
+    if (isEditMode.value) await putRequest('/dashboard/schedule/update_schedule', payload, 'json');
+    else await postRequest('/dashboard/schedule/insert_schedule', payload, 'json');
+    isModalOpen.value = false;
     await fetchScheduleGroups();
-    closeModal();
-  } catch (error) {
-    console.error("그룹 저장 실패:", error);
-  }
+  } catch (error) { errorMessage.value = t(scheduleError(error)); }
+  finally { saving.value = false; }
 };
-
-
-// ✅ 그룹 삭제
-const deleteRecord = async (scheduleId) => {
-  if (confirm(t('msg_delete_schedule_name'))) {
-    try {
-      await deleteRequest(`/dashboard/schedule/remove_schedule/${scheduleId}`);
-      await fetchScheduleGroups();
-    } catch (error) {
-      console.error("그룹 삭제 실패:", error);
-    }
-  }
+const deleteRecord = async (id) => {
+  if (saving.value || !confirm(t('msg_delete_schedule_name'))) return;
+  saving.value = true; errorMessage.value = '';
+  try { await deleteRequest(`/dashboard/schedule/remove_schedule/${id}`); await fetchScheduleGroups(); }
+  catch (error) { errorMessage.value = t(scheduleError(error)); }
+  finally { saving.value = false; }
 };
 
 // ✅ 모달 닫기
 const closeModal = () => {
+  if (saving.value) return;
   isModalOpen.value = false;
 };
 
@@ -410,7 +438,7 @@ const closeManualRunModal = () => {
 const manualRun = async () => {
   try {
     // ✅ 요청 데이터 확인 (디버깅)
-    console.log("전송 데이터:", JSON.stringify(formControlManualRun.value, null, 2));
+
     await postRequest(`/dashboard/schedule/insert_manual_schedule`, formControlManualRun.value, "json");
     closeManualRunModal();
   } catch (error) {

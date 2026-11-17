@@ -1,4 +1,5 @@
 <template>
+  <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
   <div class="panel">
     <div class="panel-head">
       <div class="panel-title">
@@ -19,7 +20,7 @@
           <option v-for="status in uniqueStatuses" :key="status" :value="status">{{ status }}</option>
         </select>
         <button class="btn" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
-        <button class="btn primary" @click="openAddScheduleModal">
+        <button v-if="!sessionMode || editableSchedules.length" :disabled="saving" class="btn primary" @click="openAddScheduleModal">
           <i class="ph ph-plus"></i> {{ $t('btn_add') }}
         </button>
       </div>
@@ -38,7 +39,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="post in paginatedPosts" :key="post.detail_id">
+          <tr v-for="post in paginatedPosts" :key="post.detail_id" :data-task="post.detail_id">
             <td>{{ post.schedule_id }}</td>
             <td>{{ post.schedule_group_name }}</td>
             <td>{{ post.task_name }}</td>
@@ -46,13 +47,13 @@
             <td>{{ formatDate(post.lastest_start_time) }}</td>
             <td>
               <div class="row-actions">
-                <button class="mini" :aria-label="$t('btn_edit')" @click="openEditModal(post)">
+                <button v-if="!sessionMode || post.can_edit" :disabled="saving" class="mini" :aria-label="$t('btn_edit')" @click="openEditModal(post)">
                   <i class="ph ph-pencil-simple"></i>
                 </button>
-                <button class="mini" :aria-label="$t('btn_run')" @click="openManualRunEditModal(post);">
+                <button v-if="!sessionMode" class="mini" :aria-label="$t('btn_run')" @click="openManualRunEditModal(post);">
                   <i class="ph ph-play"></i>
                 </button>
-                <button class="mini" :aria-label="$t('btn_remove')" @click="deleteRecord(post.detail_id)">
+                <button v-if="!sessionMode || post.can_edit" :disabled="saving" class="mini" :aria-label="$t('btn_remove')" @click="deleteRecord(post.detail_id)">
                   <i class="ph ph-trash"></i>
                 </button>
               </div>
@@ -71,31 +72,34 @@
     <!-- ✅ 공통 모달 사용 -->
     <ModalComponent
       :isOpen="isModalOpen"
+    :busy="saving"
       :title="isEditMode ? $t('list_label_task') + ' ' + $t('btn_edit') : $t('list_label_task') + ' ' + $t('btn_add')"
       :confirmText="$t('btn_save')"
       @close="closeModal"
       @confirm="saveTasks"
     >
-      <div class="form-grid">
+      <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
+    <div class="form-grid">
 
         <div class="field full">
           <label>{{ $t('schedule_name') }}</label>
-          <SearchableSelect v-model="formControl.schedule_id" :items="scheduleList" label-key="name" value-key="schedule_id" :placeholder="$t('schedule_name') + $t('msg_enter')"/>
+          <select v-if="sessionMode" id="task-schedule" v-model="formControl.schedule_id"><option v-for="item in editableSchedules" :key="item.schedule_id" :value="item.schedule_id">{{ item.group_name }} / {{ item.name }}</option></select>
+          <SearchableSelect v-else v-model="formControl.schedule_id" :items="scheduleList" label-key="name" value-key="schedule_id" :placeholder="$t('schedule_name') + $t('msg_enter')"/>
         </div>
 
         <div class="field half">
           <label>{{ $t('task_name') }}</label>
-          <input type="text" v-model="formControl.task_name" :placeholder="$t('task_command') + $t('msg_enter')" />
+          <input id="task-task_name" type="text" v-model="formControl.task_name" :placeholder="$t('task_command') + $t('msg_enter')" />
         </div>
 
         <div class="field half">
           <label>{{ $t('task_command') }}</label>
-          <input type="text" v-model="formControl.command" :placeholder="$t('task_command') + $t('msg_enter')" />
+          <input id="task-command" type="text" v-model="formControl.command" :placeholder="$t('task_command') + $t('msg_enter')" />
         </div>
 
         <div class="field half">
           <label>{{ $t('task_type') }}</label>
-          <select v-model="formControl.task_type">
+          <select id="task-type" v-model="formControl.task_type">
             <option value="command">{{ $t('task_type_command') }}</option>
             <option value="archive">{{ $t('task_type_archive') }}</option>
             <option value="copy">{{ $t('task_type_copy') }}</option>
@@ -121,7 +125,7 @@
 
         <div class="field half">
           <label>{{ $t('task_sequence') }}</label>
-          <input type="number" v-model="formControl.sequence" :placeholder="$t('task_sequence') + $t('msg_enter')" min="0" max="999" @input="formControl.sequence = $event.target.value.slice(0, 3)" />
+          <input id="task-sequence" type="number" v-model="formControl.sequence" :placeholder="$t('task_sequence') + $t('msg_enter')" min="0" :max="sessionMode ? 2147483647 : 999" @input="!sessionMode && (formControl.sequence = $event.target.value.slice(0, 3))" />
         </div>
 
         <div class="field full">
@@ -131,30 +135,32 @@
 
         <div class="field full">
           <label>{{ $t('task_destination_path') }}</label>
-          <input type="text" v-model="formControl.destination_path" :placeholder="$t('task_destination_path') + $t('msg_enter')" />
+          <input id="task-destination_path" type="text" v-model="formControl.destination_path" :placeholder="$t('task_destination_path') + $t('msg_enter')" />
         </div>
 
         <div class="field half">
           <label>{{ $t('task_house_keep_days') }}</label>
-          <input type="number" v-model="formControl.house_keep_days" :placeholder="$t('task_house_keep_days') + $t('msg_enter')" min="0" max="999" @input="formControl.house_keep_days = $event.target.value.slice(0, 3)" />
+          <input id="task-house_keep_days" type="number" v-model="formControl.house_keep_days" :placeholder="$t('task_house_keep_days') + $t('msg_enter')" min="0" max="999" @input="formControl.house_keep_days = $event.target.value.slice(0, 3)" />
         </div>
 
         <div v-if="formControl.task_type === 'housekeep'" class="field half">
           <label class="housekeep-recursive">
-            <input type="checkbox" v-model="formControl.house_keep_recursive" />
+            <input id="task-recursive" type="checkbox" v-model="formControl.house_keep_recursive" />
             <span>{{ $t('task_house_keep_recursive') }}</span>
           </label>
         </div>
 
         <div class="field half">
           <label>{{ $t('task_status') }}</label>
-          <select v-model="formControl.status">
+          <select id="task-status" v-model="formControl.status">
+          <option v-if="formControl.status === 'error'" value="error">{{ $t('label_error') }}</option>
             <option value="active">{{ $t('label_active') }}</option>
             <option value="inactive">{{ $t('label_inactive') }}</option>
             <option value="manual">{{ $t('label_manual') }}</option>
           </select>
         </div>
 
+        <div v-if="sessionMode" class="field half"><label for="task-retry">{{ $t('schedule_retry') }}</label><input id="task-retry" type="number" min="0" max="100" v-model="formControl.retry_count" /></div>
         <input type="hidden" v-model="formControl.detail_id" />
         <input type="hidden" v-model="formControl.creator" />
         <input type="hidden" v-model="formControl.modifier" />
@@ -227,12 +233,15 @@ export default {
 
 <script setup>
 import { ref, computed, onMounted, watch} from "vue";
-import { getRequest, postRequest, putRequest, deleteRequest, useSort } from "@api";
+import { getRequest, postRequest, putRequest, deleteRequest, useSort, sessionMode } from "@api";
 import ModalComponent from "../../misc/ModalComponent.vue"; // ✅ 공통 모달 컴포넌트
 import BoardPagination from "../../misc/BoardPagination.vue";
 import { useI18n } from "vue-i18n";
 import { parseServerTime } from "@/dashboard/utils/deviceStatus";
 import { housekeepOptions } from "@/dashboard/utils/housekeeping";
+import { cronDefaults, formBool, taskPayload, scheduleError } from "@/dashboard/utils/schedulePayload.mjs";
+const saving = ref(false);
+const errorMessage = ref("");
 const { t } = useI18n(); // ✅ i18n 함수 가져오기
 
 const posts = ref([]); // ✅ 초기값 빈 배열
@@ -259,6 +268,7 @@ const formControl = ref({
   house_keep_recursive: false,
 });
 const scheduleList = ref([]);
+const editableSchedules = computed(() => scheduleList.value.filter(s => s.can_edit));
 watch(() => formControl.value.task_type, (type) => {
   if (type !== "housekeep") formControl.value.house_keep_recursive = false;
 });
@@ -266,7 +276,7 @@ watch(() => formControl.value.task_type, (type) => {
 // ✅ 스케줄 목록 가져오기
 const fetchScheduleList = async () => {
   try {
-    const response = await getRequest("/dashboard/tasks/get_schedule_groups", { group_id: '%' });
+    const response = await getRequest("/dashboard/tasks/get_schedule_groups", sessionMode ? {} : { group_id: '%' });
     scheduleList.value = response || [];
   } catch (error) {
     console.error("스케줄 리스트 가져오기 실패:", error);
@@ -282,7 +292,7 @@ const fetchTasks = async () => {
     await fetchScheduleList(); // ✅ 디바이스 목록도 불러오기
 
   } catch (error) {
-    console.error("데이터 가져오기 실패:", error);
+    errorMessage.value = t(scheduleError(error));
   } finally {
     isLoading.value = false;
   }
@@ -315,25 +325,24 @@ onMounted(() => {
 
 // ✅ 그룹 추가 모달 열기
 const openAddScheduleModal = () => {
+  if (saving.value) return;
+  errorMessage.value = '';
   isEditMode.value = false;
-  Object.assign(formControl.value, {
-    schedule_name: "",
-    status: "active",
-    archive_type: null,
-    task_type: "command",
-    house_keep_recursive: false,
-    error_on_missing_source: "1",
-    creator: userId.value || "Guest",  // ✅ 수정
-    modifier: userId.value || "Guest"  // ✅ 수정
-  });
+  formControl.value = { ...cronDefaults(), schedule_id: sessionMode ? editableSchedules.value[0]?.schedule_id : 0, task_name: '', command: '', status: 'active', task_type: "command",
+    house_keep_recursive: false, archive_type: null, error_on_missing_source: '1', is_error_stop: '0', sequence: 0, retry_count: 0, creator: userId.value, modifier: userId.value };
   isModalOpen.value = true;
 };
 
 // ✅ 그룹 수정 모달 열기
 const openEditModal = (schedule) => {
+  if (saving.value || (sessionMode && !schedule.can_edit)) return;
+  errorMessage.value = '';
+  formControl.value = {};
   isEditMode.value = true;
   Object.assign(formControl.value, schedule, housekeepOptions(schedule), {
     is_immediate: "1",
+    is_error_stop: formBool(schedule.is_error_stop) ? "1" : "0",
+    error_on_missing_source: formBool(schedule.error_on_missing_source) ? "1" : "0",
     modifier: userId.value || "Guest",  // ✅ 수정
     creator: schedule.creator || userId.value  // 기존 creator 유지
   });
@@ -342,39 +351,29 @@ const openEditModal = (schedule) => {
 
 // ✅ 그룹 저장 (추가 또는 수정)
 const saveTasks = async () => {
+  if (saving.value) return;
+  saving.value = true; errorMessage.value = '';
   try {
     Object.assign(formControl.value, housekeepOptions(formControl.value));
-    // ✅ 요청 데이터 확인 (디버깅)
-    console.log("전송 데이터:", JSON.stringify(formControl.value, null, 2));
-    if (isEditMode.value) {
-      await putRequest(`/dashboard/tasks/update_task`, formControl.value, "json");
-    } else {
-      await postRequest(`/dashboard/tasks/insert_task`, formControl.value, "json");
-    }
+    const payload = sessionMode ? taskPayload(formControl.value, isEditMode.value) : formControl.value;
+    if (isEditMode.value) await putRequest('/dashboard/tasks/update_task', payload, 'json');
+    else await postRequest('/dashboard/tasks/insert_task', payload, 'json');
+    isModalOpen.value = false;
     await fetchTasks();
-    closeModal();
-  } catch (error) {
-    console.error("그룹 저장 실패:", error);
-    const code = error.response?.data?.detail?.code;
-    alert(t(code === "agent_upgrade_required" ? "msg_housekeep_agent_upgrade" : "msg_save_failed"));
-  }
+  } catch (error) { errorMessage.value = t(scheduleError(error)); }
+  finally { saving.value = false; }
 };
-
-
-// ✅ 그룹 삭제
-const deleteRecord = async (detail_id) => {
-  if (confirm(t('msg_delete_task_name'))) {
-    try {
-      await deleteRequest(`/dashboard/tasks/remove_task/${detail_id}`);
-      await fetchTasks();
-    } catch (error) {
-      console.error("그룹 삭제 실패:", error);
-    }
-  }
+const deleteRecord = async (id) => {
+  if (saving.value || !confirm(t('msg_delete_task_name'))) return;
+  saving.value = true; errorMessage.value = '';
+  try { await deleteRequest(`/dashboard/tasks/remove_task/${id}`); await fetchTasks(); }
+  catch (error) { errorMessage.value = t(scheduleError(error)); }
+  finally { saving.value = false; }
 };
 
 // ✅ 모달 닫기
 const closeModal = () => {
+  if (saving.value) return;
   isModalOpen.value = false;
 };
 
@@ -422,7 +421,7 @@ const closeManualRunModal = () => {
 const manualRun = async () => {
   try {
     // ✅ 요청 데이터 확인 (디버깅)
-    console.log("전송 데이터:", JSON.stringify(formControlManualRun.value, null, 2));
+
     await postRequest(`/dashboard/tasks/insert_manual_task`, formControlManualRun.value, "json");
     closeManualRunModal();
   } catch (error) {

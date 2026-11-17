@@ -274,18 +274,29 @@ func TestGoAgentEndToEnd(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	// The first group can run only manually; the second is one real clock trigger.
+	// Build both schedules and their paired task rows through the human service.
+	// Only the still-unported manual queue is seeded directly in this fixture.
+	management := dashboard.New(human)
 	due := time.Now().UTC().Add(10 * time.Second)
-	execSQL(`INSERT INTO schedule_group(schedule_id,name,target_device,year) VALUES(12,'manual-only',?,'2000')`, deviceID)
-	execSQL("INSERT INTO schedule_group(schedule_id,name,target_device,year,month,day,hour,minute,second) VALUES(13,'one-shot',?,?,?,?,?,?,?)", deviceID, due.Format("2006"), due.Format("1"), due.Format("2"), due.Format("15"), due.Format("4"), due.Format("5"))
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 	for i, filename := range []string{"manual.txt", "scheduled.txt"} {
-		id := strings.Repeat(fmt.Sprintf("%x", i+1), 32)
-		execSQL(`INSERT INTO schedule_detail(detail_id,schedule_id,schedule_name,sequence) VALUES(UNHEX(?),?,'test-write',1)`, id, 12+i)
+		input := dashboard.ScheduleInput{GroupID: 0, DeviceID: deviceID, Name: filename, Status: "active", CronInput: dashboard.CronInput{Year: "2000"}}
+		if i == 1 {
+			input.CronInput = dashboard.CronInput{Year: due.Format("2006"), Month: due.Format("1"), Day: due.Format("2"), Hour: due.Format("15"), Minute: due.Format("4"), Second: due.Format("5")}
+		}
+		sid, e := management.SaveSchedule(context.Background(), session, principal.CSRF, input, true)
+		if e != nil {
+			t.Fatal(e)
+		}
 		command := "printf 'executed\\n' >> " + quote(filepath.Join(dir, filename))
-		execSQL(`INSERT INTO task_detail(detail_id,task_type,command) VALUES(UNHEX(?),'command',?)`, id, command)
+		tid, e := management.SaveTask(context.Background(), session, principal.CSRF, dashboard.TaskInput{ScheduleID: sid, Name: "test-write", Status: "active", Type: "command", Command: &command, Sequence: 1}, true)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if i == 0 {
+			execSQL(`INSERT INTO manual_execution(manual_id,detail_id,is_immediate,status,schedule_datetime) VALUES(41,UNHEX(REPLACE(?,'-','')),1,'wait',UTC_TIMESTAMP())`, tid)
+		}
 	}
-	execSQL(`INSERT INTO manual_execution(manual_id,detail_id,is_immediate,status,schedule_datetime) VALUES(41,UNHEX(?),1,'wait',UTC_TIMESTAMP())`, strings.Repeat("1", 32))
 	wait := func(label string, condition func() bool) {
 		t.Helper()
 		deadline := time.Now().Add(35 * time.Second)

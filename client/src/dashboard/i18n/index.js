@@ -7,13 +7,14 @@ import agentSetup from './agentSetup'
 import housekeeping from './housekeeping'
 import access from './access'
 import devicesAccess from './devicesAccess'
+import schedulesAccess from './schedulesAccess'
 
 const userLocale = navigator.language.split('-')[0] || 'en';
 
 const messages = {
-  en: {...en_msg, ...agentSetup.en, ...housekeeping.en, ...access.en, ...devicesAccess.en},
-  ko: {...ko_msg, ...agentSetup.ko, ...housekeeping.ko, ...access.ko, ...devicesAccess.ko},
-  ja: {...ja_msg, ...agentSetup.ja, ...housekeeping.ja, ...access.ja, ...devicesAccess.ja}
+  en: {...en_msg, ...agentSetup.en, ...housekeeping.en, ...access.en, ...devicesAccess.en, ...schedulesAccess.en},
+  ko: {...ko_msg, ...agentSetup.ko, ...housekeeping.ko, ...access.ko, ...devicesAccess.ko, ...schedulesAccess.ko},
+  ja: {...ja_msg, ...agentSetup.ja, ...housekeeping.ja, ...access.ja, ...devicesAccess.ja, ...schedulesAccess.ja}
 };
 
 const i18n = createI18n({
