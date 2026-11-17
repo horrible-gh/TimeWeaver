@@ -4,7 +4,7 @@
       <!-- Head: title + close -->
       <div class="modal-head">
         <h3 class="modal-title">{{ title }}</h3>
-        <button class="modal-close" :aria-label="$t('btn_close')" @click="close">&times;</button>
+        <button class="modal-close" :aria-label="$t('btn_close')" @click="close" :disabled="busy">&times;</button>
       </div>
 
       <!-- Body: message and/or caller supplied markup -->
@@ -15,8 +15,8 @@
 
       <!-- Foot: cancel + optional confirm -->
       <div class="modal-foot">
-        <button class="btn" @click="close">{{ $t('btn_close') }}</button>
-        <button v-if="confirmText" class="btn primary" @click="confirmAction">
+        <button class="btn" @click="close" :disabled="busy">{{ $t('btn_close') }}</button>
+        <button v-if="confirmText" class="btn primary" @click="confirmAction" :disabled="busy">
           {{ confirmText }}
         </button>
       </div>
@@ -28,6 +28,7 @@
 import { defineProps, defineEmits } from "vue";
 
 defineProps({
+  busy: Boolean,
   isOpen: Boolean, // Whether the modal is visible
   title: String, // Modal title
   message: String, // Message

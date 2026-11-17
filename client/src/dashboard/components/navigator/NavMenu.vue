@@ -19,7 +19,8 @@
 </template>
 
 <script setup>
-import { defineEmits } from "vue";
+import { computed, defineEmits, onMounted, ref } from "vue";
+import { ensureSession, sessionMode } from "@api";
 import { useRoute } from "vue-router";
 
 defineEmits(["navigate"]);
@@ -29,7 +30,9 @@ const route = useRoute();
 // ✅ `href` keeps the previous full-page navigation behaviour untouched;
 //    `path` is the router path used only to decide the active highlight.
 //    The router base is "/dashboard/", so the two differ by that prefix.
-const groups = [
+const admin = ref(false);
+onMounted(async () => { if (sessionMode) { try { admin.value = (await ensureSession()).user.role === "admin"; } catch { admin.value = false; } } });
+const navigation = [
   {
     label: "shell_nav_workspace",
     items: [
@@ -45,11 +48,13 @@ const groups = [
   {
     label: "shell_nav_account",
     items: [
-      { label: "sub_users", icon: "ph-user", href: "#", path: null },
+      { label: "sub_users", icon: "ph-user", href: sessionMode ? "/dashboard/users" : "#", path: sessionMode ? "/users" : null },
       { label: "sub_logout", icon: "ph-lock-key-open", href: "/dashboard/logout", path: null },
     ],
   },
 ];
+
+const groups = computed(() => navigation.map(group => ({ ...group, items: group.items.filter(item => item.label !== "sub_users" || !sessionMode || admin.value) })));
 
 const isActive = (item) => item.path !== null && route.path === item.path;
 </script>

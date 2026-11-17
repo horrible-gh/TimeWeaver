@@ -231,40 +231,55 @@ func validToken(raw string) bool {
 // Future dashboard mutations must keep this authorization transaction open
 // through their writes; a separate unchecked principal is not a write permit.
 func (s *Service) sessionTx(ctx context.Context, token string) (*sql.Tx, Principal, error) {
-	empty := Principal{}
 	if !validToken(token) {
-		return nil, empty, failure(401, "unauthenticated")
+		return nil, Principal{}, failure(401, "unauthenticated")
 	}
 	tx, err := s.db.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
-		return nil, empty, unavailable()
+		return nil, Principal{}, unavailable()
 	}
-	fail := func(err error) (*sql.Tx, Principal, error) { tx.Rollback(); return nil, empty, err }
+	p, err := s.principalTx(ctx, tx, token)
+	if err != nil {
+		tx.Rollback()
+		return nil, Principal{}, err
+	}
+	return tx, p, nil
+}
+
+// principalTx uses the caller's transaction so administrative operations can
+// take the global policy lock BEFORE any user or session row locks.
+func (s *Service) principalTx(ctx context.Context, tx *sql.Tx, token string) (Principal, error) {
+	empty := Principal{}
+	if !validToken(token) {
+		return empty, failure(401, "unauthenticated")
+	}
 	hash := digest(token)
 	var id string
-	if err = tx.QueryRowContext(ctx, `SELECT user_id FROM tw_session WHERE digest=?`, hash).Scan(&id); errors.Is(err, sql.ErrNoRows) {
-		return fail(failure(401, "unauthenticated"))
-	} else if err != nil {
-		return fail(unavailable())
+	err := tx.QueryRowContext(ctx, `SELECT user_id FROM tw_session WHERE digest=?`, hash).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return empty, failure(401, "unauthenticated")
+	}
+	if err != nil {
+		return empty, unavailable()
 	}
 	u, err := loadUser(ctx, tx, id)
 	if err != nil {
-		return fail(err)
+		return empty, err
 	}
 	var version, last, expires int64
 	var csrf, fingerprint string
 	err = tx.QueryRowContext(ctx, `SELECT user_version,csrf,password_fingerprint,last_seen,expires_at FROM tw_session WHERE digest=? AND user_id=? FOR UPDATE`, hash, u.ID).Scan(&version, &csrf, &fingerprint, &last, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
-		return fail(failure(401, "unauthenticated"))
+		return empty, failure(401, "unauthenticated")
 	}
 	if err != nil {
-		return fail(unavailable())
+		return empty, unavailable()
 	}
 	now := s.now().Unix()
 	if u.status != "active" || version != u.version || !equalSecret(fingerprint, digest(u.password)) || now >= expires || now-last >= int64(s.idle.Seconds()) || now < last {
-		return fail(failure(401, "unauthenticated"))
+		return empty, failure(401, "unauthenticated")
 	}
-	return tx, Principal{u, csrf, hash}, nil
+	return Principal{u, csrf, hash}, nil
 }
 func (s *Service) Session(ctx context.Context, token string, touch bool) (Principal, error) {
 	tx, p, err := s.sessionTx(ctx, token)

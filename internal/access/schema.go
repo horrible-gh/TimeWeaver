@@ -13,7 +13,7 @@ import (
 	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 // This journal is separate from Python's frozen migrations(filename) contract.
 // A failed MySQL DDL installation is deliberately not auto-replayed.
@@ -56,6 +56,15 @@ func Status(ctx context.Context, db *store.Store) (SchemaStatus, error) {
 				r.Ready = false
 				r.State = "incomplete"
 			}
+		}
+	}
+	if r.Ready {
+		if err = db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='tw_audit' AND column_name IN ('target','detail')").Scan(&n); err != nil {
+			return r, unavailable()
+		}
+		if n != 2 {
+			r.Ready = false
+			r.State = "incomplete"
 		}
 	}
 	return r, nil
@@ -109,6 +118,9 @@ func Initialize(ctx context.Context, db *store.Store) (SchemaStatus, error) {
 	if status.Ready {
 		return status, nil
 	}
+	if status.Version == 1 && status.State == "ready" {
+		return upgradeAudit(ctx, conn)
+	}
 	if status.State != "missing" {
 		return status, errors.New("access migration is unfinished or incompatible; restore/review it before retrying")
 	}
@@ -142,7 +154,7 @@ func Initialize(ctx context.Context, db *store.Store) (SchemaStatus, error) {
 		`CREATE TABLE tw_user_auth(user_id ` + userType + ` PRIMARY KEY,status VARCHAR(16) NOT NULL DEFAULT 'active',version BIGINT NOT NULL DEFAULT 1,must_change_password BOOLEAN NOT NULL DEFAULT FALSE,password_changed_at BIGINT NULL,last_login_at BIGINT NULL,FOREIGN KEY(user_id) REFERENCES users(user_id),CHECK(status IN ('active','disabled'))) ENGINE=InnoDB`,
 		`CREATE TABLE tw_group_member(user_id ` + userType + ` NOT NULL,group_id INT NOT NULL,role VARCHAR(16) NOT NULL,PRIMARY KEY(user_id,group_id),FOREIGN KEY(user_id) REFERENCES users(user_id),FOREIGN KEY(group_id) REFERENCES ` + "`groups`" + `(group_id),CHECK(role IN ('viewer','operator','editor'))) ENGINE=InnoDB`,
 		`CREATE TABLE tw_session(digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,user_id ` + userType + ` NOT NULL,user_version BIGINT NOT NULL,csrf CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,password_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,created_at BIGINT NOT NULL,last_seen BIGINT NOT NULL,expires_at BIGINT NOT NULL,auth_method VARCHAR(16) NOT NULL,INDEX tw_session_user(user_id),INDEX tw_session_expiry(expires_at),FOREIGN KEY(user_id) REFERENCES users(user_id)) ENGINE=InnoDB`,
-		`CREATE TABLE tw_audit(id BIGINT AUTO_INCREMENT PRIMARY KEY,at BIGINT NOT NULL,actor VARCHAR(50) NOT NULL,action VARCHAR(40) NOT NULL,result VARCHAR(16) NOT NULL) ENGINE=InnoDB`,
+		`CREATE TABLE tw_audit(id BIGINT AUTO_INCREMENT PRIMARY KEY,at BIGINT NOT NULL,actor VARCHAR(50) NOT NULL,action VARCHAR(40) NOT NULL,result VARCHAR(16) NOT NULL,target VARCHAR(255) NOT NULL DEFAULT '',detail TEXT NULL) ENGINE=InnoDB`,
 		`CREATE TABLE tw_login_attempt(key_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,count INT NOT NULL,started BIGINT NOT NULL,INDEX tw_attempt_expiry(started)) ENGINE=InnoDB`,
 	}
 	for i, ddl := range ddls {
@@ -165,6 +177,38 @@ func Initialize(ctx context.Context, db *store.Store) (SchemaStatus, error) {
 		return empty, unavailable()
 	}
 	if err = tx.Commit(); err != nil {
+		return empty, unavailable()
+	}
+	return SchemaStatus{true, schemaVersion, "ready", false}, nil
+}
+
+// Upgrade only the known v1 shape. MySQL DDL commits implicitly; record running
+// first, never silently retry partial DDL, and do not recreate memberships.
+func upgradeAudit(ctx context.Context, conn *sql.Conn) (SchemaStatus, error) {
+	empty := SchemaStatus{}
+	var n int
+	for _, table := range accessTables {
+		if conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=?", table).Scan(&n) != nil {
+			return empty, unavailable()
+		}
+		if n != 1 {
+			return empty, errors.New("incomplete v1 access schema; inspect before upgrading")
+		}
+	}
+
+	if conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='tw_audit' AND column_name IN ('target','detail')").Scan(&n) != nil {
+		return empty, unavailable()
+	}
+	if n != 0 {
+		return empty, errors.New("unexpected v1 audit shape; inspect before upgrading")
+	}
+	if _, err := conn.ExecContext(ctx, "UPDATE tw_access_schema SET version=2,state='running' WHERE id=1 AND version=1 AND state='ready'"); err != nil {
+		return empty, unavailable()
+	}
+	if _, err := conn.ExecContext(ctx, "ALTER TABLE tw_audit ADD COLUMN target VARCHAR(255) NOT NULL DEFAULT '', ADD COLUMN detail TEXT NULL"); err != nil {
+		return empty, errors.New("audit upgrade stopped; partial DDL must be inspected before retrying")
+	}
+	if _, err := conn.ExecContext(ctx, "UPDATE tw_access_schema SET state='ready' WHERE id=1 AND version=2"); err != nil {
 		return empty, unavailable()
 	}
 	return SchemaStatus{true, schemaVersion, "ready", false}, nil

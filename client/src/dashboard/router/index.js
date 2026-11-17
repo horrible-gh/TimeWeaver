@@ -8,7 +8,10 @@ import TasksOverviewForm from "@/dashboard/components/contents/tasks/TasksOvervi
 import ManualExecutionOverviewForm from "@/dashboard/components/contents/manual_execution/ManualExecutionHistory.vue";  // Main page
 import { ensureSession, logout, sessionMode } from "@api";
 
+import UsersOverview from "@/dashboard/components/contents/users/UsersOverview.vue";
+
 const routes = [
+  ...(sessionMode ? [{ path: "/users", component: UsersOverview, meta: { admin: true } }] : []),
   { path: "/", component: DashboardForm },
   { path: "/schedule-history", component: ScheduleHistoryForm },
   { path: "/groups", component: GroupsOverviewForm },
@@ -33,6 +36,7 @@ router.beforeEach(async (to) => {
       if (current.user.must_change_password) {
         window.location.href = "/login?password=required"; return false;
       }
+      if (to.meta.admin && current.user.role !== "admin") return { path: "/groups" };
       return true;
     } catch { return false; }
   }

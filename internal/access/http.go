@@ -158,6 +158,10 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, failure(404, "not_found"))
 		return
 	}
+	if strings.HasPrefix(p, h.base+"/dashboard/") {
+		h.management(w, r)
+		return
+	}
 	wanted := "POST"
 	switch p {
 	case h.base + "/login", h.base + "/logout", h.base + "/auth/password":

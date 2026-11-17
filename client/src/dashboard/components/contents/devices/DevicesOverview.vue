@@ -74,7 +74,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { getRequest } from "@api";
+import { getRequest, sessionMode } from "@api";
 import DeviceList from "@/dashboard/components/contents/devices/DeviceList.vue";
 import DeviceSummary from "@/dashboard/components/contents/devices/DeviceSummary.vue";
 import EnrollmentPanel from "@/dashboard/components/contents/devices/EnrollmentPanel.vue";
@@ -171,6 +171,7 @@ async function loadHistory() {
 }
 
 async function probeAdmin() {
+  if (sessionMode) { roleState.value = "readOnly"; await loadGroups(); return; }
   roleState.value = "unknown";
   historyLoading.value = true;
   historyError.value = null;

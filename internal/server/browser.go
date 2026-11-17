@@ -11,6 +11,7 @@ import (
 
 	"github.com/horrible-gh/TimeWeaver/internal/access"
 	"github.com/horrible-gh/TimeWeaver/internal/config"
+	"github.com/horrible-gh/TimeWeaver/internal/dashboard"
 	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
@@ -19,7 +20,8 @@ import (
 // origin. Dashboard data APIs and the production serve CLI are still gated.
 type BrowserSurface struct {
 	*AgentSurface
-	human http.Handler
+	human     http.Handler
+	dashboard http.Handler
 }
 
 func NewBrowserSurface(ctx context.Context, db, probe *store.Store, settings config.Settings, ui http.Handler, logger *slog.Logger, options access.HTTPOptions) (*BrowserSurface, error) {
@@ -36,7 +38,7 @@ func NewBrowserSurface(ctx context.Context, db, probe *store.Store, settings con
 	if err != nil {
 		return nil, err
 	}
-	return &BrowserSurface{a, h}, nil
+	return &BrowserSurface{a, h, dashboard.NewHTTP(human, h, settings.Context)}, nil
 }
 func (s *BrowserSurface) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !validPath(r) {
@@ -48,6 +50,14 @@ func (s *BrowserSurface) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case s.context + "/login", s.context + "/logout", s.context + "/auth/me", s.context + "/auth/methods", s.context + "/auth/password":
 		s.human.ServeHTTP(w, r)
 	default:
+		if strings.HasPrefix(p, s.context+"/dashboard/users") || strings.HasPrefix(p, s.context+"/dashboard/groups/") {
+			s.human.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(p, s.context+"/dashboard/") {
+			s.dashboard.ServeHTTP(w, r)
+			return
+		}
 		s.AgentSurface.ServeHTTP(w, r)
 	}
 }

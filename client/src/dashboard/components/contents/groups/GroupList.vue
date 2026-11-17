@@ -6,12 +6,13 @@
         <p>{{ $t('groups_list_desc') }}</p>
       </div>
       <div class="toolbar">
-        <button class="btn primary" @click="openAddGroupModal">
+        <button v-if="canManage" class="btn primary" @click="openAddGroupModal">
           <i class="ph ph-plus"></i> {{ $t('btn_add') }}
         </button>
       </div>
     </div>
 
+    <p v-if="errorMessage" class="security-callout error" role="alert">{{ errorMessage }}</p>
     <div class="table-scroll">
       <table v-if="paginatedPosts.length > 0">
         <thead>
@@ -28,7 +29,7 @@
             <td>{{ post.group_name }}</td>
             <td><span class="badge" :class="statusBadgeClass(post.status)">{{ post.status }}</span></td>
             <td>
-              <div class="row-actions">
+              <div v-if="canManage" class="row-actions">
                 <button class="mini" :aria-label="$t('btn_edit')" @click="openEditGroupModal(post)">
                   <i class="ph ph-pencil-simple"></i>
                 </button>
@@ -50,12 +51,14 @@
 
     <!-- ✅ Use shared modal -->
     <ModalComponent
+      :busy="busy"
       :isOpen="isModalOpen"
       :title="isEditMode ? $t('list_label_group') + ' ' + $t('btn_edit') : $t('list_label_group') + ' ' + $t('btn_add')"
       :confirmText="$t('btn_save')"
       @close="closeModal"
       @confirm="saveGroup"
     >
+      <p v-if="errorMessage" class="security-callout error" role="alert">{{ errorMessage }}</p>
       <div class="form-grid">
         <div class="field full">
           <label>{{ $t('list_label_group') }}</label>
@@ -95,12 +98,16 @@ export default {
 <script setup>
 import { useI18n } from "vue-i18n";
 import { ref, computed, onMounted } from "vue";
-import { getRequest, postRequest, putRequest, deleteRequest, useSort } from "@api";
+import { getRequest, postRequest, putRequest, deleteRequest, useSort, ensureSession, sessionMode } from "@api";
 import ModalComponent from "../../misc/ModalComponent.vue"; // ✅ Shared modal component
 import BoardPagination from "../../misc/BoardPagination.vue";
 
-const { t } = useI18n(); // ✅ Get i18n function
+const { t, te } = useI18n(); // ✅ Get i18n function
 
+const canManage = ref(!sessionMode);
+const busy = ref(false);
+const errorMessage = ref('');
+function describeError(error) { const key = "access_error_" + error.response?.data?.detail?.code; return te(key) ? t(key) : t("access_failed"); }
 const posts = ref([]); // ✅ Initial value is an empty array
 const { sortKey, sortOrder, sort } = useSort(posts);
 const isLoading = ref(true);
@@ -120,16 +127,20 @@ const fetchGroups = async () => {
     const response = await getRequest("/dashboard/groups/get_groups");
     posts.value = response || [];
   } catch (error) {
-    console.error("Failed to fetch data:", error);
+    errorMessage.value = describeError(error);
   } finally {
     isLoading.value = false;
   }
 };
 
-onMounted(fetchGroups);
+onMounted(async () => {
+  if (sessionMode) { try { canManage.value = (await ensureSession()).user.role === "admin"; } catch { return; } }
+  await fetchGroups();
+});
 
 // ✅ Open add group modal
 const openAddGroupModal = () => {
+  errorMessage.value = "";
   isEditMode.value = false;
   Object.assign(formGroup.value, {
     group_name: "",
@@ -142,6 +153,7 @@ const openAddGroupModal = () => {
 
 // ✅ Open edit group modal
 const openEditGroupModal = (group) => {
+  errorMessage.value = "";
   isEditMode.value = true;
   Object.assign(formGroup.value, group, {
     modifier: user_id,
@@ -152,37 +164,36 @@ const openEditGroupModal = (group) => {
 
 // ✅ Save group, add or update
 const saveGroup = async () => {
+  if (busy.value) return;
+  busy.value = true; errorMessage.value = "";
   try {
-    // ✅ Check request data for debugging
-    console.log("Payload:", JSON.stringify(formGroup.value, null, 2));
-    if (isEditMode.value) {
-      await putRequest(`/dashboard/groups/update_group`, formGroup.value, "json");
-    } else {
-      await postRequest(`/dashboard/groups/insert_group`, formGroup.value, "json");
-    }
+    const body = sessionMode ? { group_name: formGroup.value.group_name, status: formGroup.value.status, ...(isEditMode.value ? { group_id: formGroup.value.group_id } : {}) } : formGroup.value;
+    if (isEditMode.value) await putRequest('/dashboard/groups/update_group', body, 'json');
+    else await postRequest('/dashboard/groups/insert_group', body, 'json');
+    isModalOpen.value = false;
     await fetchGroups();
-    closeModal();
-  } catch (error) {
-    console.error("Failed to save group:", error);
-  }
+  } catch (error) { errorMessage.value = describeError(error); }
+  finally { busy.value = false; }
 };
-
 
 // ✅ Delete group
 const deleteGroup = async (groupId) => {
-  if (confirm(t('msg_delete_group_name'))) {
+  if (busy.value) return;
+  if (confirm(t(sessionMode ? 'access_group_delete' : 'msg_delete_group_name'))) {
+    busy.value = true; errorMessage.value = '';
     try {
       await deleteRequest(`/dashboard/groups/remove_group/${groupId}`);
       await fetchGroups();
     } catch (error) {
-      console.error("Delete group failure:", error);
-    }
+      errorMessage.value = describeError(error);
+    } finally { busy.value = false; }
   }
 };
 
 // ✅ Close modal
 const closeModal = () => {
-  isModalOpen.value = false;
+  if (busy.value) return;
+  isModalOpen.value = false; errorMessage.value = "";
 };
 
 // ✅ Pagination

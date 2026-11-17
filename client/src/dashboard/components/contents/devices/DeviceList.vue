@@ -25,7 +25,7 @@
         <button class="btn" :aria-label="$t('btn_refresh')" @click="$emit('refresh')">
           <i class="ph ph-arrow-clockwise"></i> {{ $t('btn_refresh') }}
         </button>
-        <button class="btn" :title="$t('hint_add_device_manual')" @click="openAddDeviceModal">
+        <button v-if="!sessionMode" class="btn" :title="$t('hint_add_device_manual')" @click="openAddDeviceModal">
           <i class="ph ph-plus"></i> {{ $t('btn_add_device_manual') }}
         </button>
         <button
@@ -77,7 +77,7 @@
               <th @click="sort('last_heartbeat_at')">
                 {{ $t('list_label_last_heartbeat_at') }}<span class="sort-arrow">{{ sortMark('last_heartbeat_at') }}</span>
               </th>
-              <th>{{ $t('list_label_actions') }}</th>
+              <th v-if="!sessionMode || showEnrollment">{{ $t('list_label_actions') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -97,11 +97,11 @@
                 <span class="badge" :class="stateBadgeClass(device)">{{ $t('device_state_' + state(device)) }}</span>
                 <small v-if="reasonText(device)" class="state-reason">{{ reasonText(device) }}</small>
               </td>
-              <td>{{ groupName || userGroupId }}</td>
+              <td>{{ device.group_name || device.group_id || groupName || userGroupId }}</td>
               <td>{{ device.version || '—' }}</td>
               <td :title="device.last_login_at || ''">{{ relative(device.last_login_at) }}</td>
               <td :title="device.last_heartbeat_at || ''">{{ relative(device.last_heartbeat_at) }}</td>
-              <td>
+              <td v-if="!sessionMode || showEnrollment">
                 <div class="row-actions">
                   <button
                     v-if="showEnrollment"
@@ -112,10 +112,10 @@
                   >
                     <i class="ph ph-key"></i>
                   </button>
-                  <button class="mini" :aria-label="$t('btn_edit')" @click="openEditDeviceModal(device)">
+                  <button v-if="!sessionMode" class="mini" :aria-label="$t('btn_edit')" @click="openEditDeviceModal(device)">
                     <i class="ph ph-pencil-simple"></i>
                   </button>
-                  <button class="mini" :aria-label="$t('btn_remove')" @click="removeDevice(device.device_id)">
+                  <button v-if="!sessionMode" class="mini" :aria-label="$t('btn_remove')" @click="removeDevice(device.device_id)">
                     <i class="ph ph-trash"></i>
                   </button>
                 </div>
@@ -167,7 +167,7 @@
 <script setup>
 import { computed, defineEmits, defineProps, onUnmounted, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { deleteRequest, postRequest, putRequest } from "@api";
+import { deleteRequest, postRequest, putRequest, sessionMode } from "@api";
 import BoardPagination from "@/dashboard/components/misc/BoardPagination.vue";
 import ModalComponent from "@/dashboard/components/misc/ModalComponent.vue";
 import { DEVICE_PAGE_SIZE, NEW_DEVICE_HIGHLIGHT_MS, SEARCH_DEBOUNCE_MS } from "@/dashboard/constants/enrollment";
