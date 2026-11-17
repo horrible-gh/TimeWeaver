@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +78,26 @@ func TestHistoryQueryPreservesRecordedIdentityAndFailsClosed(t *testing.T) {
 		}
 		if role == "user" && (!strings.Contains(q, "scope_sg.schedule_id>0 AND scope_device.device_id>0") || !strings.Contains(q, "(1=0)")) {
 			t.Fatal("unresolved ownership or an unauthenticated identity could grant a scope", q)
+		}
+	}
+}
+
+func TestHistoryQueryIsIdenticalForWindowsAndUnixCheckouts(t *testing.T) {
+	raw, err := businessQueries.Get("get_execution_logs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lf := strings.ReplaceAll(raw, "\r\n", "\n")
+	crlf := strings.ReplaceAll(lf, "\n", "\r\n")
+	for _, role := range []string{"admin", "user"} {
+		u := access.User{Role: role}
+		want, wantArgs, err := scopeHistoryQuery(lf, u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, args, err := scopeHistoryQuery(crlf, u)
+		if err != nil || got != want || !reflect.DeepEqual(args, wantArgs) {
+			t.Fatal("Windows line endings changed the scoped history query", err)
 		}
 	}
 }

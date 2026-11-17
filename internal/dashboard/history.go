@@ -41,6 +41,13 @@ func historyQuery(u access.User) (string, []any, error) {
 	if err != nil {
 		return "", nil, fail(503, "unavailable")
 	}
+	return scopeHistoryQuery(q, u)
+}
+
+func scopeHistoryQuery(q string, u access.User) (string, []any, error) {
+	// Windows checkouts can embed CRLF. Normalize the derived query in memory;
+	// the frozen SQL source stays byte-for-byte unchanged on every platform.
+	q = strings.ReplaceAll(q, "\r\n", "\n")
 	// Derive the read from the frozen catalog without altering its bytes. Match
 	// the recorded parent as well as detail ID, so a legacy move cannot reveal
 	// another group's current command/path or make its old history visible.
