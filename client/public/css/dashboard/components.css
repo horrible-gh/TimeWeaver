@@ -636,6 +636,13 @@ button:disabled {
   inset: 0;
 }
 
+.chart-state {
+  display: grid;
+  place-items: center;
+  color: var(--muted-2);
+  font-size: 12px;
+}
+
 .tile-foot {
   margin-top: 12px;
   color: var(--muted-2);

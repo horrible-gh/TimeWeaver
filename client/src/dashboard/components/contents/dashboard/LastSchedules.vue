@@ -1,20 +1,20 @@
 <template>
-  <div class="panel">
+  <div class="panel" :aria-busy="loading">
     <div class="panel-head">
       <div class="panel-title">
-        <h2>Latest schedules</h2>
+        <h2>{{ $t('last_schedules_title') }}</h2>
         <p>{{ $t('last_schedules_desc') }}</p>
       </div>
       <div class="actions">
-        <button class="btn" @click="$emit('refresh')">
+        <button id="latest-refresh" class="btn" :disabled="loading" @click="$emit('refresh')">
           <i class="ph ph-arrow-clockwise"></i> {{ $t('btn_refresh') }}
         </button>
       </div>
     </div>
 
-    <div v-if="schedules.length === 0" class="empty-state">
-      {{ $t('schedules_list_no_datas') }}
-    </div>
+    <div v-if="loading" class="empty-state">{{ $t('msg_loading') }}</div>
+    <div v-else-if="failed" class="empty-state">{{ $t('dashboard_unavailable') }}</div>
+    <div v-else-if="schedules.length === 0" class="empty-state">{{ $t('dashboard_no_data') }}</div>
     <div class="table-scroll" v-else>
       <table>
         <thead>
@@ -28,14 +28,14 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="schedule in schedules" :key="schedule.schedule_id">
+          <tr v-for="schedule in schedules" :key="schedule.schedule_id" :data-latest-schedule="schedule.schedule_id">
             <td>
               <div class="device-name">
                 <span class="device-glyph"><i class="ph ph-hard-drives"></i></span>
                 <span>{{ schedule.device_name }}</span>
               </div>
             </td>
-            <td>{{ schedule.sg_name }} · {{ schedule.task_count }} Tasks</td>
+            <td>{{ schedule.sg_name }} · {{ $t('last_schedules_tasks', { n: schedule.task_count }) }}</td>
             <td>
               <span class="badge" :class="statusBadgeClass(schedule.custom_status)">
                 {{ statusLabel(schedule.custom_status) }}
@@ -43,13 +43,13 @@
             </td>
             <td>{{ formatDateTime(schedule.group_start_time) }}</td>
             <td>{{ formatDateTime(schedule.group_end_time) }}</td>
-            <td>{{ schedule.error_summary }}</td>
+            <td>{{ schedule.error_summary || '—' }}</td>
           </tr>
         </tbody>
       </table>
     </div>
-    <div class="panel-foot">
-      <span>{{ $t('last_schedules_updated', { t: lastUpdated }) }}</span>
+    <div v-if="lastUpdated && !loading && !failed" class="panel-foot">
+      <span id="latest-updated" :data-updated-at="updatedAt">{{ $t('last_schedules_updated', { t: lastUpdated }) }}</span>
     </div>
   </div>
 </template>
@@ -65,16 +65,18 @@ export default defineComponent({
       type: Array,
       default: () => [],
     },
+    loading: Boolean,
+    failed: Boolean,
+    updatedAt: { type: String, default: null },
   },
   emits: ["refresh"],
-  setup() {
-    const { t } = useI18n();
+  setup(props) {
+    const { t, locale } = useI18n();
 
     const formatDateTime = (dateString) => {
       const date = parseServerTime(dateString);
       if (!date) return "-";
       const parts = new Intl.DateTimeFormat("en-CA", {
-        timeZone: "Asia/Tokyo",
         year: "numeric",
         month: "2-digit",
         day: "2-digit",
@@ -91,19 +93,27 @@ export default defineComponent({
       online: status === "completed",
       danger: status === "error",
       warning: status === "warning",
+      info: status === 'in_progress' || status === 'running',
+      offline: status === 'disconnected',
     });
 
     const statusLabels = {
       completed: "exec_status_completed",
       error: "exec_status_error",
       warning: "exec_status_warning",
+      in_progress: 'exec_status_running',
+      running: 'exec_status_running',
+      disconnected: 'exec_status_disconnected',
     };
     const statusLabel = (status) => {
       const key = statusLabels[status];
-      return key ? t(key) : status;
+      return key ? t(key) : t('exec_status_unknown');
     };
 
-    const lastUpdated = computed(() => new Date().toLocaleString());
+    const lastUpdated = computed(() => {
+      const date = parseServerTime(props.updatedAt);
+      return date ? date.toLocaleString(locale.value) : '';
+    });
 
     return { formatDateTime, statusBadgeClass, statusLabel, lastUpdated };
   },

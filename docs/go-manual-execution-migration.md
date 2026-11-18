@@ -180,7 +180,8 @@ databases on loopback; test commands operate only inside temporary directories.
 Consult the commit's CI run for the actual executed result rather than treating
 this coverage description as a production-readiness claim.
 
-Charts, OS identity/login, full SQLite support, installable server startup and
+Charts are covered in [the following slice](go-chart-migration.md).
+OS identity/login, full SQLite support, installable server startup and
 deployment/rollback validation remain separate gates. Native Windows browser and
 agent lifecycle validation is still pending. Existing production service and
 main-branch cutover remain outside this slice.

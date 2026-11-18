@@ -40,14 +40,31 @@ Do not add a scheduler or push channel to the server.
 
 ## Status
 
-Implemented: read-only SHA-256 comparison of tracked legacy server/agent files
-against the pinned baseline, static route inventory, seven guard regression tests,
-and a branch CI job retaining a source snapshot and inventory as verification
-artifacts. The guard never imports the Python app or opens a database.
+Implemented slices now cover the MySQL/MariaDB store and migration preflight,
+agent identity/runtime/execution APIs, embedded Vue surface, human sessions and
+group permissions, user/group administration, device enrollment, schedules and
+tasks, manual execution and history, and scoped dashboard charts/recent schedules.
+Each slice retains its own compatibility limits and test evidence:
 
-Not yet complete: runtime response fixtures, production DB inventory, cross-server
-token/snapshot tests, complete database/API implementation, session/RBAC implementation,
-and operational cutover tests. Static inventory must not be described as runtime compatibility.
+- [Human access](go-human-access-migration.md) and [administration](go-administration-migration.md)
+- [Devices and enrollment](go-device-management-migration.md)
+- [Schedules and tasks](go-schedule-task-migration.md)
+- [Manual execution and history](go-manual-execution-migration.md)
+- [Dashboard charts and recent schedules](go-chart-migration.md)
+- [Agent identity](go-identity-migration.md), [runtime](go-runtime-migration.md)
+  and [execution](go-execution-migration.md)
+
+CI includes disposable MySQL/MariaDB integration, Python interoperability,
+embedded-browser workflows and an actual pinned Go agent. Consult the exact
+commit's workflow run for executed results; a static route inventory alone is
+not runtime compatibility. The read-only baseline guard continues to compare
+tracked legacy server/agent files and embedded SQL against the pinned baseline.
+It never imports the Python app or opens a database.
+
+Still required before production: OS identity/login, full SQLite support,
+installable server startup, production DB inventory, and deployment/rollback
+validation. `serve` remains disabled. The sections below record the foundation
+as it was introduced; newer slice documents describe subsequent implementation.
 
 Run from a full Git checkout:
 

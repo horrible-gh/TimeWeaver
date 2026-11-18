@@ -1,0 +1,32 @@
+export default {
+ en: {
+  dashboard_load_failed: 'Some dashboard data could not be loaded. Refresh to try again.', dashboard_unavailable: 'Unavailable', dashboard_no_data: 'No data',
+  metric_devices_meta: 'Active {n}',
+  metric_errors_label: 'Recent schedule errors', metric_errors_meta: 'Recent list · {n} warning(s)',
+  section_service_status_desc: 'Devices · schedules · tasks by status',
+  chart_footer_devices: 'Device status', chart_footer_schedules: 'Schedule status and recent results', chart_footer_tasks: 'Task status from the latest 24h results',
+  chart_tasks_content_title3: 'Completed',
+  last_schedules_title: 'Latest schedules', last_schedules_desc: 'Latest execution for up to 3 schedules.', last_schedules_tasks: '{n} task(s)',
+  exec_status_running: 'Running', exec_status_disconnected: 'Disconnected', exec_status_unknown: 'Unknown',
+ },
+ ko: {
+  dashboard_load_failed: '일부 현황을 불러오지 못했습니다. 새로고침해 다시 확인하세요.', dashboard_unavailable: '조회 실패', dashboard_no_data: '데이터 없음',
+  metric_devices_meta: '활성 {n}',
+  metric_errors_label: '최근 스케줄 오류', metric_errors_meta: '최근 목록 · 경고 {n}건',
+  section_service_status_desc: '장치·스케줄·작업의 상태별 현황',
+  chart_footer_devices: '장치 상태', chart_footer_schedules: '스케줄 상태와 최근 실행 결과', chart_footer_tasks: '최근 24시간 실행 결과 기준 작업 상태',
+  chart_tasks_content_title3: '완료',
+  last_schedules_title: '최근 스케줄', last_schedules_desc: '최대 3개 스케줄의 최신 실행 결과입니다.', last_schedules_tasks: '작업 {n}개',
+  exec_status_running: '진행 중', exec_status_disconnected: '연결 끊김', exec_status_unknown: '알 수 없음',
+ },
+ ja: {
+  dashboard_load_failed: '一部の状況を取得できませんでした。更新して再確認してください。', dashboard_unavailable: '取得失敗', dashboard_no_data: 'データなし',
+  metric_devices_meta: '有効 {n}',
+  metric_errors_label: '最近のスケジュールエラー', metric_errors_meta: '最近の一覧 · 警告 {n}件',
+  section_service_status_desc: 'デバイス・スケジュール・タスクの状態別集計',
+  chart_footer_devices: 'デバイスの状態', chart_footer_schedules: 'スケジュールの状態と最近の実行結果', chart_footer_tasks: '直近24時間の実行結果に基づくタスクの状態',
+  chart_tasks_content_title3: '完了',
+  last_schedules_title: '最近のスケジュール', last_schedules_desc: '最大3件のスケジュールの最新実行結果です。', last_schedules_tasks: '{n}タスク',
+  exec_status_running: '実行中', exec_status_disconnected: '切断', exec_status_unknown: '不明',
+ },
+};

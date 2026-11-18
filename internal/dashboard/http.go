@@ -47,7 +47,7 @@ func NewHTTP(service *access.Service, guard *access.HTTP, base string) http.Hand
 	s := New(service)
 	return guard.Guard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(strings.TrimSuffix(r.URL.Path, "/"), base)
-		if s.scheduleHTTP(w, r, path) || s.manualHTTP(w, r, path) {
+		if s.scheduleHTTP(w, r, path) || s.manualHTTP(w, r, path) || s.chartHTTP(w, r, path) {
 			return
 		}
 		allowed := ""
