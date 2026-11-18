@@ -29,7 +29,11 @@ func NewBrowserSurface(ctx context.Context, db, probe *store.Store, settings con
 	if err != nil {
 		return nil, err
 	}
-	human, err := access.New(ctx, db, settings.IdleTimeout)
+	var provider access.OSAuthenticator
+	if settings.OSLoginEnabled {
+		provider = access.NewOSAuthenticator()
+	}
+	human, err := access.NewWithOS(ctx, db, settings.IdleTimeout, provider)
 	if err != nil {
 		return nil, err
 	}

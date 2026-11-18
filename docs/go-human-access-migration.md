@@ -4,6 +4,11 @@ Branch: `feature/go-server-unified`, following `c17fec3`. This slice does not
 unlock production `serve`. The deployed server, main branch, original Python
 sources/SQL and separate agent repository are unchanged.
 
+This document records the local-session foundation. The subsequent
+[OS account slice](go-os-access-migration.md) adds native Linux/Windows login and
+access schema v3; the local password, cookie and group-permission rules continue
+to apply.
+
 ## Implemented
 
 - `internal/access` verifies existing passlib PBKDF2-SHA256 passwords without

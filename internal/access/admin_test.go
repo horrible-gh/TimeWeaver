@@ -244,6 +244,10 @@ func TestMySQLAdministrationAuditFailureIsAtomic(t *testing.T) {
 func TestMySQLAccessV1UpgradePreservesSessionsAndRemovedGrants(t *testing.T) {
 	s, _, token := adminFixture(t)
 	ctx := context.Background()
+	// Reconstruct the old v1 layout from the current initialized fixture.
+	if _, err := s.db.DB.Exec("DROP TABLE tw_user_identity"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.db.DB.Exec("DELETE FROM tw_group_member WHERE user_id='reader'"); err != nil {
 		t.Fatal(err)
 	}
@@ -257,8 +261,8 @@ func TestMySQLAccessV1UpgradePreservesSessionsAndRemovedGrants(t *testing.T) {
 	if err != nil || status.Ready || status.Version != 1 {
 		t.Fatal(status, err)
 	}
-	if _, err = Initialize(ctx, s.db); err != nil {
-		t.Fatal(err)
+	if status, err = Initialize(ctx, s.db); err != nil || !status.Ready || status.Version != 3 {
+		t.Fatal("v1-to-v3 upgrade failed", status, err)
 	}
 	if _, err = s.Session(ctx, token, false); err != nil {
 		t.Fatal("upgrade revoked session", err)

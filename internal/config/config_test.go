@@ -72,6 +72,38 @@ func TestEnvironmentOverridesAndSecretsAreNotSerialized(t *testing.T) {
 		}
 	}
 }
+
+func TestOSLoginConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name, fileValue, environment string
+		want, invalid                bool
+	}{
+		{name: "enabled by default", want: true},
+		{name: "disabled in file", fileValue: "false"},
+		{name: "environment overrides file", fileValue: "true", environment: "false"},
+		{name: "invalid value fails closed", fileValue: "maybe", invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			extra := ""
+			if tc.fileValue != "" {
+				extra = "OS_LOGIN_ENABLED=" + tc.fileValue + "\n"
+			}
+			s, err := Load(settingsFile(t, extra), func(key string) (string, bool) {
+				return tc.environment, key == "OS_LOGIN_ENABLED" && tc.environment != ""
+			})
+			if tc.invalid {
+				if err == nil || !strings.Contains(err.Error(), "OS_LOGIN_ENABLED") {
+					t.Fatalf("invalid OS login configuration was not rejected: %v", err)
+				}
+				return
+			}
+			if err != nil || s.OSLoginEnabled != tc.want {
+				t.Fatalf("OS login configuration: enabled=%v, error=%v", s.OSLoginEnabled, err)
+			}
+		})
+	}
+}
+
 func TestInvalidSettings(t *testing.T) {
 	for _, extra := range []string{"CONTEXT=/dashboard/api\n", "CONTEXT=\n", "CONTEXT=/time_weaver/\n", "DB_TYPE=other\n", "DB_PATH=:memory:\n", "LISTEN_PORT=0\n", "LISTEN_PORT=65536\n", "LISTEN_HOST=http://localhost\n", "DB_TYPE=mysql\n", "ACCESS_TOKEN_EXPIRE_MINUTES=-1\n", "AGENT_SECRET_KEY=short\n"} {
 		t.Run(strings.Split(extra, "=")[0], func(t *testing.T) {

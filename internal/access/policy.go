@@ -26,8 +26,11 @@ type User struct {
 	GroupID            int64        `json:"group_id"`
 	Groups             []Membership `json:"groups"`
 	MustChangePassword bool         `json:"must_change_password"`
+	AuthMethod         string       `json:"auth_method"`
+	OSName             string       `json:"os_name,omitempty"`
 	version            int64
 	password, status   string
+	osSubject          string
 }
 type Principal struct {
 	User    User   `json:"user"`

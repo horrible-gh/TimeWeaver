@@ -89,6 +89,16 @@ jobs:
           git diff --exit-code -- go.mod go.sum
       - run: go test ./...
       - run: go vet ./...
+      - name: Verify native Linux OS authentication with disposable accounts
+        if: runner.os == 'Linux'
+        timeout-minutes: 3
+        shell: bash
+        run: bash scripts/test-native-os-auth-linux.sh
+      - name: Verify native Windows OS authentication with disposable accounts
+        if: runner.os == 'Windows'
+        timeout-minutes: 3
+        shell: pwsh
+        run: ./scripts/test-native-os-auth-windows.ps1
       - name: Validate the real embedded Vue bundle
         run: go run ./cmd/timeweaver assets-check --context /timeweaver_svr
       - name: Race and formatting checks
@@ -174,7 +184,7 @@ jobs:
       - name: Exercise human sessions through the real embedded Vue UI
         env:
           TIMEWEAVER_BROWSER_ACCESS: '1'
-        run: go test -race -count=1 -timeout=600s -v ./internal/server -run 'TestBrowser(Session|Administration|Devices|Schedules|Manual|Charts)Flow'
+        run: go test -race -count=1 -timeout=720s -v ./internal/server -run 'TestBrowser(Session|Administration|Devices|Schedules|Manual|Charts|OS)Flow'
       - name: Compare Python and Go migrations on disposable databases
         run: python scripts/test-go-store-compat.py artifacts/timeweaver-store
       - name: Cross-check identity with the frozen Python service

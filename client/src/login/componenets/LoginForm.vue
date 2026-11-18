@@ -6,13 +6,20 @@
         <strong>TimeWeaver</strong><span>{{ changing ? text.change : $t('title') }}</span>
       </div>
       <form class="form-grid" @submit.prevent="submit">
+        <div class="field full" v-if="sessionMode && !changing && loginMethods.includes('os')">
+          <label for="auth-method">{{ text.method }}</label>
+          <select id="auth-method" v-model="method" :disabled="isLoading" @change="changeMethod">
+            <option value="local">{{ text.local }}</option>
+            <option value="os">{{ text.os }}</option>
+          </select>
+        </div>
         <div class="field full" v-if="!changing">
-          <label for="auth-id">ID</label>
-          <input id="auth-id" name="username" v-model="id" autocomplete="username" placeholder="ID" required />
+          <label for="auth-id">{{ method === 'os' ? text.osAccount : 'ID' }}</label>
+          <input id="auth-id" name="username" v-model="id" :disabled="isLoading" autocomplete="username" :placeholder="method === 'os' ? text.osAccount : 'ID'" :maxlength="method === 'os' ? 256 : 50" required />
         </div>
         <div class="field full">
           <label for="auth-password">{{ changing ? text.current : $t('password') }}</label>
-          <input id="auth-password" name="password" type="password" v-model="password" autocomplete="current-password" required />
+          <input id="auth-password" name="password" type="password" v-model="password" :disabled="isLoading" autocomplete="current-password" required />
         </div>
         <template v-if="changing">
           <div class="field full">
@@ -41,13 +48,14 @@
   </div>
 </template>
 <script>
-import { login, ensureSession, changePassword, sessionMode } from "@api";
+import { login, ensureSession, changePassword, sessionMode, getLoginMethods } from "@api";
 import { sessionMessages } from "../../../session.mjs";
 export default {
   name: 'LoginForm',
-  data: () => ({ id: '', password: '', nextPassword: '', confirmation: '', changing: false, isLoading: false, error: '', notice: '', sessionMode }),
+  data: () => ({ id: '', password: '', nextPassword: '', confirmation: '', changing: false, isLoading: false, error: '', notice: '', method: 'local', loginMethods: ['local'], sessionMode }),
   computed: { text() { return sessionMessages[this.$i18n.locale] || sessionMessages.en; } },
   async mounted() {
+    const methodsRequest = sessionMode ? getLoginMethods().then(methods => { this.loginMethods = methods; }).catch(() => { this.loginMethods = ['local']; }) : Promise.resolve();
     if (sessionMode && new URLSearchParams(window.location.search).get('password') === 'required') {
       try {
         const data = await ensureSession();
@@ -56,8 +64,10 @@ export default {
         if (this.changing) this.notice = this.text.required;
       } catch { this.error = this.text.unavailable; }
     }
+    await methodsRequest;
   },
   methods: {
+    changeMethod() { this.id = ''; this.password = ''; this.error = ''; this.notice = ''; },
     async submit() {
       if (this.isLoading) return;
       this.error = '';
@@ -70,7 +80,7 @@ export default {
           this.password = ''; this.nextPassword = ''; this.confirmation = '';
           window.history.replaceState(null, '', '/login');
         } else {
-          const data = await login(this.id, this.password);
+          const data = await login(this.id, this.password, this.method);
           this.password = '';
           if (sessionMode && data.user.must_change_password) {
             this.changing = true; this.notice = this.text.required;
@@ -78,11 +88,12 @@ export default {
         }
       } catch (error) {
         const code = error.response?.data?.detail?.code;
-        if (code === 'login_limited') this.error = this.text.limited;
+        if (code === 'os_login_unavailable') this.error = this.text.osUnavailable;
+        else if (code === 'login_limited') this.error = this.text.limited;
         else if (code === 'password_policy' || code === 'password_unchanged') this.error = this.text.policy;
         else if (!error.response || error.response.status >= 500) this.error = this.text.unavailable;
         else this.error = this.$t('login_failed');
-      } finally { this.isLoading = false; }
+      } finally { if (this.method === 'os') this.password = ''; this.isLoading = false; }
     },
     register() { alert('Go to the registration page'); },
     forgot() { alert('Show password recovery page'); },

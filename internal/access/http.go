@@ -200,7 +200,7 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	r = r.WithContext(ctx)
 	if p == h.base+"/auth/methods" {
-		jsonReply(w, 200, map[string]any{"methods": []string{"local"}})
+		jsonReply(w, 200, map[string]any{"methods": h.service.Methods()})
 		return
 	}
 	if p == h.base+"/login" || p == h.base+"/auth/password" {
@@ -225,11 +225,15 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		form, err := url.ParseQuery(string(b))
-		if err != nil || len(form["username"]) != 1 || len(form["password"]) != 1 || len(form["method"]) > 1 || (form.Get("method") != "" && form.Get("method") != "local") {
+		if err != nil || len(form["username"]) != 1 || len(form["password"]) != 1 || len(form["method"]) > 1 || (form.Get("method") != "" && form.Get("method") != "local" && form.Get("method") != "os") {
 			writeError(w, failure(422, "invalid_request"))
 			return
 		}
-		principal, token, err := h.service.Login(ctx, form.Get("username"), form.Get("password"), h.peer(r), tokenFrom(r))
+		login := h.service.Login
+		if form.Get("method") == "os" {
+			login = h.service.LoginOS
+		}
+		principal, token, err := login(ctx, form.Get("username"), form.Get("password"), h.peer(r), tokenFrom(r))
 		if err != nil {
 			writeError(w, err)
 			return

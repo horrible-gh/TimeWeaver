@@ -36,6 +36,7 @@ type Settings struct {
 	Database        Database      `json:"database"`
 	IdleTimeout     time.Duration `json:"-"`
 	AbsoluteTimeout time.Duration `json:"-"`
+	OSLoginEnabled  bool          `json:"os_login_enabled"`
 }
 
 var namePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -120,6 +121,9 @@ func Load(filename string, lookup func(string) (string, bool)) (Settings, error)
 	}
 	result.IdleTimeout = time.Duration(idle) * time.Minute
 	result.AbsoluteTimeout = time.Duration(absolute) * time.Hour
+	if result.OSLoginEnabled, err = strconv.ParseBool(get("OS_LOGIN_ENABLED", "true")); err != nil {
+		return Settings{}, errors.New("OS_LOGIN_ENABLED must be a boolean")
+	}
 	db := Database{Type: get("DB_TYPE", "sqlite3")}
 	switch db.Type {
 	case "mysql":

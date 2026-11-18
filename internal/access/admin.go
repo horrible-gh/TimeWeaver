@@ -23,17 +23,21 @@ type AdminUser struct {
 	GroupID            int64        `json:"group_id"`
 	Version            int64        `json:"version"`
 	MustChangePassword bool         `json:"must_change_password"`
+	AuthMethod         string       `json:"auth_method"`
+	OSName             string       `json:"os_name"`
 	Groups             []Membership `json:"groups"`
 }
 type UserInput struct {
-	ID       string       `json:"user_id"`
-	Name     string       `json:"name"`
-	Email    string       `json:"email"`
-	Role     string       `json:"role"`
-	Status   string       `json:"status"`
-	Version  int64        `json:"version"`
-	Groups   []Membership `json:"groups"`
-	Password string       `json:"password,omitempty"`
+	ID         string       `json:"user_id"`
+	Name       string       `json:"name"`
+	Email      string       `json:"email"`
+	Role       string       `json:"role"`
+	Status     string       `json:"status"`
+	Version    int64        `json:"version"`
+	Groups     []Membership `json:"groups"`
+	Password   string       `json:"password,omitempty"`
+	AuthMethod string       `json:"auth_method,omitempty"`
+	OSName     string       `json:"os_name,omitempty"`
 }
 
 func cleanText(s string, limit int, empty bool) bool {
@@ -48,7 +52,7 @@ func cleanText(s string, limit int, empty bool) bool {
 	return true
 }
 func validUserInput(in UserInput, create bool) error {
-	if !cleanText(in.ID, 50, false) || !cleanText(in.Name, 255, false) || !cleanText(in.Email, 100, true) || (in.Role != "user" && in.Role != "admin") || (in.Status != "active" && in.Status != "disabled") || len(in.Groups) > 128 || (!create && (in.Version < 1 || in.Password != "")) {
+	if !cleanText(in.ID, 50, create && in.AuthMethod == "os") || !cleanText(in.Name, 255, false) || !cleanText(in.Email, 100, true) || (in.Role != "user" && in.Role != "admin") || (in.Status != "active" && in.Status != "disabled") || len(in.Groups) > 128 || (!create && (in.Version < 1 || in.Password != "")) || (in.AuthMethod != "" && in.AuthMethod != "local" && in.AuthMethod != "os") || !cleanText(in.OSName, 255, true) {
 		return failure(422, "invalid_request")
 	}
 	if in.Email != "" {
@@ -149,11 +153,18 @@ func invalidateUser(ctx context.Context, tx *sql.Tx, id string) error {
 }
 func targetUser(ctx context.Context, tx *sql.Tx, id string) (User, error) {
 	u, err := loadUser(ctx, tx, id)
+	return u, adminLookupError(err)
+}
+func (s *Service) peekTargetUser(ctx context.Context, id string) (User, error) {
+	u, err := scanUser(s.db.DB.QueryRowContext(ctx, userSelect, id))
+	return u, adminLookupError(err)
+}
+func adminLookupError(err error) error {
 	var e *Error
 	if errors.As(err, &e) && e.Code == "invalid_credentials" {
-		return u, failure(404, "user_not_found")
+		return failure(404, "user_not_found")
 	}
-	return u, err
+	return err
 }
 func (s *Service) ListUsers(ctx context.Context, token string) ([]AdminUser, error) {
 	out := []AdminUser{}
@@ -161,13 +172,13 @@ func (s *Service) ListUsers(ctx context.Context, token string) ([]AdminUser, err
 		if u.Role != "admin" {
 			return failure(403, "forbidden")
 		}
-		rows, err := tx.QueryContext(ctx, "SELECT u.user_id,u.name,COALESCE(u.email,''),u.role,u.group_id,a.status,a.version,a.must_change_password FROM users u JOIN tw_user_auth a ON a.user_id=u.user_id ORDER BY u.user_id")
+		rows, err := tx.QueryContext(ctx, "SELECT u.user_id,u.name,COALESCE(u.email,''),u.role,u.group_id,a.status,a.version,a.must_change_password,CASE WHEN BINARY u.password=BINARY '!os' THEN 'os' ELSE 'local' END,COALESCE(i.os_name,'') FROM users u JOIN tw_user_auth a ON a.user_id=u.user_id LEFT JOIN tw_user_identity i ON i.user_id=u.user_id ORDER BY u.user_id")
 		if err != nil {
 			return unavailable()
 		}
 		for rows.Next() {
 			v := AdminUser{Groups: []Membership{}}
-			if rows.Scan(&v.ID, &v.Name, &v.Email, &v.Role, &v.GroupID, &v.Status, &v.Version, &v.MustChangePassword) != nil {
+			if rows.Scan(&v.ID, &v.Name, &v.Email, &v.Role, &v.GroupID, &v.Status, &v.Version, &v.MustChangePassword, &v.AuthMethod, &v.OSName) != nil {
 				rows.Close()
 				return unavailable()
 			}
@@ -227,18 +238,66 @@ func (s *Service) CreateUser(ctx context.Context, token, csrf string, in UserInp
 	if err := validUserInput(in, true); err != nil {
 		return err
 	}
-	hash, err := hashPassword(in.Password)
+	if in.AuthMethod == "" {
+		in.AuthMethod = "local"
+	}
+	var identity OSIdentity
+	var hash string
+	var err error
+	if in.AuthMethod == "os" {
+		if in.Password != "" {
+			return failure(422, "invalid_request")
+		}
+		identity, err = s.resolveIdentity(ctx, in.OSName)
+		if err != nil {
+			return err
+		}
+		hash = "!os"
+		if in.ID == "" {
+			// The app user outlives a particular OS binding. A subject-derived
+			// ID would collide when a previously rebound identity is linked again.
+			var random string
+			random, err = randomToken()
+			if err != nil {
+				return err
+			}
+			in.ID = "os_" + random[:32]
+		}
+	} else {
+		if in.OSName != "" {
+			return failure(422, "invalid_request")
+		}
+		hash, err = hashPassword(in.Password)
+	}
 	if err != nil {
 		return err
 	}
 	return s.withRequest(ctx, token, csrf, true, true, func(tx *sql.Tx, actor User) error {
+		if in.AuthMethod == "os" && !s.OSAvailable() {
+			return failure(503, "os_login_unavailable")
+		}
+		if in.AuthMethod == "os" {
+			var owner string
+			err := tx.QueryRowContext(ctx, "SELECT user_id FROM tw_user_identity WHERE subject=? FOR UPDATE", identity.Subject).Scan(&owner)
+			if err == nil {
+				return failure(409, "os_identity_in_use")
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return unavailable()
+			}
+		}
 		// User/auth/memberships/audit are committed together or not at all.
 		_, err := tx.ExecContext(ctx, "INSERT INTO users(user_id,name,email,password,role,group_id) VALUES(?,?,?,?,?,0)", in.ID, in.Name, in.Email, hash, in.Role)
 		if err != nil {
 			return adminFailure(err)
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO tw_user_auth(user_id,status,must_change_password) VALUES(?,?,TRUE)", in.ID, in.Status); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO tw_user_auth(user_id,status,must_change_password) VALUES(?,?,?)", in.ID, in.Status, in.AuthMethod == "local"); err != nil {
 			return unavailable()
+		}
+		if in.AuthMethod == "os" {
+			if _, err = tx.ExecContext(ctx, "INSERT INTO tw_user_identity(subject,user_id,os_name,created_at) VALUES(?,?,?,?)", identity.Subject, in.ID, identity.Name, s.now().Unix()); err != nil {
+				return identityFailure(err)
+			}
 		}
 		if err = replaceMemberships(ctx, tx, in.ID, in.Groups); err != nil {
 			return err
@@ -246,10 +305,33 @@ func (s *Service) CreateUser(ctx context.Context, token, csrf string, in UserInp
 		if _, err = tx.ExecContext(ctx, "UPDATE users SET group_id=? WHERE user_id=?", defaultGroup(0, in.Groups), in.ID); err != nil {
 			return unavailable()
 		}
-		return auditChange(ctx, tx, s.now().Unix(), actor.ID, "user_create", in.ID, map[string]any{"role": in.Role, "status": in.Status, "groups": in.Groups})
+		return auditChange(ctx, tx, s.now().Unix(), actor.ID, "user_create", in.ID, map[string]any{"role": in.Role, "status": in.Status, "groups": in.Groups, "auth_method": in.AuthMethod})
 	})
 }
 func (s *Service) UpdateUser(ctx context.Context, token, csrf string, in UserInput) (bool, error) {
+	if err := s.checkAdmin(ctx, token, csrf); err != nil {
+		return false, err
+	}
+	if err := validUserInput(in, false); err != nil {
+		return false, err
+	}
+	var identity *OSIdentity
+	if in.OSName != "" {
+		candidate, err := s.peekTargetUser(ctx, in.ID)
+		if err != nil {
+			return false, err
+		}
+		if candidate.AuthMethod != "os" {
+			return false, failure(409, "auth_method_immutable")
+		}
+		if candidate.OSName != in.OSName {
+			resolved, err := s.resolveIdentity(ctx, in.OSName)
+			if err != nil {
+				return false, err
+			}
+			identity = &resolved
+		}
+	}
 	reauth := false
 	err := s.withRequest(ctx, token, csrf, true, true, func(tx *sql.Tx, actor User) error {
 		if err := validUserInput(in, false); err != nil {
@@ -262,13 +344,23 @@ func (s *Service) UpdateUser(ctx context.Context, token, csrf string, in UserInp
 		if old.version != in.Version {
 			return failure(409, "stale_user")
 		}
-		if old.Role == "admin" && old.status == "active" && !old.MustChangePassword && (in.Role != "admin" || in.Status != "active") {
-			var remaining int
-			if tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM users u JOIN tw_user_auth a ON a.user_id=u.user_id WHERE u.role='admin' AND a.status='active' AND a.must_change_password=FALSE AND BINARY u.password<>BINARY ? AND u.user_id<>?", legacySeedHash, old.ID).Scan(&remaining) != nil {
-				return unavailable()
+		if in.AuthMethod != "" && in.AuthMethod != old.AuthMethod {
+			return failure(409, "auth_method_immutable")
+		}
+		if err = protectAdminAccess(ctx, tx, old, in.Role, in.Status, old.MustChangePassword); err != nil {
+			return err
+		}
+		if identity != nil {
+			if old.AuthMethod != "os" || !s.OSAvailable() {
+				return failure(503, "os_login_unavailable")
 			}
-			if remaining == 0 {
-				return failure(409, "last_admin")
+			if old.osSubject == "" {
+				_, err = tx.ExecContext(ctx, "INSERT INTO tw_user_identity(subject,user_id,os_name,created_at) VALUES(?,?,?,?)", identity.Subject, old.ID, identity.Name, s.now().Unix())
+			} else {
+				_, err = tx.ExecContext(ctx, "UPDATE tw_user_identity SET subject=?,os_name=? WHERE user_id=?", identity.Subject, identity.Name, old.ID)
+			}
+			if err != nil {
+				return identityFailure(err)
 			}
 		}
 		if err = replaceMemberships(ctx, tx, old.ID, in.Groups); err != nil {
@@ -284,7 +376,7 @@ func (s *Service) UpdateUser(ctx context.Context, token, csrf string, in UserInp
 			return err
 		}
 		reauth = actor.ID == old.ID
-		return auditChange(ctx, tx, s.now().Unix(), actor.ID, "user_update", old.ID, map[string]any{"role": in.Role, "status": in.Status, "groups": in.Groups})
+		return auditChange(ctx, tx, s.now().Unix(), actor.ID, "user_update", old.ID, map[string]any{"role": in.Role, "status": in.Status, "groups": in.Groups, "auth_method": old.AuthMethod, "os_rebound": identity != nil})
 	})
 	return reauth, err
 }
@@ -294,6 +386,13 @@ func (s *Service) ResetPassword(ctx context.Context, token, csrf, id, password s
 	}
 	if !cleanText(id, 50, false) || version < 1 {
 		return failure(422, "invalid_request")
+	}
+	candidate, err := s.peekTargetUser(ctx, id)
+	if err != nil {
+		return err
+	}
+	if candidate.AuthMethod == "os" {
+		return failure(409, "os_password_managed")
 	}
 	hash, err := hashPassword(password)
 	if err != nil {
@@ -310,6 +409,12 @@ func (s *Service) ResetPassword(ctx context.Context, token, csrf, id, password s
 		if old.version != version {
 			return failure(409, "stale_user")
 		}
+		if old.AuthMethod == "os" {
+			return failure(409, "os_password_managed")
+		}
+		if err = protectAdminAccess(ctx, tx, old, old.Role, old.status, true); err != nil {
+			return err
+		}
 		if _, err = tx.ExecContext(ctx, "UPDATE users SET password=? WHERE user_id=?", hash, old.ID); err != nil {
 			return unavailable()
 		}
@@ -321,4 +426,23 @@ func (s *Service) ResetPassword(ctx context.Context, token, csrf, id, password s
 		}
 		return auditChange(ctx, tx, s.now().Unix(), actor.ID, "password_reset", old.ID, map[string]bool{"must_change_password": true})
 	})
+}
+
+// An OS provider can be disabled or unavailable after a restart. Keep a usable
+// local administrator as a recovery path independently of OS administrators.
+func protectAdminAccess(ctx context.Context, tx *sql.Tx, old User, role, status string, mustChange bool) error {
+	if old.Role != "admin" || old.status != "active" || old.MustChangePassword || (role == "admin" && status == "active" && !mustChange) {
+		return nil
+	}
+	var all, local int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(SUM(BINARY u.password<>BINARY '!os'),0) FROM users u JOIN tw_user_auth a ON a.user_id=u.user_id WHERE u.role='admin' AND a.status='active' AND a.must_change_password=FALSE AND BINARY u.password<>BINARY ? AND u.user_id<>?", legacySeedHash, old.ID).Scan(&all, &local); err != nil {
+		return unavailable()
+	}
+	if all == 0 {
+		return failure(409, "last_admin")
+	}
+	if old.AuthMethod == "local" && local == 0 {
+		return failure(409, "last_local_admin")
+	}
+	return nil
 }

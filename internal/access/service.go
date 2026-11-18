@@ -17,9 +17,16 @@ type Service struct {
 	idle   time.Duration
 	now    func() time.Time
 	rateMu sync.Mutex
+	osAuth OSAuthenticator
 }
 
 func New(ctx context.Context, db *store.Store, idle time.Duration) (*Service, error) {
+	return NewWithOS(ctx, db, idle, nil)
+}
+
+// A nil provider keeps the local-only embedding contract. Server startup chooses
+// its native provider explicitly; clients can never supply an authentication implementation.
+func NewWithOS(ctx context.Context, db *store.Store, idle time.Duration, provider OSAuthenticator) (*Service, error) {
 	if db == nil || db.ReadOnly() || idle < time.Minute || idle > 30*24*time.Hour {
 		return nil, errors.New("invalid human access settings")
 	}
@@ -30,14 +37,14 @@ func New(ctx context.Context, db *store.Store, idle time.Duration) (*Service, er
 	if !status.Ready {
 		return nil, errors.New("human access schema is not ready")
 	}
-	return &Service{db: db, idle: idle, now: time.Now}, nil
+	return &Service{db: db, idle: idle, now: time.Now, osAuth: provider}, nil
 }
 
-const userSelect = `SELECT u.user_id,u.name,u.role,u.group_id,u.password,a.status,a.version,a.must_change_password FROM users u JOIN tw_user_auth a ON a.user_id=u.user_id WHERE u.user_id=?`
+const userSelect = `SELECT u.user_id,u.name,u.role,u.group_id,u.password,a.status,a.version,a.must_change_password,COALESCE(i.subject,''),COALESCE(i.os_name,'') FROM users u JOIN tw_user_auth a ON a.user_id=u.user_id LEFT JOIN tw_user_identity i ON i.user_id=u.user_id WHERE u.user_id=?`
 
 func scanUser(row *sql.Row) (User, error) {
 	u := User{Groups: []Membership{}}
-	err := row.Scan(&u.ID, &u.Name, &u.Role, &u.GroupID, &u.password, &u.status, &u.version, &u.MustChangePassword)
+	err := row.Scan(&u.ID, &u.Name, &u.Role, &u.GroupID, &u.password, &u.status, &u.version, &u.MustChangePassword, &u.osSubject, &u.OSName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return u, failure(401, "invalid_credentials")
 	}
@@ -47,6 +54,10 @@ func scanUser(row *sql.Row) (User, error) {
 	// Even if an administrator accidentally removes the flag, a known seed hash
 	// must never acquire unrestricted access through a normal login.
 	u.MustChangePassword = u.MustChangePassword || equalSecret(u.password, legacySeedHash)
+	u.AuthMethod = "local"
+	if u.password == "!os" {
+		u.AuthMethod = "os"
+	}
 	return u, nil
 }
 func loadUser(ctx context.Context, tx *sql.Tx, id string) (User, error) {
@@ -142,7 +153,7 @@ func (s *Service) Login(ctx context.Context, id, password, peer, oldToken string
 	if err = s.attempt(ctx, "account:"+candidate.ID, 5); err != nil {
 		return Principal{}, "", err
 	}
-	if !checkPassword(candidate.password, password) || candidate.status != "active" {
+	if !checkPassword(candidate.password, password) || candidate.status != "active" || candidate.AuthMethod != "local" {
 		return Principal{}, "", failure(401, "invalid_credentials")
 	}
 	tx, err := s.db.DB.BeginTx(ctx, nil)
@@ -157,6 +168,25 @@ func (s *Service) Login(ctx context.Context, id, password, peer, oldToken string
 	if u.status != "active" || u.version != candidate.version || !equalSecret(u.password, candidate.password) {
 		return Principal{}, "", failure(401, "invalid_credentials")
 	}
+	p, token, err := s.issueSession(ctx, tx, u, oldToken)
+	if err != nil {
+		return Principal{}, "", err
+	}
+	if tx.Commit() != nil {
+		return Principal{}, "", unavailable()
+	}
+	s.clearAccountAttempt(ctx, "account:"+u.ID)
+	return p, token, nil
+}
+
+func sessionFingerprint(u User) string {
+	if u.AuthMethod == "os" {
+		return digest("os\x00" + u.osSubject)
+	}
+	return digest(u.password)
+}
+
+func (s *Service) issueSession(ctx context.Context, tx *sql.Tx, u User, oldToken string) (Principal, string, error) {
 	token, err := randomToken()
 	if err != nil {
 		return Principal{}, "", err
@@ -170,7 +200,7 @@ func (s *Service) Login(ctx context.Context, id, password, peer, oldToken string
 	if _, err = tx.ExecContext(ctx, `DELETE FROM tw_session WHERE expires_at<=? OR last_seen<=? OR digest=?`, now, now-int64(s.idle.Seconds()), digest(oldToken)); err != nil {
 		return Principal{}, "", unavailable()
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO tw_session(digest,user_id,user_version,csrf,password_fingerprint,created_at,last_seen,expires_at,auth_method) VALUES(?,?,?,?,?,?,?,?,'local')`, p.session, u.ID, u.version, csrf, digest(u.password), now, now, now+12*3600); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO tw_session(digest,user_id,user_version,csrf,password_fingerprint,created_at,last_seen,expires_at,auth_method) VALUES(?,?,?,?,?,?,?,?,?)`, p.session, u.ID, u.version, csrf, sessionFingerprint(u), now, now, now+12*3600, u.AuthMethod); err != nil {
 		return Principal{}, "", unavailable()
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT digest FROM tw_session WHERE user_id=? ORDER BY (digest=?) DESC,created_at DESC,digest DESC`, u.ID, p.session)
@@ -206,14 +236,14 @@ func (s *Service) Login(ctx context.Context, id, password, peer, oldToken string
 	if err = audit(ctx, tx, now, u.ID, "login"); err != nil {
 		return Principal{}, "", err
 	}
-	if tx.Commit() != nil {
-		return Principal{}, "", unavailable()
-	}
+	return p, token, nil
+}
+
+func (s *Service) clearAccountAttempt(ctx context.Context, key string) {
 	// Only a successful login clears the account bucket; never the peer bucket.
 	s.rateMu.Lock()
-	_, _ = s.db.DB.ExecContext(ctx, "DELETE FROM tw_login_attempt WHERE key_hash=?", digest("account:"+u.ID))
+	_, _ = s.db.DB.ExecContext(ctx, "DELETE FROM tw_login_attempt WHERE key_hash=?", digest(key))
 	s.rateMu.Unlock()
-	return p, token, nil
 }
 func validToken(raw string) bool {
 	if len(raw) != 64 {
@@ -267,8 +297,8 @@ func (s *Service) principalTx(ctx context.Context, tx *sql.Tx, token string) (Pr
 		return empty, err
 	}
 	var version, last, expires int64
-	var csrf, fingerprint string
-	err = tx.QueryRowContext(ctx, `SELECT user_version,csrf,password_fingerprint,last_seen,expires_at FROM tw_session WHERE digest=? AND user_id=? FOR UPDATE`, hash, u.ID).Scan(&version, &csrf, &fingerprint, &last, &expires)
+	var csrf, fingerprint, method string
+	err = tx.QueryRowContext(ctx, `SELECT user_version,csrf,password_fingerprint,last_seen,expires_at,auth_method FROM tw_session WHERE digest=? AND user_id=? FOR UPDATE`, hash, u.ID).Scan(&version, &csrf, &fingerprint, &last, &expires, &method)
 	if errors.Is(err, sql.ErrNoRows) {
 		return empty, failure(401, "unauthenticated")
 	}
@@ -276,7 +306,7 @@ func (s *Service) principalTx(ctx context.Context, tx *sql.Tx, token string) (Pr
 		return empty, unavailable()
 	}
 	now := s.now().Unix()
-	if u.status != "active" || version != u.version || !equalSecret(fingerprint, digest(u.password)) || now >= expires || now-last >= int64(s.idle.Seconds()) || now < last {
+	if method != u.AuthMethod || (method != "local" && method != "os") || method == "os" && (!s.OSAvailable() || u.osSubject == "") || u.status != "active" || version != u.version || !equalSecret(fingerprint, sessionFingerprint(u)) || now >= expires || now-last >= int64(s.idle.Seconds()) || now < last {
 		return empty, failure(401, "unauthenticated")
 	}
 	return Principal{u, csrf, hash}, nil
@@ -325,6 +355,9 @@ func (s *Service) ChangePassword(ctx context.Context, token, csrf, current, next
 	}
 	if !equalSecret(p.CSRF, csrf) {
 		return failure(403, "csrf_failed")
+	}
+	if p.User.AuthMethod == "os" {
+		return failure(409, "os_password_managed")
 	}
 	if err = s.attempt(ctx, "password:"+p.User.ID, 5); err != nil {
 		return err

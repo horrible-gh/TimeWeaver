@@ -5,6 +5,10 @@ This remains a migration build. Production `serve` is not enabled. The main
 branch, deployed server/database, legacy Python/SQL and separate agent repository
 are not changed by this slice.
 
+The subsequent [OS account slice](go-os-access-migration.md) extends this surface
+with pre-linked OS users and schema v3, while preserving the local administration
+and audited-transaction rules described here.
+
 ## Implemented surface
 
 - Embedded Vue now has an administrator-only Users page: create local users,

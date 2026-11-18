@@ -2,6 +2,7 @@ import axios from "axios";
 import config from "@config";
 import { ref } from "vue";
 import { createCookieSession } from "./session.mjs";
+import { availableLoginMethods, loginPayload } from "./authentication.mjs";
 
 export const sessionMode = config.AUTH_MODE === "session";
 const apiClient = axios.create({ baseURL: config.API_SERVER_URL, withCredentials: true });
@@ -35,15 +36,18 @@ export const getRequest = (url, params = {}, type = "default") => request("get",
 export const postRequest = (url, data, type = "default") => request("post", url, data, type);
 export const putRequest = (url, data, type = "default") => request("put", url, data, type);
 export const deleteRequest = (url, params = {}) => request("delete", url, undefined, "default", params);
-export async function login(username, password) {
+export async function login(username, password, method = 'local') {
   cookieSession?.clear();
-  const data = await postRequest("/login", { username, password });
+  const data = await postRequest("/login", loginPayload(username, password, method, sessionMode));
   if (sessionMode) cookieSession.accept(data);
   else {
     localStorage.setItem("access_token", data.access_token);
     localStorage.setItem("user", JSON.stringify(data.user));
   }
   return data;
+}
+export async function getLoginMethods() {
+  return sessionMode ? availableLoginMethods(await getRequest('/auth/methods')) : ['local'];
 }
 export const ensureSession = () => sessionMode ? cookieSession.read() : Promise.resolve(null);
 export async function logout() {

@@ -13,11 +13,12 @@ import (
 	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 // This journal is separate from Python's frozen migrations(filename) contract.
 // A failed MySQL DDL installation is deliberately not auto-replayed.
-var accessTables = []string{"tw_user_auth", "tw_group_member", "tw_session", "tw_audit", "tw_login_attempt"}
+var accessBaseTables = []string{"tw_user_auth", "tw_group_member", "tw_session", "tw_audit", "tw_login_attempt"}
+var accessTables = append(append([]string{}, accessBaseTables...), "tw_user_identity")
 
 type SchemaStatus struct {
 	Ready    bool   `json:"ready"`
@@ -65,6 +66,14 @@ func Status(ctx context.Context, db *store.Store) (SchemaStatus, error) {
 		if n != 2 {
 			r.Ready = false
 			r.State = "incomplete"
+		}
+	}
+	if r.Ready {
+		if err = db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='tw_user_identity' AND column_name IN ('subject','user_id','os_name','created_at')").Scan(&n); err != nil {
+			return r, unavailable()
+		}
+		if n != 4 {
+			r.Ready, r.State = false, "incomplete"
 		}
 	}
 	return r, nil
@@ -119,7 +128,13 @@ func Initialize(ctx context.Context, db *store.Store) (SchemaStatus, error) {
 		return status, nil
 	}
 	if status.Version == 1 && status.State == "ready" {
-		return upgradeAudit(ctx, conn)
+		status, err = upgradeAudit(ctx, conn)
+		if err != nil {
+			return empty, err
+		}
+	}
+	if status.Version == 2 && status.State == "ready" {
+		return upgradeIdentity(ctx, conn)
 	}
 	if status.State != "missing" {
 		return status, errors.New("access migration is unfinished or incompatible; restore/review it before retrying")
@@ -135,15 +150,10 @@ func Initialize(ctx context.Context, db *store.Store) (SchemaStatus, error) {
 	}
 	// Match the actual legacy user identifier collation for foreign keys, rather
 	// than assuming the database default still matches a pre-existing users table.
-	var charset, collation, kind string
-	if err = conn.QueryRowContext(ctx, `SELECT CHARACTER_SET_NAME,COLLATION_NAME,COLUMN_TYPE FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='users' AND column_name='user_id'`).Scan(&charset, &collation, &kind); err != nil {
-		return empty, unavailable()
+	userType, err := userIdentifierType(ctx, conn)
+	if err != nil {
+		return empty, err
 	}
-	validName := regexp.MustCompile(`^[A-Za-z0-9_]+$`)
-	if !validName.MatchString(charset) || !validName.MatchString(collation) || strings.ToLower(kind) != "varchar(50)" {
-		return empty, errors.New("unexpected legacy user identifier shape")
-	}
-	userType := "VARCHAR(50) CHARACTER SET " + charset + " COLLATE " + collation
 	if _, err = conn.ExecContext(ctx, `CREATE TABLE tw_access_schema(id INT PRIMARY KEY,version INT NOT NULL,state VARCHAR(16) NOT NULL) ENGINE=InnoDB`); err != nil {
 		return empty, unavailable()
 	}
@@ -156,6 +166,7 @@ func Initialize(ctx context.Context, db *store.Store) (SchemaStatus, error) {
 		`CREATE TABLE tw_session(digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,user_id ` + userType + ` NOT NULL,user_version BIGINT NOT NULL,csrf CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,password_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,created_at BIGINT NOT NULL,last_seen BIGINT NOT NULL,expires_at BIGINT NOT NULL,auth_method VARCHAR(16) NOT NULL,INDEX tw_session_user(user_id),INDEX tw_session_expiry(expires_at),FOREIGN KEY(user_id) REFERENCES users(user_id)) ENGINE=InnoDB`,
 		`CREATE TABLE tw_audit(id BIGINT AUTO_INCREMENT PRIMARY KEY,at BIGINT NOT NULL,actor VARCHAR(50) NOT NULL,action VARCHAR(40) NOT NULL,result VARCHAR(16) NOT NULL,target VARCHAR(255) NOT NULL DEFAULT '',detail TEXT NULL) ENGINE=InnoDB`,
 		`CREATE TABLE tw_login_attempt(key_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,count INT NOT NULL,started BIGINT NOT NULL,INDEX tw_attempt_expiry(started)) ENGINE=InnoDB`,
+		identityDDL(userType),
 	}
 	for i, ddl := range ddls {
 		if _, err = conn.ExecContext(ctx, ddl); err != nil {
@@ -187,7 +198,7 @@ func Initialize(ctx context.Context, db *store.Store) (SchemaStatus, error) {
 func upgradeAudit(ctx context.Context, conn *sql.Conn) (SchemaStatus, error) {
 	empty := SchemaStatus{}
 	var n int
-	for _, table := range accessTables {
+	for _, table := range accessBaseTables {
 		if conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=?", table).Scan(&n) != nil {
 			return empty, unavailable()
 		}
@@ -209,6 +220,63 @@ func upgradeAudit(ctx context.Context, conn *sql.Conn) (SchemaStatus, error) {
 		return empty, errors.New("audit upgrade stopped; partial DDL must be inspected before retrying")
 	}
 	if _, err := conn.ExecContext(ctx, "UPDATE tw_access_schema SET state='ready' WHERE id=1 AND version=2"); err != nil {
+		return empty, unavailable()
+	}
+	return SchemaStatus{false, 2, "ready", false}, nil
+}
+
+func userIdentifierType(ctx context.Context, conn *sql.Conn) (string, error) {
+	var charset, collation, kind string
+	if err := conn.QueryRowContext(ctx, `SELECT CHARACTER_SET_NAME,COLLATION_NAME,COLUMN_TYPE FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='users' AND column_name='user_id'`).Scan(&charset, &collation, &kind); err != nil {
+		return "", unavailable()
+	}
+	validName := regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+	if !validName.MatchString(charset) || !validName.MatchString(collation) || strings.ToLower(kind) != "varchar(50)" {
+		return "", errors.New("unexpected legacy user identifier shape")
+	}
+	return "VARCHAR(50) CHARACTER SET " + charset + " COLLATE " + collation, nil
+}
+
+func identityDDL(userType string) string {
+	return `CREATE TABLE tw_user_identity(subject VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,user_id ` + userType + ` NOT NULL,os_name VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,created_at BIGINT NOT NULL,UNIQUE KEY tw_identity_user(user_id),FOREIGN KEY(user_id) REFERENCES users(user_id)) ENGINE=InnoDB`
+}
+
+// The v3 addition never reconstructs grants, changes passwords, or discards local
+// sessions. Unknown or partial DDL must be reviewed instead of being replayed.
+func upgradeIdentity(ctx context.Context, conn *sql.Conn) (SchemaStatus, error) {
+	empty := SchemaStatus{}
+	var n int
+	for _, table := range accessBaseTables {
+		if conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=?", table).Scan(&n) != nil {
+			return empty, unavailable()
+		}
+		if n != 1 {
+			return empty, errors.New("incomplete v2 access schema; inspect before upgrading")
+		}
+	}
+	if conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='tw_user_identity'").Scan(&n) != nil {
+		return empty, unavailable()
+	}
+	if n != 0 {
+		return empty, errors.New("untracked OS identity table; inspect before upgrading")
+	}
+	if conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='tw_audit' AND column_name IN ('target','detail')").Scan(&n) != nil {
+		return empty, unavailable()
+	}
+	if n != 2 {
+		return empty, errors.New("incomplete v2 audit shape; inspect before upgrading")
+	}
+	userType, err := userIdentifierType(ctx, conn)
+	if err != nil {
+		return empty, err
+	}
+	if _, err = conn.ExecContext(ctx, "UPDATE tw_access_schema SET version=3,state='running' WHERE id=1 AND version=2 AND state='ready'"); err != nil {
+		return empty, unavailable()
+	}
+	if _, err = conn.ExecContext(ctx, identityDDL(userType)); err != nil {
+		return empty, errors.New("OS identity upgrade stopped; partial DDL must be inspected before retrying")
+	}
+	if _, err = conn.ExecContext(ctx, "UPDATE tw_access_schema SET state='ready' WHERE id=1 AND version=3"); err != nil {
 		return empty, unavailable()
 	}
 	return SchemaStatus{true, schemaVersion, "ready", false}, nil

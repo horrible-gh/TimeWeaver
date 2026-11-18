@@ -165,6 +165,8 @@ request-error presentation. Administrator and global membership scopes are
 covered through the real HTTP integration tests. Consult the commit's CI run for the actual executed
 results; this coverage description is not a production-readiness claim.
 
-OS identity/login, complete SQLite support, installable server startup and
-deployment/rollback validation remain separate gates. Production `serve` stays
-blocked, and this slice does not change the main-branch deployment.
+OS identity/login is implemented in the subsequent
+[OS account slice](go-os-access-migration.md). Complete SQLite support,
+remembered-session continuity, installable server startup and deployment/rollback
+validation remain separate gates. Production `serve` stays blocked, and this
+slice does not change the main-branch deployment.
