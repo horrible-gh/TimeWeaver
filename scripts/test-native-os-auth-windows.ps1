@@ -46,7 +46,10 @@ try {
     $nativeBinary = Join-Path $nativeTemp 'access-native.test.exe'
     & go test -c -o $nativeBinary ./internal/access
     if ($LASTEXITCODE -ne 0) { throw 'Native authentication test build failed.' }
-    & $nativeBinary -test.run '^(TestNativeOS|TestLiveNativeOS)' -test.v -test.timeout 2m
+    # Quote dotted Go flags as complete native arguments: when the command is
+    # a variable, PowerShell can otherwise split -test.run into -test and .run.
+    $nativeArgs = @('-test.run=^(TestNativeOS|TestLiveNativeOS)', '-test.v', '-test.timeout=2m')
+    & $nativeBinary @nativeArgs
     if ($LASTEXITCODE -ne 0) { throw 'Native Windows authentication checks failed.' }
 }
 finally {
