@@ -94,7 +94,7 @@ func executionOnce[T any](ctx context.Context, db *store.Store, operation func(*
 	// SQLite's writable connection starts BEGIN IMMEDIATE. The reservation is
 	// acquired before any read, so independent server instances cannot read the
 	// same pending claim or missing result and both commit a winning mutation.
-	tx, err := conn.BeginTx(ctx, options)
+	tx, err := store.BeginWrite(ctx, conn, db.Dialect, options)
 	if err != nil {
 		return zero, executionError("unavailable")
 	}
@@ -332,7 +332,7 @@ func (s *Execution) result(ctx context.Context, deviceID int64, r ExecutionResul
 func (s *Execution) event(ctx context.Context, deviceID int64, r AgentEvent, env *string) (time.Time, error) {
 	// Append-only incident events have no idempotency key. Never replay an
 	// ambiguous insert or commit; the client controls any delivery retry.
-	tx, err := s.db.DB.BeginTx(ctx, nil)
+	tx, err := store.BeginWrite(ctx, s.db.DB, s.db.Dialect, nil)
 	if err != nil {
 		return time.Time{}, executionError("unavailable")
 	}

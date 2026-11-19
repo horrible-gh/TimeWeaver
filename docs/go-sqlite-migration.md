@@ -37,6 +37,11 @@ New assets live in `internal/store/sqlite/`:
   migrator does not replay them or invent completion records for them. A fresh
   installation records only the new migration that actually ran.
 
+Git attributes preserve the exact versioned bytes of both legacy SQL resource
+copies and the new SQLite assets on every checkout. Native Windows builds and
+Linux builds therefore compute the same migration checksums; line-ending
+conversion must not change the identity of an already recorded migration.
+
 A fresh database seeds reserved group 0 (`Unknown`), the legacy device -1
 sentinel, and the existing restricted administrator seed. Access initialization
 and login retain the mandatory initial password-change gate. Upgrading an
@@ -119,10 +124,14 @@ and restore its settings, or discard the connection if cleanup cannot be
 completed. Health uses a separate read-only store.
 
 SQLite's native busy handler can delay context interruption. The native busy
-timeout is bounded to 250 ms; contention fails safely instead of allowing a
-cancelled HTTP request to wait through the previous five-second timeout.
-Migration lock acquisition has a separate context-aware retry budget of five
-seconds. No application write is blindly replayed after an uncertain commit.
+timeout is bounded to 250 ms. Application writer admission retries busy/locked
+errors only while acquiring `BEGIN IMMEDIATE`, before a transaction or any
+authorization read/write exists. The busy retry window has a five-second budget
+and honors the caller's cancellation. Waiting for a pooled connection and a
+successful transaction both retain the caller's original context. Migration lock
+acquisition has its own context-aware five-second
+budget. Application statements, authentication callbacks and commits are not
+replayed by this admission retry, including after an uncertain commit.
 
 ## Dates, binary values and response types
 
@@ -160,9 +169,10 @@ queries execute the native SQLite implementation.
 - Access scenarios cover the existing local/OS/session/administration contracts,
   independent-store authorization/revocation and last-administrator protection,
   rate limits, schema initialization/upgrade and rejection of key/FK drift.
-- Eight agent integration scenarios cover enrollment/rotation races, lost result
+- Nine agent integration scenarios cover enrollment/rotation races, lost result
   acknowledgements, claim serialization, transaction rollback, stable/read-only
-  snapshots, lease sweeping, cancellation and independent health inspection.
+  snapshots, lease sweeping, delayed-writer admission, cancellation and
+  independent health inspection.
 - Twenty-one shared dashboard/HTTP scenarios cover schedules/tasks, devices,
   enrollment, manual requests, scoped history, chart aggregation and failure
   behavior.

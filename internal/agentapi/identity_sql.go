@@ -11,7 +11,7 @@ import (
 
 func (s *Identity) enrollOnce(ctx context.Context, token []byte, name string, version *string, refresh []byte) (credentialIssue, error) {
 	var result credentialIssue
-	tx, err := s.db.DB.BeginTx(ctx, nil)
+	tx, err := store.BeginWrite(ctx, s.db.DB, s.db.Dialect, nil)
 	if err != nil {
 		return result, failure("unavailable")
 	}
@@ -98,7 +98,7 @@ func (s *Identity) enrollOnce(ctx context.Context, token []byte, name string, ve
 }
 func (s *Identity) rotateOnce(ctx context.Context, current, next []byte) (credentialIssue, error) {
 	var result credentialIssue
-	tx, err := s.db.DB.BeginTx(ctx, nil)
+	tx, err := store.BeginWrite(ctx, s.db.DB, s.db.Dialect, nil)
 	if err != nil {
 		return result, failure("unavailable")
 	}

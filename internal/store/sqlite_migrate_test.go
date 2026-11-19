@@ -47,7 +47,7 @@ func legacySQLiteFixture(t *testing.T) *Store {
 		"target_device INTEGER NOT NULL DEFAULT -1", "target_device INTEGER DEFAULT 0",
 		"UNIQUE (group_id,device_name)", "UNIQUE (device_name)",
 		"    deleted_at DATETIME\n", "    deleted_at TEXT\n",
-	).Replace(string(ddl))
+	).Replace(strings.ReplaceAll(string(ddl), "\r\n", "\n"))
 	execSQLite(t, s, legacy)
 	execSQLite(t, s, "CREATE TABLE migrations(filename TEXT PRIMARY KEY, applied_at TEXT)")
 	files, _ := legacySQLiteMigrations()
@@ -248,6 +248,9 @@ func replaceSQLiteTable(t *testing.T, s *Store, name string, change func(string)
 	if err := s.DB.QueryRow("SELECT sql FROM sqlite_schema WHERE name=?", name).Scan(&ddl); err != nil {
 		t.Fatal(err)
 	}
+	// SQLite preserves the checkout's line endings in sqlite_schema. Fixture
+	// mutation patterns use LF even when Windows embedded assets contain CRLF.
+	ddl = strings.ReplaceAll(ddl, "\r\n", "\n")
 	execSQLite(t, s, "PRAGMA foreign_keys=OFF")
 	execSQLite(t, s, "ALTER TABLE `"+name+"` RENAME TO old_fixture")
 	execSQLite(t, s, change(ddl))
@@ -256,6 +259,41 @@ func replaceSQLiteTable(t *testing.T, s *Store, name string, change func(string)
 	}
 	execSQLite(t, s, "DROP TABLE old_fixture")
 	execSQLite(t, s, "PRAGMA foreign_keys=ON")
+}
+
+func TestSQLiteFixtureMutationsHandleStoredLineEndings(t *testing.T) {
+	reference, err := sqliteReference()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, newline string }{{"LF", "\n"}, {"CRLF", "\r\n"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := sqliteTestStore(t)
+			ddl := strings.ReplaceAll(reference["execution_log"].ddl, "\r\n", "\n")
+			execSQLite(t, s, strings.ReplaceAll(ddl, "\n", tc.newline))
+			var stored string
+			if err := s.DB.QueryRow("SELECT sql FROM sqlite_schema WHERE name='execution_log'").Scan(&stored); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(stored, "\r\n") != (tc.newline == "\r\n") {
+				t.Fatal("fixture did not retain the requested line endings")
+			}
+			replaceSQLiteTable(t, s, "execution_log", func(ddl string) string {
+				const constraint = ",\n    UNIQUE (execution_grp_id,detail_id,attempt)"
+				if !strings.Contains(ddl, constraint) {
+					t.Fatal("fixture constraint pattern missing after normalization")
+				}
+				return strings.Replace(ddl, constraint, "", 1)
+			}, true)
+			for range 2 {
+				execSQLite(t, s, "INSERT INTO execution_log(execution_grp_id,schedule_id,detail_id,attempt,start_time,result_code) VALUES(?,1,?,1,'2026-11-19 00:00:00',0)", []byte("fedcba9876543210"), []byte("0123456789abcdef"))
+			}
+			var count int
+			if err := s.DB.QueryRow("SELECT COUNT(*) FROM execution_log").Scan(&count); err != nil || count != 2 {
+				t.Fatal("fixture did not remove the unique constraint", count, err)
+			}
+		})
+	}
 }
 
 func TestSQLiteMigrationRollbackAndCrossStoreSerialization(t *testing.T) {

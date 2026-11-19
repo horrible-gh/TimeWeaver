@@ -16,7 +16,7 @@ func (s *Runtime) Heartbeat(ctx context.Context, principal DeviceIdentity, reque
 	if !validHeartbeat(request) {
 		return HeartbeatData{}, invalidRequest()
 	}
-	tx, err := s.db.DB.BeginTx(ctx, nil)
+	tx, err := store.BeginWrite(ctx, s.db.DB, s.db.Dialect, nil)
 	if err != nil {
 		return HeartbeatData{}, runtimeFailure()
 	}

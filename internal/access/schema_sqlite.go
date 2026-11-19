@@ -240,7 +240,7 @@ var sqliteAccessDDL = []string{
 // initializers and commits the schema and journal together. An existing running
 // marker or an untracked table remains a hard failure, as it is on MySQL.
 func initializeSQLiteAccess(ctx context.Context, db *store.Store) (SchemaStatus, error) {
-	tx, err := db.DB.BeginTx(ctx, nil)
+	tx, err := store.BeginWrite(ctx, db.DB, db.Dialect, nil)
 	if err != nil {
 		return SchemaStatus{}, unavailable()
 	}

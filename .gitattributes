@@ -1,0 +1,4 @@
+# Preserve SQL resource bytes: migration checksums hash the embedded Git blobs.
+/server/res/sql/** -text
+/internal/store/sql/** -text
+/internal/store/sqlite/** -text

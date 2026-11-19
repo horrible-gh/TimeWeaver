@@ -93,14 +93,18 @@ func audit(ctx context.Context, tx *sql.Tx, now int64, id, action string) error 
 	return nil
 }
 func (s *Service) attempt(ctx context.Context, key string, limit int) error {
-	s.rateMu.Lock()
-	defer s.rateMu.Unlock()
-	now := s.now().Unix()
-	tx, err := s.db.DB.BeginTx(ctx, nil)
+	// SQLite's immediate transaction serializes this bucket across services.
+	// A local mutex here would make canceled siblings wait behind admission.
+	if s.db.Dialect != "sqlite" {
+		s.rateMu.Lock()
+		defer s.rateMu.Unlock()
+	}
+	tx, err := store.BeginWrite(ctx, s.db.DB, s.db.Dialect, nil)
 	if err != nil {
 		return unavailable()
 	}
 	defer tx.Rollback()
+	now := s.now().Unix()
 	if _, err = tx.ExecContext(ctx, "DELETE FROM tw_login_attempt WHERE started<=?", now-300); err != nil {
 		return unavailable()
 	}
@@ -159,7 +163,7 @@ func (s *Service) Login(ctx context.Context, id, password, peer, oldToken string
 	if !checkPassword(candidate.password, password) || candidate.status != "active" || candidate.AuthMethod != "local" {
 		return Principal{}, "", failure(401, "invalid_credentials")
 	}
-	tx, err := s.db.DB.BeginTx(ctx, nil)
+	tx, err := store.BeginWrite(ctx, s.db.DB, s.db.Dialect, nil)
 	if err != nil {
 		return Principal{}, "", unavailable()
 	}
@@ -244,6 +248,17 @@ func (s *Service) issueSession(ctx context.Context, tx *sql.Tx, u User, oldToken
 
 func (s *Service) clearAccountAttempt(ctx context.Context, key string) {
 	// Only a successful login clears the account bucket; never the peer bucket.
+	if s.db.Dialect == "sqlite" {
+		tx, err := store.BeginWrite(ctx, s.db.DB, s.db.Dialect, nil)
+		if err != nil {
+			return
+		}
+		defer tx.Rollback()
+		if _, err = tx.ExecContext(ctx, "DELETE FROM tw_login_attempt WHERE key_hash=?", digest(key)); err == nil {
+			_ = tx.Commit()
+		}
+		return
+	}
 	s.rateMu.Lock()
 	_, _ = s.db.DB.ExecContext(ctx, "DELETE FROM tw_login_attempt WHERE key_hash=?", digest(key))
 	s.rateMu.Unlock()
@@ -267,7 +282,7 @@ func (s *Service) sessionTx(ctx context.Context, token string) (*sql.Tx, Princip
 	if !validToken(token) {
 		return nil, Principal{}, failure(401, "unauthenticated")
 	}
-	tx, err := s.db.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, err := store.BeginWrite(ctx, s.db.DB, s.db.Dialect, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, Principal{}, unavailable()
 	}

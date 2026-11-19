@@ -333,3 +333,50 @@ func TestSQLiteExecutionCanceledWriterDoesNotMutateQueue(t *testing.T) {
 		t.Fatal("cancelled writer left the pool unusable", err)
 	}
 }
+
+func TestSQLiteExecutionWaitsForWriterBeforeClaim(t *testing.T) {
+	first, second, _ := sqliteAgentStores(t)
+	f := newExecutionFixtureOn(t, first)
+	lock, err := second.DB.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	type claimResult struct {
+		data ClaimData
+		err  error
+	}
+	result := make(chan claimResult, 1)
+	go func() {
+		data, _, err := f.service.Claim(ctx, f.principal, 41)
+		result <- claimResult{data, err}
+	}()
+	// Hold another store's write reservation beyond the driver's native busy
+	// timeout. The claim must wait for admission without returning unavailable
+	// or starting an operation against a stale, unlocked queue state.
+	timer := time.NewTimer(350 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case early := <-result:
+		t.Fatal("claim completed while another writer held the database", early.err)
+	case <-timer.C:
+	}
+	if err = lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	var claimed claimResult
+	select {
+	case claimed = <-result:
+	case <-ctx.Done():
+		t.Fatal("claim did not resume after writer release", ctx.Err())
+	}
+	if claimed.err != nil {
+		t.Fatal("claim failed after writer admission", claimed.err)
+	}
+	var status, token string
+	if err = second.DB.QueryRow("SELECT status,claim_token FROM manual_execution WHERE manual_id=41").Scan(&status, &token); err != nil || status != "processing" || token != claimed.data.Token {
+		t.Fatal("admitted claim did not persist its returned lease", status, err)
+	}
+}

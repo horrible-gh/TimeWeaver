@@ -106,7 +106,7 @@ func (s *Service) LoginOS(ctx context.Context, name, password, peer, oldToken st
 	if err != nil || !validOSIdentity(verified) || verified.Subject != identity.Subject {
 		return Principal{}, "", failure(401, "invalid_credentials")
 	}
-	tx, err := s.db.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, err := store.BeginWrite(ctx, s.db.DB, s.db.Dialect, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return Principal{}, "", unavailable()
 	}

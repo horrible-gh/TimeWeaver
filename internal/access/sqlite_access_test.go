@@ -459,3 +459,46 @@ func TestSQLiteOSRateLimitsAcrossIndependentStores(t *testing.T) {
 		t.Fatal("independent stores bypassed the canonical identity limit", checked, limited, provider.calls.Load())
 	}
 }
+
+func TestSQLiteAttemptCancellationIsNotBlockedBySiblingAdmission(t *testing.T) {
+	db, service := sqliteInitialized(t)
+	other := openSQLiteAccessStore(t, sqliteAccessPath(t, db))
+	holder, err := other.DB.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- service.attempt(ctx, "waiting-peer", 5) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for db.DB.Stats().InUse == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if db.DB.Stats().InUse == 0 {
+		t.Fatal("first rate request never reached database admission")
+	}
+	canceled, stop := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer stop()
+	started := time.Now()
+	err = service.attempt(canceled, "canceled-peer", 5)
+	elapsed := time.Since(started)
+	requireError(t, err, "unavailable")
+	if elapsed > 2*time.Second || canceled.Err() == nil {
+		t.Error("canceled rate request waited behind a sibling admission", elapsed)
+	}
+	if err = holder.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-firstDone; err != nil {
+		t.Fatal("first rate request did not recover after writer release", err)
+	}
+	var count int
+	if err = db.DB.QueryRow("SELECT count FROM tw_login_attempt WHERE key_hash=?", digest("waiting-peer")).Scan(&count); err != nil || count != 1 {
+		t.Fatal("waiting rate bucket was not applied exactly once", count, err)
+	}
+	if err = db.DB.QueryRow("SELECT COUNT(*) FROM tw_login_attempt WHERE key_hash=?", digest("canceled-peer")).Scan(&count); err != nil || count != 0 {
+		t.Fatal("canceled rate request changed its bucket", count, err)
+	}
+}

@@ -42,7 +42,7 @@ func (s *Service) withRequest(ctx context.Context, token, csrf string, write, ad
 	// Writable SQLite stores begin IMMEDIATE transactions. Acquiring the write
 	// reservation before reading the principal serializes authorization and
 	// revocation across independent connections and Service instances.
-	tx, err := s.db.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, err := store.BeginWrite(ctx, s.db.DB, s.db.Dialect, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return unavailable()
 	}
