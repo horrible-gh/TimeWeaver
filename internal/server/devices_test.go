@@ -40,11 +40,11 @@ func deviceFixtureFor(t *testing.T) *deviceFixture {
 	db, probe := serverDatabase(t)
 	ctx := context.Background()
 	for _, q := range []string{"INSERT INTO `groups`(group_id,group_name,status) VALUES(7,'Seven','active'),(8,'Eight','active'),(9,'Disabled','inactive')", "INSERT INTO devices(group_id,device_name) VALUES(7,'seven'),(8,'eight')"} {
-		if _, err := db.DB.Exec(q); err != nil {
+		if _, err := fixtureExec(t, db, q); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := db.DB.Exec("UPDATE users SET password=? WHERE user_id='timeweaver'", deviceTestHash); err != nil {
+	if _, err := fixtureExec(t, db, "UPDATE users SET password=? WHERE user_id='timeweaver'", deviceTestHash); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"viewer", "operator", "editor", "global-editor"} {
@@ -52,7 +52,7 @@ func deviceFixtureFor(t *testing.T) *deviceFixture {
 		if id == "global-editor" {
 			group = 0
 		}
-		if _, err := db.DB.Exec("INSERT INTO users(user_id,name,password,role,group_id) VALUES(?,?,?,'user',?)", id, id, deviceTestHash, group); err != nil {
+		if _, err := fixtureExec(t, db, "INSERT INTO users(user_id,name,password,role,group_id) VALUES(?,?,?,'user',?)", id, id, deviceTestHash, group); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -63,7 +63,7 @@ func deviceFixtureFor(t *testing.T) *deviceFixture {
 		t.Fatal(err)
 	}
 	for _, role := range []string{"viewer", "operator"} {
-		if _, err := db.DB.Exec("UPDATE tw_group_member SET role=? WHERE user_id=?", role, role); err != nil {
+		if _, err := fixtureExec(t, db, "UPDATE tw_group_member SET role=? WHERE user_id=?", role, role); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -124,13 +124,13 @@ func TestMySQLDeviceMutationScopesAndPreservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var actor, name string
-	if err = f.db.DB.QueryRow("SELECT creator,device_name FROM devices WHERE device_id=?", id).Scan(&actor, &name); err != nil || actor != "editor" || name != "한글-日本語" {
+	if err = fixtureRow(t, f.db, "SELECT creator,device_name FROM devices WHERE device_id=?", id).Scan(&actor, &name); err != nil || actor != "editor" || name != "한글-日本語" {
 		t.Fatal("server actor/name", err)
 	}
 	_, err = f.dashboard.SaveDevice(ctx, editor.token, editor.csrf, dashboard.DeviceInput{ID: id, GroupID: gid(8), Name: name, Status: "active"}, false)
 	expectCode(t, err, "device_group_changed")
 	var other int64
-	if err = f.db.DB.QueryRow("SELECT device_id FROM devices WHERE group_id=8").Scan(&other); err != nil {
+	if err = fixtureRow(t, f.db, "SELECT device_id FROM devices WHERE group_id=8").Scan(&other); err != nil {
 		t.Fatal(err)
 	}
 	_, err = f.dashboard.SaveDevice(ctx, editor.token, editor.csrf, dashboard.DeviceInput{ID: other, GroupID: gid(7), Name: "forged", Status: "inactive"}, false)
@@ -158,7 +158,7 @@ func TestMySQLDeviceMutationScopesAndPreservation(t *testing.T) {
 	if _, err = f.dashboard.SaveDevice(ctx, editor.token, editor.csrf, dashboard.DeviceInput{ID: id, Name: "renamed", Status: "inactive", Modifier: "forged"}, false); err != nil {
 		t.Fatal(err)
 	}
-	if err = f.db.DB.QueryRow("SELECT modifier FROM devices WHERE device_id=?", id).Scan(&actor); err != nil || actor != "editor" {
+	if err = fixtureRow(t, f.db, "SELECT modifier FROM devices WHERE device_id=?", id).Scan(&actor); err != nil || actor != "editor" {
 		t.Fatal("modifier", err)
 	}
 	if err = f.dashboard.DeleteDevice(ctx, editor.token, editor.csrf, id); err != nil {
@@ -172,16 +172,16 @@ func TestMySQLDeviceMutationScopesAndPreservation(t *testing.T) {
 		}
 		switch kind {
 		case "schedule":
-			_, err = f.db.DB.Exec("INSERT INTO schedule_group(name,target_device) VALUES('linked',?)", id)
+			_, err = fixtureExec(t, f.db, "INSERT INTO schedule_group(name,target_device) VALUES('linked',?)", id)
 		case "credential":
-			_, err = f.db.DB.Exec("INSERT INTO agent_device_credential(device_id,token_hash,expires_at) VALUES(?,UNHEX(REPEAT('ab',32)),UTC_TIMESTAMP()+INTERVAL 1 DAY)", id)
+			_, err = fixtureExec(t, f.db, "INSERT INTO agent_device_credential(device_id,token_hash,expires_at) VALUES(?,UNHEX(REPEAT('ab',32)),UTC_TIMESTAMP()+INTERVAL 1 DAY)", id)
 		case "event":
-			_, err = f.db.DB.Exec("INSERT INTO agent_event(device_id,event_type,severity,occurred_at) VALUES(?,'recovered','info',UTC_TIMESTAMP())", id)
+			_, err = fixtureExec(t, f.db, "INSERT INTO agent_event(device_id,event_type,severity,occurred_at) VALUES(?,'recovered','info',UTC_TIMESTAMP())", id)
 		default:
 			var issue dashboard.EnrollmentIssue
 			issue, err = f.dashboard.IssueEnrollment(ctx, admin.token, admin.csrf, dashboard.EnrollmentInput{GroupID: gid(7), Name: dname(kind), TTLHours: 1})
 			if err == nil && kind == "used_enrollment" {
-				_, err = f.db.DB.Exec("UPDATE agent_enrollment_token SET used_at=UTC_TIMESTAMP(),used_by_device_id=? WHERE enrollment_id=UNHEX(REPLACE(?,'-',''))", id, issue.ID)
+				_, err = fixtureExec(t, f.db, "UPDATE agent_enrollment_token SET used_at=UTC_TIMESTAMP(),used_by_device_id=? WHERE enrollment_id=UNHEX(REPLACE(?,'-',''))", id, issue.ID)
 			}
 		}
 		if err != nil {
@@ -190,7 +190,7 @@ func TestMySQLDeviceMutationScopesAndPreservation(t *testing.T) {
 		expectCode(t, f.dashboard.DeleteDevice(ctx, editor.token, editor.csrf, id), "device_in_use")
 	}
 	// A removed grant is checked again; cached/UI permissions cannot authorize.
-	if _, err = f.db.DB.Exec("DELETE FROM tw_group_member WHERE user_id='editor'"); err != nil {
+	if _, err = fixtureExec(t, f.db, "DELETE FROM tw_group_member WHERE user_id='editor'"); err != nil {
 		t.Fatal(err)
 	}
 	_, err = f.dashboard.SaveDevice(ctx, editor.token, editor.csrf, dashboard.DeviceInput{GroupID: gid(7), Name: "revoked", Status: "active"}, true)
@@ -222,7 +222,7 @@ func TestMySQLEnrollmentLifecycleAndAuditRollback(t *testing.T) {
 	}
 	var hash []byte
 	var hours int
-	if err = f.db.DB.QueryRow("SELECT token_hash,TIMESTAMPDIFF(HOUR,created_at,expires_at) FROM agent_enrollment_token WHERE enrollment_id=UNHEX(REPLACE(?,'-',''))", issue.ID).Scan(&hash, &hours); err != nil {
+	if err = fixtureRow(t, f.db, "SELECT token_hash,TIMESTAMPDIFF(HOUR,created_at,expires_at) FROM agent_enrollment_token WHERE enrollment_id=UNHEX(REPLACE(?,'-',''))", issue.ID).Scan(&hash, &hours); err != nil {
 		t.Fatal(err)
 	}
 	want := sha256.Sum256([]byte(issue.Token))
@@ -299,7 +299,7 @@ func TestMySQLEnrollmentLifecycleAndAuditRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.db.DB.Exec("UPDATE agent_enrollment_token SET expires_at=UTC_TIMESTAMP()-INTERVAL 1 SECOND WHERE enrollment_id=UNHEX(REPLACE(?,'-',''))", expired.ID); err != nil {
+	if _, err = fixtureExec(t, f.db, "UPDATE agent_enrollment_token SET expires_at=UTC_TIMESTAMP()-INTERVAL 1 SECOND WHERE enrollment_id=UNHEX(REPLACE(?,'-',''))", expired.ID); err != nil {
 		t.Fatal(err)
 	}
 	items, err = f.dashboard.Enrollments(ctx, admin.token, gid(8))
@@ -312,43 +312,43 @@ func TestMySQLEnrollmentLifecycleAndAuditRollback(t *testing.T) {
 	}
 	// An unavailable audit table must roll back every mutation, not just log a warning.
 	var before int
-	f.db.DB.QueryRow("SELECT COUNT(*) FROM agent_enrollment_token").Scan(&before)
-	if _, err = f.db.DB.Exec("RENAME TABLE tw_audit TO tw_audit_test_offline"); err != nil {
+	fixtureRow(t, f.db, "SELECT COUNT(*) FROM agent_enrollment_token").Scan(&before)
+	if _, err = fixtureExec(t, f.db, "RENAME TABLE tw_audit TO tw_audit_test_offline"); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { f.db.DB.Exec("RENAME TABLE tw_audit_test_offline TO tw_audit") })
+	t.Cleanup(func() { fixtureExec(t, f.db, "RENAME TABLE tw_audit_test_offline TO tw_audit") })
 	failed, err := f.dashboard.IssueEnrollment(ctx, admin.token, admin.csrf, dashboard.EnrollmentInput{GroupID: gid(7), TTLHours: 1})
 	expectCode(t, err, "unavailable")
 	if failed.Token != "" {
 		t.Fatal("uncommitted secret escaped")
 	}
 	var after int
-	f.db.DB.QueryRow("SELECT COUNT(*) FROM agent_enrollment_token").Scan(&after)
+	fixtureRow(t, f.db, "SELECT COUNT(*) FROM agent_enrollment_token").Scan(&after)
 	if before != after {
 		t.Fatal("failed token persisted")
 	}
 	_, err = f.dashboard.SaveDevice(ctx, admin.token, admin.csrf, dashboard.DeviceInput{GroupID: gid(7), Name: "rollback", Status: "active"}, true)
 	expectCode(t, err, "unavailable")
-	f.db.DB.QueryRow("SELECT COUNT(*) FROM devices WHERE device_name='rollback'").Scan(&after)
+	fixtureRow(t, f.db, "SELECT COUNT(*) FROM devices WHERE device_name='rollback'").Scan(&after)
 	if after != 0 {
 		t.Fatal("failed create persisted")
 	}
 	_, err = f.dashboard.SaveDevice(ctx, admin.token, admin.csrf, dashboard.DeviceInput{ID: next.DeviceID, Name: "rollback-update", Status: "inactive"}, false)
 	expectCode(t, err, "unavailable")
 	var storedName string
-	f.db.DB.QueryRow("SELECT device_name FROM devices WHERE device_id=?", next.DeviceID).Scan(&storedName)
+	fixtureRow(t, f.db, "SELECT device_name FROM devices WHERE device_id=?", next.DeviceID).Scan(&storedName)
 	if storedName != *issue.Name {
 		t.Fatal("failed update persisted")
 	}
 	_, err = f.dashboard.RevokeEnrollment(ctx, admin.token, admin.csrf, expired.ID)
 	expectCode(t, err, "unavailable")
 	expectCode(t, f.dashboard.DeleteDevice(ctx, admin.token, admin.csrf, manualID), "unavailable")
-	f.db.DB.QueryRow("SELECT COUNT(*) FROM devices WHERE device_id=?", manualID).Scan(&after)
+	fixtureRow(t, f.db, "SELECT COUNT(*) FROM devices WHERE device_id=?", manualID).Scan(&after)
 	if after != 1 {
 		t.Fatal("failed delete persisted")
 	}
 	var timestamp sql.NullTime
-	f.db.DB.QueryRow("SELECT revoked_at FROM agent_enrollment_token WHERE enrollment_id=UNHEX(REPLACE(?,'-',''))", expired.ID).Scan(&timestamp)
+	fixtureRow(t, f.db, "SELECT revoked_at FROM agent_enrollment_token WHERE enrollment_id=UNHEX(REPLACE(?,'-',''))", expired.ID).Scan(&timestamp)
 	if timestamp.Valid {
 		t.Fatal("failed revoke persisted")
 	}

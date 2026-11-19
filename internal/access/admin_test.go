@@ -1,12 +1,15 @@
 package access
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
 func adminFixture(t *testing.T) (*Service, Principal, string) {
@@ -25,7 +28,11 @@ func adminFixture(t *testing.T) (*Service, Principal, string) {
 	return s, p, token
 }
 func TestMySQLAdministrationAndRevocation(t *testing.T) {
-	s, p, token := adminFixture(t)
+	testAdministrationAndRevocation(t, adminFixture)
+}
+
+func testAdministrationAndRevocation(t *testing.T, fixture adminAccessFixture) {
+	s, p, token := fixture(t)
 	ctx := context.Background()
 	reader, readerToken, err := s.Login(ctx, "reader", testPassword, "127.0.0.2", "")
 	if err != nil {
@@ -110,7 +117,11 @@ func TestMySQLAdministrationAndRevocation(t *testing.T) {
 	}
 }
 func TestMySQLConcurrentLastAdminProtection(t *testing.T) {
-	s, p, token := adminFixture(t)
+	testConcurrentLastAdminProtection(t, adminFixture)
+}
+
+func testConcurrentLastAdminProtection(t *testing.T, fixture adminAccessFixture) {
+	s, p, token := fixture(t)
 	ctx := context.Background()
 	if _, err := s.db.DB.Exec("INSERT INTO users(user_id,name,password,role,group_id) VALUES('second','Second',?,'admin',0)", testHash); err != nil {
 		t.Fatal(err)
@@ -167,7 +178,11 @@ func TestMySQLConcurrentLastAdminProtection(t *testing.T) {
 	}
 }
 func TestMySQLGroupRemovalCannotGrantGlobalRights(t *testing.T) {
-	s, p, token := adminFixture(t)
+	testGroupRemovalCannotGrantGlobalRights(t, adminFixture)
+}
+
+func testGroupRemovalCannotGrantGlobalRights(t *testing.T, fixture adminAccessFixture) {
+	s, p, token := fixture(t)
 	ctx := context.Background()
 	r, old, err := s.Login(ctx, "reader", testPassword, "127.0.0.2", "")
 	if err != nil {
@@ -180,7 +195,7 @@ func TestMySQLGroupRemovalCannotGrantGlobalRights(t *testing.T) {
 	if _, err = s.db.DB.Exec("INSERT INTO devices(group_id,device_name) VALUES(7,'moved-device')"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.DB.Exec("INSERT INTO agent_enrollment_token(enrollment_id,token_hash,group_id,expires_at) VALUES(UNHEX(REPEAT('01',16)),UNHEX(REPEAT('02',32)),7,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 1 DAY))"); err != nil {
+	if _, err = s.db.DB.Exec("INSERT INTO agent_enrollment_token(enrollment_id,token_hash,group_id,expires_at) VALUES(?,?,7,?)", bytes.Repeat([]byte{1}, 16), bytes.Repeat([]byte{2}, 32), store.TimeValue(s.db.Dialect, time.Now().UTC().Add(24*time.Hour))); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.DeleteGroup(ctx, token, p.CSRF, 7); err != nil {
@@ -217,7 +232,11 @@ func TestMySQLGroupRemovalCannotGrantGlobalRights(t *testing.T) {
 	}
 }
 func TestMySQLAdministrationAuditFailureIsAtomic(t *testing.T) {
-	s, p, token := adminFixture(t)
+	testAdministrationAuditFailureIsAtomic(t, adminFixture)
+}
+
+func testAdministrationAuditFailureIsAtomic(t *testing.T, fixture adminAccessFixture) {
+	s, p, token := fixture(t)
 	ctx := context.Background()
 	reader, old, err := s.Login(ctx, "reader", testPassword, "127.0.0.2", "")
 	if err != nil {
@@ -242,7 +261,11 @@ func TestMySQLAdministrationAuditFailureIsAtomic(t *testing.T) {
 	}
 }
 func TestMySQLAccessV1UpgradePreservesSessionsAndRemovedGrants(t *testing.T) {
-	s, _, token := adminFixture(t)
+	testAccessV1UpgradePreservesSessionsAndRemovedGrants(t, adminFixture)
+}
+
+func testAccessV1UpgradePreservesSessionsAndRemovedGrants(t *testing.T, fixture adminAccessFixture) {
+	s, _, token := fixture(t)
 	ctx := context.Background()
 	// Reconstruct the old v1 layout from the current initialized fixture.
 	if _, err := s.db.DB.Exec("DROP TABLE tw_user_identity"); err != nil {
@@ -251,8 +274,14 @@ func TestMySQLAccessV1UpgradePreservesSessionsAndRemovedGrants(t *testing.T) {
 	if _, err := s.db.DB.Exec("DELETE FROM tw_group_member WHERE user_id='reader'"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.DB.Exec("ALTER TABLE tw_audit DROP COLUMN target,DROP COLUMN detail"); err != nil {
-		t.Fatal(err)
+	dropColumns := []string{"ALTER TABLE tw_audit DROP COLUMN target,DROP COLUMN detail"}
+	if s.db.Dialect == "sqlite" {
+		dropColumns = []string{"ALTER TABLE tw_audit DROP COLUMN target", "ALTER TABLE tw_audit DROP COLUMN detail"}
+	}
+	for _, query := range dropColumns {
+		if _, err := s.db.DB.Exec(query); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err := s.db.DB.Exec("UPDATE tw_access_schema SET version=1,state='ready'"); err != nil {
 		t.Fatal(err)

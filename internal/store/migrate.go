@@ -44,7 +44,7 @@ func (s *Store) Status(ctx context.Context) (MigrationReport, error) {
 	return inspect(ctx, s.DB, s.Dialect, catalog)
 }
 func inspect(ctx context.Context, q queryer, dialect string, catalog []Migration) (MigrationReport, error) {
-	r := MigrationReport{Dialect: dialect, ReadOnly: true, WriteSupported: dialect == "mysql", Migrations: []MigrationStatus{}, Unknown: []string{}}
+	r := MigrationReport{Dialect: dialect, ReadOnly: true, WriteSupported: dialect == "mysql" || dialect == "sqlite", Migrations: []MigrationStatus{}, Unknown: []string{}}
 	exists, err := tableExists(ctx, q, dialect, "migrations")
 	if err != nil {
 		return r, err
@@ -114,8 +114,43 @@ func inspect(ctx context.Context, q queryer, dialect string, catalog []Migration
 			if item.State != "applied" {
 				r.Blocked = true
 			}
+		} else if dialect == "sqlite" && m.Name == sqliteFoundation && applied[m.Name] {
+			// Unlike legacy Python history, this marker and its checksum journal
+			// are written in one transaction. A missing journal means corruption.
+			item.State = "blocked"
+			r.Blocked = true
+		}
+		if dialect == "sqlite" && m.Name == sqliteFoundation && item.State == "applied" && item.Statement != len(m.Statements) {
+			item.State = "blocked"
+			r.Blocked = true
 		}
 		r.Migrations = append(r.Migrations, item)
+	}
+	if dialect == "sqlite" {
+		legacy, err := legacySQLiteMigrations()
+		if err != nil {
+			return r, err
+		}
+		for _, m := range legacy {
+			known[m.Name] = true
+			a, attempted := attempts[m.Name]
+			if !applied[m.Name] && !attempted {
+				continue // Historical predecessors are never invented or replayed.
+			}
+			item := MigrationStatus{Name: m.Name, SHA256: m.SHA256, State: "applied"}
+			if attempted {
+				item.Statement = a.statement
+				if a.hash != m.SHA256 {
+					item.State = "checksum_mismatch"
+				} else if a.state != "applied" || !applied[m.Name] {
+					item.State = "blocked"
+				}
+				if item.State != "applied" {
+					r.Blocked = true
+				}
+			}
+			r.Migrations = append(r.Migrations, item)
+		}
 	}
 	unknown := map[string]bool{}
 	for name := range applied {
@@ -140,18 +175,18 @@ func inspect(ctx context.Context, q queryer, dialect string, catalog []Migration
 
 // Migrate applies the frozen MySQL catalog on ONE pinned connection. The caller
 // must stop the Python server and confirm a backup first; its migrator does not
-// participate in this Go-only advisory lock. SQLite writes remain blocked until
-// the missing bootstrap and query dialect have been implemented and verified.
+// participate in this Go-only advisory lock. Native SQLite migrations use one
+// immediate transaction for schema, data and migration history together.
 func (s *Store) Migrate(ctx context.Context) (MigrationReport, error) {
 	if s.readOnly {
 		return MigrationReport{}, errors.New("migration requires an explicitly writable database")
 	}
-	if s.Dialect != "mysql" {
-		return MigrationReport{}, ErrSQLiteIncomplete
-	}
 	catalog, err := Migrations(s.Dialect)
 	if err != nil {
 		return MigrationReport{}, err
+	}
+	if s.Dialect == "sqlite" {
+		return s.applySQLite(ctx, catalog)
 	}
 	return s.apply(ctx, catalog)
 }

@@ -90,7 +90,11 @@ func requireError(t *testing.T, err error, code string) {
 	}
 }
 func TestMySQLAccessMigrationPreservesAndDoesNotRegrant(t *testing.T) {
-	db := accessStore(t)
+	testAccessMigrationPreservesAndDoesNotRegrant(t, accessStore)
+}
+
+func testAccessMigrationPreservesAndDoesNotRegrant(t *testing.T, fixture storeAccessFixture) {
+	db := fixture(t)
 	ctx := context.Background()
 	before, _ := db.Status(ctx)
 	r, err := Status(ctx, db)
@@ -130,7 +134,11 @@ func TestMySQLAccessMigrationPreservesAndDoesNotRegrant(t *testing.T) {
 	}
 }
 func TestMySQLAccessSessionLifecycleAndPasswordGate(t *testing.T) {
-	db, s := initialized(t)
+	testAccessSessionLifecycleAndPasswordGate(t, initialized)
+}
+
+func testAccessSessionLifecycleAndPasswordGate(t *testing.T, fixture initializedAccessFixture) {
+	db, s := fixture(t)
 	ctx := context.Background()
 	p, token, err := s.Login(ctx, "reader", testPassword, "127.0.0.1", "")
 	if err != nil {
@@ -180,7 +188,11 @@ func TestMySQLAccessSessionLifecycleAndPasswordGate(t *testing.T) {
 	requireError(t, err, "unauthenticated")
 }
 func TestMySQLAccessExpiryRevocationAndLimits(t *testing.T) {
-	db, s := initialized(t)
+	testAccessExpiryRevocationAndLimits(t, initialized)
+}
+
+func testAccessExpiryRevocationAndLimits(t *testing.T, fixture initializedAccessFixture) {
+	db, s := fixture(t)
 	ctx := context.Background()
 	_, token, err := s.Login(ctx, "reader", testPassword, "127.0.0.1", "")
 	if err != nil {
@@ -235,7 +247,11 @@ func request(h http.Handler, method, path, body, token, csrf string) *httptest.R
 	return w
 }
 func TestMySQLAccessHTTPAndTransport(t *testing.T) {
-	_, s := initialized(t)
+	testAccessHTTPAndTransport(t, initialized)
+}
+
+func testAccessHTTPAndTransport(t *testing.T, fixture initializedAccessFixture) {
+	_, s := fixture(t)
 	h, err := NewHTTP(s, "/timeweaver_svr", HTTPOptions{Origin: "https://tw.example"})
 	if err != nil {
 		t.Fatal(err)
@@ -332,7 +348,11 @@ func TestHumanOriginRejectsRemoteHTTPAndSpoofedLocal(t *testing.T) {
 }
 
 func TestMySQLAccessSessionCapAndAtomicPasswordFailure(t *testing.T) {
-	db, s := initialized(t)
+	testAccessSessionCapAndAtomicPasswordFailure(t, initialized)
+}
+
+func testAccessSessionCapAndAtomicPasswordFailure(t *testing.T, fixture initializedAccessFixture) {
+	db, s := fixture(t)
 	ctx := context.Background()
 	var first, latest string
 	var principal Principal

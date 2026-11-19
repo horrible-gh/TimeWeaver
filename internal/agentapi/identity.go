@@ -75,8 +75,7 @@ type credentialIssue struct {
 	IssuedAt, ExpiresAt time.Time
 }
 
-// Identity is intentionally MySQL/MariaDB-only until the SQLite schema and
-// transaction dialect are complete. Constructing it never runs migrations.
+// Identity uses the existing device schema. Constructing it never runs migrations.
 type Identity struct {
 	db  *store.Store
 	key []byte
@@ -84,8 +83,8 @@ type Identity struct {
 }
 
 func NewIdentity(db *store.Store, settings config.Settings) (*Identity, error) {
-	if db == nil || db.DB == nil || db.Dialect != "mysql" || db.ReadOnly() {
-		return nil, errors.New("identity API requires a writable MySQL/MariaDB store")
+	if db == nil || db.DB == nil || (db.Dialect != "mysql" && db.Dialect != "sqlite") || db.ReadOnly() {
+		return nil, errors.New("identity API requires a writable MySQL/MariaDB or SQLite store")
 	}
 	if len(settings.SecretKey) < 32 || (settings.AgentSecretKey != "" && len(settings.AgentSecretKey) < 32) {
 		return nil, errors.New("identity signing configuration is invalid")

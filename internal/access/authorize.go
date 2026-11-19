@@ -3,6 +3,8 @@ package access
 import (
 	"context"
 	"database/sql"
+
+	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
 // WithRead holds the authenticated user lock through scoped reads. Polling does
@@ -37,6 +39,9 @@ func (s *Service) withRequest(ctx context.Context, token, csrf string, write, ad
 	if !validToken(token) {
 		return failure(401, "unauthenticated")
 	}
+	// Writable SQLite stores begin IMMEDIATE transactions. Acquiring the write
+	// reservation before reading the principal serializes authorization and
+	// revocation across independent connections and Service instances.
 	tx, err := s.db.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return unavailable()
@@ -47,7 +52,7 @@ func (s *Service) withRequest(ctx context.Context, token, csrf string, write, ad
 		// locks. A->B and B->A admin edits cannot deadlock or remove both admins.
 		var version int
 		var state string
-		if tx.QueryRowContext(ctx, "SELECT version,state FROM tw_access_schema WHERE id=1 FOR UPDATE").Scan(&version, &state) != nil || version != schemaVersion || state != "ready" {
+		if tx.QueryRowContext(ctx, "SELECT version,state FROM tw_access_schema WHERE id=1"+store.LockClause(s.db.Dialect, false)).Scan(&version, &state) != nil || version != schemaVersion || state != "ready" {
 			return unavailable()
 		}
 	}

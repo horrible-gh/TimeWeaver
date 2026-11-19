@@ -11,7 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/go-sql-driver/mysql"
+	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
 type AdminUser struct {
@@ -71,14 +71,11 @@ func validUserInput(in UserInput, create bool) error {
 	return nil
 }
 func adminFailure(err error) error {
-	var my *mysql.MySQLError
-	if errors.As(err, &my) {
-		if my.Number == 1062 {
-			return failure(409, "already_exists")
-		}
-		if my.Number == 1451 || my.Number == 1452 {
-			return failure(409, "resource_in_use")
-		}
+	if store.IsUniqueViolation(err) {
+		return failure(409, "already_exists")
+	}
+	if store.IsForeignKeyViolation(err) {
+		return failure(409, "resource_in_use")
 	}
 	return unavailable()
 }
@@ -93,9 +90,9 @@ func auditChange(ctx context.Context, tx *sql.Tx, now int64, actor, action, targ
 	}
 	return nil
 }
-func requireGroup(ctx context.Context, tx *sql.Tx, id int64) error {
+func (s *Service) requireGroup(ctx context.Context, tx *sql.Tx, id int64) error {
 	var found int64
-	err := tx.QueryRowContext(ctx, "SELECT group_id FROM `groups` WHERE group_id=? FOR UPDATE", id).Scan(&found)
+	err := tx.QueryRowContext(ctx, "SELECT group_id FROM `groups` WHERE group_id=?"+store.LockClause(s.db.Dialect, false), id).Scan(&found)
 	if errors.Is(err, sql.ErrNoRows) {
 		return failure(422, "group_not_found")
 	}
@@ -104,11 +101,11 @@ func requireGroup(ctx context.Context, tx *sql.Tx, id int64) error {
 	}
 	return nil
 }
-func replaceMemberships(ctx context.Context, tx *sql.Tx, id string, groups []Membership) error {
+func (s *Service) replaceMemberships(ctx context.Context, tx *sql.Tx, id string, groups []Membership) error {
 	copy := append([]Membership(nil), groups...)
 	sort.Slice(copy, func(i, j int) bool { return copy[i].GroupID < copy[j].GroupID })
 	for _, m := range copy {
-		if err := requireGroup(ctx, tx, m.GroupID); err != nil {
+		if err := s.requireGroup(ctx, tx, m.GroupID); err != nil {
 			return err
 		}
 	}
@@ -151,8 +148,8 @@ func invalidateUser(ctx context.Context, tx *sql.Tx, id string) error {
 	}
 	return nil
 }
-func targetUser(ctx context.Context, tx *sql.Tx, id string) (User, error) {
-	u, err := loadUser(ctx, tx, id)
+func (s *Service) targetUser(ctx context.Context, tx *sql.Tx, id string) (User, error) {
+	u, err := s.loadUser(ctx, tx, id)
 	return u, adminLookupError(err)
 }
 func (s *Service) peekTargetUser(ctx context.Context, id string) (User, error) {
@@ -172,7 +169,11 @@ func (s *Service) ListUsers(ctx context.Context, token string) ([]AdminUser, err
 		if u.Role != "admin" {
 			return failure(403, "forbidden")
 		}
-		rows, err := tx.QueryContext(ctx, "SELECT u.user_id,u.name,COALESCE(u.email,''),u.role,u.group_id,a.status,a.version,a.must_change_password,CASE WHEN BINARY u.password=BINARY '!os' THEN 'os' ELSE 'local' END,COALESCE(i.os_name,'') FROM users u JOIN tw_user_auth a ON a.user_id=u.user_id LEFT JOIN tw_user_identity i ON i.user_id=u.user_id ORDER BY u.user_id")
+		osPassword := "BINARY u.password=BINARY '!os'"
+		if s.db.Dialect == "sqlite" {
+			osPassword = "u.password COLLATE BINARY='!os'"
+		}
+		rows, err := tx.QueryContext(ctx, "SELECT u.user_id,u.name,COALESCE(u.email,''),u.role,u.group_id,a.status,a.version,a.must_change_password,CASE WHEN "+osPassword+" THEN 'os' ELSE 'local' END,COALESCE(i.os_name,'') FROM users u JOIN tw_user_auth a ON a.user_id=u.user_id LEFT JOIN tw_user_identity i ON i.user_id=u.user_id ORDER BY u.user_id")
 		if err != nil {
 			return unavailable()
 		}
@@ -278,7 +279,7 @@ func (s *Service) CreateUser(ctx context.Context, token, csrf string, in UserInp
 		}
 		if in.AuthMethod == "os" {
 			var owner string
-			err := tx.QueryRowContext(ctx, "SELECT user_id FROM tw_user_identity WHERE subject=? FOR UPDATE", identity.Subject).Scan(&owner)
+			err := tx.QueryRowContext(ctx, "SELECT user_id FROM tw_user_identity WHERE subject=?"+store.LockClause(s.db.Dialect, false), identity.Subject).Scan(&owner)
 			if err == nil {
 				return failure(409, "os_identity_in_use")
 			}
@@ -299,7 +300,7 @@ func (s *Service) CreateUser(ctx context.Context, token, csrf string, in UserInp
 				return identityFailure(err)
 			}
 		}
-		if err = replaceMemberships(ctx, tx, in.ID, in.Groups); err != nil {
+		if err = s.replaceMemberships(ctx, tx, in.ID, in.Groups); err != nil {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, "UPDATE users SET group_id=? WHERE user_id=?", defaultGroup(0, in.Groups), in.ID); err != nil {
@@ -337,7 +338,7 @@ func (s *Service) UpdateUser(ctx context.Context, token, csrf string, in UserInp
 		if err := validUserInput(in, false); err != nil {
 			return err
 		}
-		old, err := targetUser(ctx, tx, in.ID)
+		old, err := s.targetUser(ctx, tx, in.ID)
 		if err != nil {
 			return err
 		}
@@ -347,7 +348,7 @@ func (s *Service) UpdateUser(ctx context.Context, token, csrf string, in UserInp
 		if in.AuthMethod != "" && in.AuthMethod != old.AuthMethod {
 			return failure(409, "auth_method_immutable")
 		}
-		if err = protectAdminAccess(ctx, tx, old, in.Role, in.Status, old.MustChangePassword); err != nil {
+		if err = s.protectAdminAccess(ctx, tx, old, in.Role, in.Status, old.MustChangePassword); err != nil {
 			return err
 		}
 		if identity != nil {
@@ -363,7 +364,7 @@ func (s *Service) UpdateUser(ctx context.Context, token, csrf string, in UserInp
 				return identityFailure(err)
 			}
 		}
-		if err = replaceMemberships(ctx, tx, old.ID, in.Groups); err != nil {
+		if err = s.replaceMemberships(ctx, tx, old.ID, in.Groups); err != nil {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, "UPDATE users SET name=?,email=?,role=?,group_id=? WHERE user_id=?", in.Name, in.Email, in.Role, defaultGroup(old.GroupID, in.Groups), old.ID); err != nil {
@@ -399,7 +400,7 @@ func (s *Service) ResetPassword(ctx context.Context, token, csrf, id, password s
 		return err
 	}
 	return s.withRequest(ctx, token, csrf, true, true, func(tx *sql.Tx, actor User) error {
-		old, err := targetUser(ctx, tx, id)
+		old, err := s.targetUser(ctx, tx, id)
 		if err != nil {
 			return err
 		}
@@ -412,7 +413,7 @@ func (s *Service) ResetPassword(ctx context.Context, token, csrf, id, password s
 		if old.AuthMethod == "os" {
 			return failure(409, "os_password_managed")
 		}
-		if err = protectAdminAccess(ctx, tx, old, old.Role, old.status, true); err != nil {
+		if err = s.protectAdminAccess(ctx, tx, old, old.Role, old.status, true); err != nil {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, "UPDATE users SET password=? WHERE user_id=?", hash, old.ID); err != nil {
@@ -430,12 +431,16 @@ func (s *Service) ResetPassword(ctx context.Context, token, csrf, id, password s
 
 // An OS provider can be disabled or unavailable after a restart. Keep a usable
 // local administrator as a recovery path independently of OS administrators.
-func protectAdminAccess(ctx context.Context, tx *sql.Tx, old User, role, status string, mustChange bool) error {
+func (s *Service) protectAdminAccess(ctx context.Context, tx *sql.Tx, old User, role, status string, mustChange bool) error {
 	if old.Role != "admin" || old.status != "active" || old.MustChangePassword || (role == "admin" && status == "active" && !mustChange) {
 		return nil
 	}
 	var all, local int
-	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(SUM(BINARY u.password<>BINARY '!os'),0) FROM users u JOIN tw_user_auth a ON a.user_id=u.user_id WHERE u.role='admin' AND a.status='active' AND a.must_change_password=FALSE AND BINARY u.password<>BINARY ? AND u.user_id<>?", legacySeedHash, old.ID).Scan(&all, &local); err != nil {
+	localPassword, nonSeedPassword := "BINARY u.password<>BINARY '!os'", "BINARY u.password<>BINARY ?"
+	if s.db.Dialect == "sqlite" {
+		localPassword, nonSeedPassword = "u.password COLLATE BINARY<>'!os'", "u.password COLLATE BINARY<>?"
+	}
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(SUM("+localPassword+"),0) FROM users u JOIN tw_user_auth a ON a.user_id=u.user_id WHERE u.role='admin' AND a.status='active' AND a.must_change_password=FALSE AND "+nonSeedPassword+" AND u.user_id<>?", legacySeedHash, old.ID).Scan(&all, &local); err != nil {
 		return unavailable()
 	}
 	if all == 0 {

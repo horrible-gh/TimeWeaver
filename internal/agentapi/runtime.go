@@ -99,8 +99,8 @@ type HeartbeatData struct {
 type Runtime struct{ db *store.Store }
 
 func NewRuntime(db *store.Store) (*Runtime, error) {
-	if db == nil || db.DB == nil || db.Dialect != "mysql" || db.ReadOnly() {
-		return nil, errors.New("runtime requires a writable MySQL/MariaDB store")
+	if db == nil || db.DB == nil || (db.Dialect != "mysql" && db.Dialect != "sqlite") || db.ReadOnly() {
+		return nil, errors.New("runtime requires a writable MySQL/MariaDB or SQLite store")
 	}
 	return &Runtime{db: db}, nil
 }

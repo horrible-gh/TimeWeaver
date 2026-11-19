@@ -39,7 +39,7 @@ func TestBrowserManualFlow(t *testing.T) {
 	task := makeTask(schedule, "manual-first")
 	makeTask(schedule, "manual-second")
 	privateTask := makeTask(private, "private-task-eight")
-	processing, err := f.db.DB.Exec(`INSERT INTO manual_execution(detail_id,is_immediate,status,schedule_datetime,claim_token,claim_expires_at) VALUES(UNHEX(REPLACE(?,'-','')),1,'processing',UTC_TIMESTAMP(),REPEAT('a',64),UTC_TIMESTAMP()+INTERVAL 1 HOUR)`, task)
+	processing, err := fixtureExec(t, f.db, `INSERT INTO manual_execution(detail_id,is_immediate,status,schedule_datetime,claim_token,claim_expires_at) VALUES(UNHEX(REPLACE(?,'-','')),1,'processing',UTC_TIMESTAMP(),REPEAT('a',64),UTC_TIMESTAMP()+INTERVAL 1 HOUR)`, task)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,13 +47,13 @@ func TestBrowserManualFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.db.DB.Exec(`INSERT INTO manual_execution(detail_id,is_immediate,status,schedule_datetime) VALUES(UNHEX(REPLACE(?,'-','')),1,'wait',UTC_TIMESTAMP())`, privateTask); err != nil {
+	if _, err = fixtureExec(t, f.db, `INSERT INTO manual_execution(detail_id,is_immediate,status,schedule_datetime) VALUES(UNHEX(REPLACE(?,'-','')),1,'wait',UTC_TIMESTAMP())`, privateTask); err != nil {
 		t.Fatal(err)
 	}
 	historyTime := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	addHistory := func(sid int64, tid, group, message string) int64 {
 		t.Helper()
-		result, e := f.db.DB.Exec(`INSERT INTO execution_log(execution_grp_id,schedule_id,detail_id,start_time,end_time,result_code,result_message) VALUES(UNHEX(?),?,UNHEX(REPLACE(?,'-','')),?,?,0,?)`, group, sid, tid, historyTime, historyTime.Add(time.Second), message)
+		result, e := fixtureExec(t, f.db, `INSERT INTO execution_log(execution_grp_id,schedule_id,detail_id,start_time,end_time,result_code,result_message) VALUES(UNHEX(?),?,UNHEX(REPLACE(?,'-','')),?,?,0,?)`, group, sid, tid, historyTime, historyTime.Add(time.Second), message)
 		if e != nil {
 			t.Fatal(e)
 		}

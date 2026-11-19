@@ -9,7 +9,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
@@ -70,23 +69,32 @@ func executionOnce[T any](ctx context.Context, db *store.Store, operation func(*
 		return zero, executionError("unavailable")
 	}
 	defer conn.Close()
-	var previous int64
-	if err = conn.QueryRowContext(ctx, "SELECT @@SESSION.innodb_lock_wait_timeout").Scan(&previous); err != nil {
-		return zero, executionError("unavailable")
-	}
-	// Reset the session setting on this exact connection, including error/cancel
-	// paths. Discard rather than return a contaminated connection to the pool.
-	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if _, e := conn.ExecContext(cleanup, "SET SESSION innodb_lock_wait_timeout = ?", previous); e != nil {
-			conn.Raw(func(any) error { return driver.ErrBadConn })
+	if db.Dialect == "mysql" {
+		var previous int64
+		if err = conn.QueryRowContext(ctx, "SELECT @@SESSION.innodb_lock_wait_timeout").Scan(&previous); err != nil {
+			return zero, executionError("unavailable")
 		}
-	}()
-	if _, err = conn.ExecContext(ctx, "SET SESSION innodb_lock_wait_timeout = 3"); err != nil {
-		return zero, executionError("unavailable")
+		// Reset the session setting on this exact connection, including error/cancel
+		// paths. Discard rather than return a contaminated connection to the pool.
+		defer func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if _, e := conn.ExecContext(cleanup, "SET SESSION innodb_lock_wait_timeout = ?", previous); e != nil {
+				conn.Raw(func(any) error { return driver.ErrBadConn })
+			}
+		}()
+		if _, err = conn.ExecContext(ctx, "SET SESSION innodb_lock_wait_timeout = 3"); err != nil {
+			return zero, executionError("unavailable")
+		}
 	}
-	tx, err := conn.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	var options *sql.TxOptions
+	if db.Dialect == "mysql" {
+		options = &sql.TxOptions{Isolation: sql.LevelReadCommitted}
+	}
+	// SQLite's writable connection starts BEGIN IMMEDIATE. The reservation is
+	// acquired before any read, so independent server instances cannot read the
+	// same pending claim or missing result and both commit a winning mutation.
+	tx, err := conn.BeginTx(ctx, options)
 	if err != nil {
 		return zero, executionError("unavailable")
 	}
@@ -111,7 +119,7 @@ func executionOnce[T any](ctx context.Context, db *store.Store, operation func(*
 
 // Lock ordering matches the reference: schedule_group -> schedule_detail ->
 // manual_execution. The unlocked candidate is rechecked after taking the locks.
-func lockExecutionTarget(ctx context.Context, tx *sql.Tx, deviceID, expectedSchedule int64, detailID []byte, allowDeleted bool) (executionTarget, error) {
+func (s *Execution) lockExecutionTarget(ctx context.Context, tx *sql.Tx, deviceID, expectedSchedule int64, detailID []byte, allowDeleted bool) (executionTarget, error) {
 	var target executionTarget
 	suffix := ""
 	if !allowDeleted {
@@ -124,14 +132,14 @@ func lockExecutionTarget(ctx context.Context, tx *sql.Tx, deviceID, expectedSche
 		return target, err
 	}
 	var device, groupStop, detailStop sql.NullInt64
-	if err := tx.QueryRowContext(ctx, "SELECT target_device,is_error_stop FROM schedule_group WHERE schedule_id=? FOR UPDATE", target.schedule).Scan(&device, &groupStop); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT target_device,is_error_stop FROM schedule_group WHERE schedule_id=?"+store.LockClause(s.db.Dialect, false), target.schedule).Scan(&device, scanFlag(&groupStop)); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return target, executionError("not_found")
 		}
 		return target, err
 	}
 	var lockedSchedule int64
-	if err := tx.QueryRowContext(ctx, "SELECT schedule_id,is_error_stop FROM schedule_detail WHERE detail_id=?"+suffix+" FOR UPDATE", detailID).Scan(&lockedSchedule, &detailStop); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT schedule_id,is_error_stop FROM schedule_detail WHERE detail_id=?"+suffix+store.LockClause(s.db.Dialect, false), detailID).Scan(&lockedSchedule, scanFlag(&detailStop)); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return target, executionError("not_found")
 		}
@@ -143,9 +151,9 @@ func lockExecutionTarget(ctx context.Context, tx *sql.Tx, deviceID, expectedSche
 	target.groupStop, target.detailStop = groupStop.Int64 != 0, detailStop.Int64 != 0
 	return target, nil
 }
-func lockManual(ctx context.Context, tx *sql.Tx, id int64) (manualRecord, error) {
+func (s *Execution) lockManual(ctx context.Context, tx *sql.Tx, id int64) (manualRecord, error) {
 	var r manualRecord
-	err := tx.QueryRowContext(ctx, `SELECT detail_id,status,claim_token,claim_expires_at,is_immediate,schedule_datetime FROM manual_execution WHERE manual_id=? FOR UPDATE`, id).Scan(&r.detail, &r.status, &r.token, &r.expiry, &r.immediate, &r.scheduled)
+	err := tx.QueryRowContext(ctx, `SELECT detail_id,status,claim_token,claim_expires_at,is_immediate,schedule_datetime FROM manual_execution WHERE manual_id=?`+store.LockClause(s.db.Dialect, false), id).Scan(&r.detail, &r.status, &r.token, store.ScanNullTime(&r.expiry), &r.immediate, store.ScanNullTime(&r.scheduled))
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, executionError("not_found")
 	}
@@ -163,22 +171,22 @@ func (s *Execution) claim(ctx context.Context, deviceID, manualID int64, token s
 		if err != nil {
 			return result, err
 		}
-		if _, err = lockExecutionTarget(ctx, tx, deviceID, schedule, detail, false); err != nil {
+		if _, err = s.lockExecutionTarget(ctx, tx, deviceID, schedule, detail, false); err != nil {
 			return result, err
 		}
-		manual, err := lockManual(ctx, tx, manualID)
+		manual, err := s.lockManual(ctx, tx, manualID)
 		if err != nil {
 			return result, err
 		}
 		if !bytes.Equal(detail, manual.detail) {
 			return result, executionError("not_found")
 		}
-		now, err := dbNow(ctx, tx)
+		now, err := store.DBNow(ctx, tx, s.db.Dialect)
 		if err != nil {
 			return result, err
 		}
 		if manual.status == "processing" && manual.expiry.Valid && !manual.expiry.Time.After(now) {
-			if _, err = tx.ExecContext(ctx, `UPDATE manual_execution SET status='wait',claim_token=NULL,claim_expires_at=NULL,modified_at=? WHERE manual_id=?`, now, manualID); err != nil {
+			if _, err = tx.ExecContext(ctx, `UPDATE manual_execution SET status='wait',claim_token=NULL,claim_expires_at=NULL,modified_at=? WHERE manual_id=?`, store.TimeValue(s.db.Dialect, now), manualID); err != nil {
 				return result, err
 			}
 			manual.status = "wait"
@@ -192,7 +200,7 @@ func (s *Execution) claim(ctx context.Context, deviceID, manualID int64, token s
 			return result, executionError("not_due")
 		}
 		expires := now.Add(claimTTL)
-		if _, err = tx.ExecContext(ctx, `UPDATE manual_execution SET status='processing',claim_token=?,claim_expires_at=?,modified_at=? WHERE manual_id=?`, token, expires, now, manualID); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE manual_execution SET status='processing',claim_token=?,claim_expires_at=?,modified_at=? WHERE manual_id=?`, token, store.TimeValue(s.db.Dialect, expires), store.TimeValue(s.db.Dialect, now), manualID); err != nil {
 			return result, err
 		}
 		return claimRecord{ClaimData{manualID, token, expires.UTC(), nil}, now}, nil
@@ -200,14 +208,18 @@ func (s *Execution) claim(ctx context.Context, deviceID, manualID int64, token s
 }
 func (s *Execution) start(ctx context.Context, deviceID int64, r ExecutionStart, execID, detailID []byte) (time.Time, error) {
 	return executionTransaction(ctx, s.db, func(tx *sql.Tx) (time.Time, error) {
-		if _, err := lockExecutionTarget(ctx, tx, deviceID, r.ScheduleID, detailID, false); err != nil {
+		if _, err := s.lockExecutionTarget(ctx, tx, deviceID, r.ScheduleID, detailID, false); err != nil {
 			return time.Time{}, err
 		}
-		now, err := dbNow(ctx, tx)
+		now, err := store.DBNow(ctx, tx, s.db.Dialect)
 		if err != nil {
 			return time.Time{}, err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO execution_running(schedule_id,detail_id,execution_grp_id,attempt,start_time) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE execution_grp_id=VALUES(execution_grp_id),attempt=VALUES(attempt),start_time=VALUES(start_time)`, r.ScheduleID, detailID, execID, r.Attempt, r.StartedAt)
+		query := `INSERT INTO execution_running(schedule_id,detail_id,execution_grp_id,attempt,start_time) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE execution_grp_id=VALUES(execution_grp_id),attempt=VALUES(attempt),start_time=VALUES(start_time)`
+		if s.db.Dialect == "sqlite" {
+			query = `INSERT INTO execution_running(schedule_id,detail_id,execution_grp_id,attempt,start_time) VALUES (?,?,?,?,?) ON CONFLICT(schedule_id,detail_id) DO UPDATE SET execution_grp_id=excluded.execution_grp_id,attempt=excluded.attempt,start_time=excluded.start_time`
+		}
+		_, err = tx.ExecContext(ctx, query, r.ScheduleID, detailID, execID, r.Attempt, store.TimeValue(s.db.Dialect, r.StartedAt))
 		return now, err
 	})
 }
@@ -222,7 +234,7 @@ type storedResult struct {
 
 func findExecutionResult(ctx context.Context, tx *sql.Tx, execID, detailID []byte, attempt int64) (storedResult, error) {
 	var v storedResult
-	err := tx.QueryRowContext(ctx, `SELECT execution_id,schedule_id,manual_id,start_time,end_time,result_code,result_message,environment_info FROM execution_log WHERE execution_grp_id=? AND detail_id=? AND attempt=?`, execID, detailID, attempt).Scan(&v.id, &v.schedule, &v.manual, &v.started, &v.finished, &v.code, &v.message, &v.environment)
+	err := tx.QueryRowContext(ctx, `SELECT execution_id,schedule_id,manual_id,start_time,end_time,result_code,result_message,environment_info FROM execution_log WHERE execution_grp_id=? AND detail_id=? AND attempt=?`, execID, detailID, attempt).Scan(&v.id, &v.schedule, &v.manual, store.ScanTime(&v.started), store.ScanNullTime(&v.finished), &v.code, &v.message, &v.environment)
 	return v, err
 }
 func sameOptionalText(stored sql.NullString, value *string) bool {
@@ -243,11 +255,11 @@ func clearExecutionRunning(ctx context.Context, tx *sql.Tx, r ExecutionStart, de
 func (s *Execution) result(ctx context.Context, deviceID int64, r ExecutionResult, execID, detailID []byte, env *string) (resultRecord, error) {
 	return executionTransaction(ctx, s.db, func(tx *sql.Tx) (resultRecord, error) {
 		var out resultRecord
-		target, err := lockExecutionTarget(ctx, tx, deviceID, r.ScheduleID, detailID, true)
+		target, err := s.lockExecutionTarget(ctx, tx, deviceID, r.ScheduleID, detailID, true)
 		if err != nil {
 			return out, err
 		}
-		now, err := dbNow(ctx, tx)
+		now, err := store.DBNow(ctx, tx, s.db.Dialect)
 		if err != nil {
 			return out, err
 		}
@@ -265,7 +277,7 @@ func (s *Execution) result(ctx context.Context, deviceID int64, r ExecutionResul
 			return out, err
 		}
 		if r.ManualID != nil {
-			manual, err := lockManual(ctx, tx, *r.ManualID)
+			manual, err := s.lockManual(ctx, tx, *r.ManualID)
 			if err != nil {
 				return out, err
 			}
@@ -276,10 +288,9 @@ func (s *Execution) result(ctx context.Context, deviceID int64, r ExecutionResul
 				return out, executionError("claim_expired")
 			}
 		}
-		inserted, err := tx.ExecContext(ctx, `INSERT INTO execution_log(execution_grp_id,schedule_id,detail_id,attempt,manual_id,start_time,end_time,result_code,result_message,environment_info) VALUES (?,?,?,?,?,?,?,?,?,?)`, execID, r.ScheduleID, detailID, r.Attempt, r.ManualID, r.StartedAt, r.FinishedAt, r.ResultCode, r.ResultMessage, env)
+		inserted, err := tx.ExecContext(ctx, `INSERT INTO execution_log(execution_grp_id,schedule_id,detail_id,attempt,manual_id,start_time,end_time,result_code,result_message,environment_info) VALUES (?,?,?,?,?,?,?,?,?,?)`, execID, r.ScheduleID, detailID, r.Attempt, r.ManualID, store.TimeValue(s.db.Dialect, r.StartedAt), store.TimeValue(s.db.Dialect, r.FinishedAt), r.ResultCode, r.ResultMessage, env)
 		if err != nil {
-			var dbErr *mysql.MySQLError
-			if !errors.As(err, &dbErr) || dbErr.Number != 1062 {
+			if !store.IsUniqueViolation(err) {
 				return out, err
 			}
 			existing, lookupErr := findExecutionResult(ctx, tx, execID, detailID, r.Attempt)
@@ -306,13 +317,13 @@ func (s *Execution) result(ctx context.Context, deviceID int64, r ExecutionResul
 			if r.ResultCode != 0 {
 				status = "failed"
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE manual_execution SET status=?,claim_token=NULL,claim_expires_at=NULL,modified_at=? WHERE manual_id=?`, status, now, *r.ManualID)
+			_, err = tx.ExecContext(ctx, `UPDATE manual_execution SET status=?,claim_token=NULL,claim_expires_at=NULL,modified_at=? WHERE manual_id=?`, status, store.TimeValue(s.db.Dialect, now), *r.ManualID)
 			transitions = append(transitions, AppliedTransition{"manual_execution", *r.ManualID, status})
 		case r.ResultCode != 0 && target.groupStop:
-			_, err = tx.ExecContext(ctx, `UPDATE schedule_group SET status='error',modified_at=? WHERE schedule_id=?`, now, r.ScheduleID)
+			_, err = tx.ExecContext(ctx, `UPDATE schedule_group SET status='error',modified_at=? WHERE schedule_id=?`, store.TimeValue(s.db.Dialect, now), r.ScheduleID)
 			transitions = append(transitions, AppliedTransition{"schedule_group", r.ScheduleID, "error"})
 		case r.ResultCode != 0 && target.detailStop:
-			_, err = tx.ExecContext(ctx, `UPDATE schedule_detail SET status='error',modified_at=? WHERE detail_id=?`, now, detailID)
+			_, err = tx.ExecContext(ctx, `UPDATE schedule_detail SET status='error',modified_at=? WHERE detail_id=?`, store.TimeValue(s.db.Dialect, now), detailID)
 			transitions = append(transitions, AppliedTransition{"schedule_detail", r.DetailID, "error"})
 		}
 		return resultRecord{ResultData{id, false, transitions}, now}, err
@@ -326,11 +337,11 @@ func (s *Execution) event(ctx context.Context, deviceID int64, r AgentEvent, env
 		return time.Time{}, executionError("unavailable")
 	}
 	defer tx.Rollback()
-	now, err := dbNow(ctx, tx)
+	now, err := store.DBNow(ctx, tx, s.db.Dialect)
 	if err != nil {
 		return time.Time{}, executionError("unavailable")
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO agent_event(device_id,event_type,severity,occurred_at,message,environment_info) VALUES (?,?,?,?,?,?)`, deviceID, r.Type, r.Severity, r.OccurredAt, r.Message, env); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO agent_event(device_id,event_type,severity,occurred_at,message,environment_info) VALUES (?,?,?,?,?,?)`, deviceID, r.Type, r.Severity, store.TimeValue(s.db.Dialect, r.OccurredAt), r.Message, env); err != nil {
 		return time.Time{}, executionError("unavailable")
 	}
 	if err = tx.Commit(); err != nil {

@@ -2,7 +2,7 @@ package store
 
 import (
 	"bytes"
-	"errors"
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -43,7 +43,7 @@ func TestFrozenSQLAssets(t *testing.T) {
 	}
 }
 func TestCatalogAndQueries(t *testing.T) {
-	for dialect, count := range map[string]int{"mysql": 31, "sqlite": 7} {
+	for dialect, count := range map[string]int{"mysql": 31, "sqlite": 1} {
 		files, err := Migrations(dialect)
 		if err != nil {
 			t.Fatal(err)
@@ -76,8 +76,36 @@ func TestCatalogAndQueries(t *testing.T) {
 	if _, err := q.Get("not-existing"); err == nil {
 		t.Fatal("missing query accepted")
 	}
-	if _, err := Queries("sqlite3"); !errors.Is(err, ErrSQLiteIncomplete) {
-		t.Fatal("incomplete dialect concealed", err)
+	legacy, err := legacySQLiteMigrations()
+	if err != nil || len(legacy) != 7 {
+		t.Fatal("frozen SQLite predecessor inventory", len(legacy), err)
+	}
+	got := []string{}
+	for _, migration := range legacy {
+		got = append(got, migration.Name)
+	}
+	want := []string{"groups_001.sql", "groups_002.sql", "timeweaver_server_014.sql", "timeweaver_server_015.sql", "users_001.sql", "users_002.sql", "users_003_group_integrity.sql"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatal(got)
+	}
+	sqliteQueries, err := Queries("sqlite3")
+	if err != nil || len(sqliteQueries) != 39 {
+		t.Fatal(len(sqliteQueries), err)
+	}
+	db := sqliteTestStore(t)
+	if _, err = db.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for key := range q {
+		statement, err := sqliteQueries.Get(key)
+		if err != nil {
+			t.Fatal(key, err)
+		}
+		prepared, err := db.DB.PrepareContext(context.Background(), statement)
+		if err != nil {
+			t.Fatalf("SQLite query %s: %v", key, err)
+		}
+		prepared.Close()
 	}
 }
 func TestSQLSyntaxBoundaries(t *testing.T) {

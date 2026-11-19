@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/horrible-gh/TimeWeaver/internal/access"
+	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
 type EnrollmentInput struct {
@@ -76,7 +77,7 @@ func (s *Service) IssueEnrollment(ctx context.Context, token, csrf string, in En
 			}
 		}
 		var status string
-		err := tx.QueryRowContext(ctx, "SELECT status FROM `groups` WHERE group_id=? FOR UPDATE", *in.GroupID).Scan(&status)
+		err := tx.QueryRowContext(ctx, "SELECT status FROM `groups` WHERE group_id=?"+s.lock(), *in.GroupID).Scan(&status)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fail(422, "group_inactive")
 		}
@@ -87,7 +88,7 @@ func (s *Service) IssueEnrollment(ctx context.Context, token, csrf string, in En
 			return fail(422, "group_inactive")
 		}
 		var now time.Time
-		if err = tx.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP()").Scan(&now); err != nil {
+		if err = tx.QueryRowContext(ctx, "SELECT "+s.nowSQL()).Scan(store.ScanTime(&now)); err != nil {
 			return dbError(err)
 		}
 		var id [16]byte
@@ -102,7 +103,7 @@ func (s *Service) IssueEnrollment(ctx context.Context, token, csrf string, in En
 		id[8] = id[8]&63 | 128
 		out = EnrollmentIssue{ID: uuidString(id[:]), Token: "enr_" + hex.EncodeToString(secret[:]), Name: in.Name, GroupID: *in.GroupID, Expires: now.UTC().Add(time.Duration(in.TTLHours) * time.Hour)}
 		hash := sha256.Sum256([]byte(out.Token))
-		if _, err = tx.ExecContext(ctx, "INSERT INTO agent_enrollment_token(enrollment_id,token_hash,device_name,group_id,created_at,expires_at) VALUES(?,?,?,?,?,?)", id[:], hash[:], out.Name, out.GroupID, now, out.Expires); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO agent_enrollment_token(enrollment_id,token_hash,device_name,group_id,created_at,expires_at) VALUES(?,?,?,?,?,?)", id[:], hash[:], out.Name, out.GroupID, s.timeValue(now), s.timeValue(out.Expires)); err != nil {
 			return dbError(err)
 		}
 		// Record only non-secret metadata; not even the digest belongs in the audit.
@@ -129,7 +130,7 @@ func (s *Service) Enrollments(ctx context.Context, token string, group *int64) (
 			where = " WHERE group_id=?"
 			args = append(args, *group)
 		}
-		rows, err := tx.QueryContext(ctx, "SELECT enrollment_id,device_name,group_id,created_at,expires_at,used_at,used_by_device_id,revoked_at,UTC_TIMESTAMP() FROM agent_enrollment_token"+where+" ORDER BY created_at DESC,enrollment_id", args...)
+		rows, err := tx.QueryContext(ctx, "SELECT enrollment_id,device_name,group_id,created_at,expires_at,used_at,used_by_device_id,revoked_at,"+s.nowSQL()+" FROM agent_enrollment_token"+where+" ORDER BY created_at DESC,enrollment_id", args...)
 		if err != nil {
 			return dbError(err)
 		}
@@ -141,7 +142,7 @@ func (s *Service) Enrollments(ctx context.Context, token string, group *int64) (
 			var used, revoked sql.NullTime
 			var usedBy sql.NullInt64
 			var now time.Time
-			if err = rows.Scan(&id, &name, &v.GroupID, &v.Created, &v.Expires, &used, &usedBy, &revoked, &now); err != nil {
+			if err = rows.Scan(&id, &name, &v.GroupID, store.ScanTime(&v.Created), store.ScanTime(&v.Expires), store.ScanNullTime(&used), &usedBy, store.ScanNullTime(&revoked), store.ScanTime(&now)); err != nil {
 				return dbError(err)
 			}
 			if len(id) != 16 {
@@ -188,7 +189,7 @@ func (s *Service) RevokeEnrollment(ctx context.Context, token, csrf, id string) 
 		}
 		var used, revoked sql.NullTime
 		var now time.Time
-		err = tx.QueryRowContext(ctx, "SELECT used_at,revoked_at,UTC_TIMESTAMP() FROM agent_enrollment_token WHERE enrollment_id=? FOR UPDATE", b).Scan(&used, &revoked, &now)
+		err = tx.QueryRowContext(ctx, "SELECT used_at,revoked_at,"+s.nowSQL()+" FROM agent_enrollment_token WHERE enrollment_id=?"+s.lock(), b).Scan(store.ScanNullTime(&used), store.ScanNullTime(&revoked), store.ScanTime(&now))
 		if errors.Is(err, sql.ErrNoRows) {
 			return fail(404, "not_found")
 		}
@@ -199,7 +200,7 @@ func (s *Service) RevokeEnrollment(ctx context.Context, token, csrf, id string) 
 			return fail(409, "already_used")
 		}
 		if !revoked.Valid {
-			if _, err = tx.ExecContext(ctx, "UPDATE agent_enrollment_token SET revoked_at=? WHERE enrollment_id=?", now, b); err != nil {
+			if _, err = tx.ExecContext(ctx, "UPDATE agent_enrollment_token SET revoked_at=? WHERE enrollment_id=?", s.timeValue(now), b); err != nil {
 				return dbError(err)
 			}
 			revoked = sql.NullTime{Time: now, Valid: true}

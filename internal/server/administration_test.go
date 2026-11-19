@@ -36,11 +36,11 @@ func TestBrowserAdministrationFlow(t *testing.T) {
 	ab64 := func(b []byte) string { return strings.ReplaceAll(base64.RawStdEncoding.EncodeToString(b), "+", ".") }
 	hash := "$pbkdf2-sha256$29000$" + ab64(salt) + "$" + ab64(key)
 	for _, q := range []string{"INSERT INTO `groups`(group_id,group_name) VALUES(7,'Seven'),(8,'Eight')", "INSERT INTO devices(group_id,device_name) VALUES(7,'device-seven'),(8,'device-eight')"} {
-		if _, err = db.DB.Exec(q); err != nil {
+		if _, err = fixtureExec(t, db, q); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err = db.DB.Exec("INSERT INTO users(user_id,name,password,role,group_id) VALUES('browser-admin','Browser Admin',?,'admin',0)", hash); err != nil {
+	if _, err = fixtureExec(t, db, "INSERT INTO users(user_id,name,password,role,group_id) VALUES('browser-admin','Browser Admin',?,'admin',0)", hash); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = db.RepairCriticalSchema(ctx); err != nil {
@@ -89,7 +89,7 @@ func TestBrowserAdministrationFlow(t *testing.T) {
 	}
 	t.Log(string(out))
 	var actor, target string
-	if db.DB.QueryRow("SELECT actor,target FROM tw_audit WHERE action='user_create' ORDER BY id DESC LIMIT 1").Scan(&actor, &target) != nil || actor != "browser-admin" || target != "browser-limited" {
+	if fixtureRow(t, db, "SELECT actor,target FROM tw_audit WHERE action='user_create' ORDER BY id DESC LIMIT 1").Scan(&actor, &target) != nil || actor != "browser-admin" || target != "browser-limited" {
 		t.Fatal("administrator audit identity")
 	}
 }

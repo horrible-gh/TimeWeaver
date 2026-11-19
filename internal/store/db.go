@@ -73,7 +73,10 @@ func Open(ctx context.Context, c config.Database, readOnly bool) (*Store, error)
 			uriPath = "/" + uriPath
 		}
 		uri := url.URL{Scheme: "file", Path: uriPath}
-		query := url.Values{"_pragma": {"busy_timeout(5000)", "foreign_keys(1)"}}
+		// SQLite's native busy handler can defer context interruption until its
+		// timeout expires. Keep this short so a cancelled HTTP write is bounded;
+		// migration lock acquisition has its own context-aware retry loop.
+		query := url.Values{"_pragma": {"busy_timeout(250)", "foreign_keys(1)"}}
 		if readOnly {
 			query.Set("mode", "ro")
 			query.Add("_pragma", "query_only(1)")

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/go-sql-driver/mysql"
+	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
 func (s *Service) OSAvailable() bool {
@@ -52,8 +52,7 @@ func (s *Service) resolveIdentity(ctx context.Context, name string) (OSIdentity,
 }
 
 func identityFailure(err error) error {
-	var my *mysql.MySQLError
-	if errors.As(err, &my) && my.Number == 1062 {
+	if store.IsUniqueViolation(err) {
 		return failure(409, "os_identity_in_use")
 	}
 	return adminFailure(err)
@@ -112,7 +111,7 @@ func (s *Service) LoginOS(ctx context.Context, name, password, peer, oldToken st
 		return Principal{}, "", unavailable()
 	}
 	defer tx.Rollback()
-	u, err := loadUser(ctx, tx, candidate.ID)
+	u, err := s.loadUser(ctx, tx, candidate.ID)
 	if err != nil {
 		return Principal{}, "", err
 	}

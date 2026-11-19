@@ -86,7 +86,11 @@ func enrollment(t *testing.T, s *Identity, name *string, group int64) string {
 		t.Fatal(err)
 	}
 	id := digest(raw)[:16]
-	_, err = s.db.DB.Exec(`INSERT INTO agent_enrollment_token(enrollment_id,token_hash,device_name,group_id,created_at,expires_at) VALUES (?,?,?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP()+INTERVAL 1 DAY)`, id, digest(raw), name, group)
+	now, err := store.DBNow(context.Background(), s.db.DB, s.db.Dialect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.db.DB.Exec(`INSERT INTO agent_enrollment_token(enrollment_id,token_hash,device_name,group_id,created_at,expires_at) VALUES (?,?,?,?,?,?)`, id, digest(raw), name, group, store.TimeValue(s.db.Dialect, now), store.TimeValue(s.db.Dialect, now.Add(24*time.Hour)))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -88,7 +88,7 @@ func latestChartRows(t *testing.T, f *deviceFixture, h http.Handler, user string
 func chartsNow(t *testing.T, f *deviceFixture) time.Time {
 	t.Helper()
 	var now time.Time
-	if err := f.db.DB.QueryRow("SELECT UTC_TIMESTAMP()").Scan(&now); err != nil {
+	if err := fixtureRow(t, f.db, "SELECT UTC_TIMESTAMP()").Scan(&now); err != nil {
 		t.Fatal(err)
 	}
 	return now.UTC()
@@ -102,7 +102,7 @@ func chartsLog(t *testing.T, f *deviceFixture, schedule int64, detail string, wh
 			t.Fatal(err)
 		}
 	}
-	result, err := f.db.DB.Exec(`INSERT INTO execution_log(execution_grp_id,schedule_id,detail_id,start_time,end_time,result_code,result_message) VALUES(?,?,UNHEX(REPLACE(?,'-','')),?,?,?,?)`, instance, schedule, detail, when, when.Add(time.Second), code, message)
+	result, err := fixtureExec(t, f.db, `INSERT INTO execution_log(execution_grp_id,schedule_id,detail_id,start_time,end_time,result_code,result_message) VALUES(?,?,UNHEX(REPLACE(?,'-','')),?,?,?,?)`, instance, schedule, detail, when, when.Add(time.Second), code, message)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -53,10 +53,6 @@ func runDatabaseCommand(command string, args []string, out, diagnostics io.Write
 		fmt.Fprintln(diagnostics, err)
 		return 2
 	}
-	if args[0] == writeAction && settings.Database.Type != "mysql" {
-		fmt.Fprintln(diagnostics, store.ErrSQLiteIncomplete)
-		return 2
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 	db, err := store.Open(ctx, settings.Database, args[0] == "status")

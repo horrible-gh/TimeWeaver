@@ -166,7 +166,8 @@ covered through the real HTTP integration tests. Consult the commit's CI run for
 results; this coverage description is not a production-readiness claim.
 
 OS identity/login is implemented in the subsequent
-[OS account slice](go-os-access-migration.md). Complete SQLite support,
-remembered-session continuity, installable server startup and deployment/rollback
+[OS account slice](go-os-access-migration.md). Native SQLite query and service
+support is implemented in the [SQLite slice](go-sqlite-migration.md).
+Remembered-session continuity, installable server startup and deployment/rollback
 validation remain separate gates. Production `serve` stays blocked, and this
 slice does not change the main-branch deployment.

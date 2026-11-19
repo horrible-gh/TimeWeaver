@@ -65,8 +65,8 @@ type ResultData struct {
 type Execution struct{ db *store.Store }
 
 func NewExecution(db *store.Store) (*Execution, error) {
-	if db == nil || db.DB == nil || db.Dialect != "mysql" || db.ReadOnly() {
-		return nil, errors.New("execution requires a writable MySQL/MariaDB store")
+	if db == nil || db.DB == nil || (db.Dialect != "mysql" && db.Dialect != "sqlite") || db.ReadOnly() {
+		return nil, errors.New("execution requires a writable MySQL/MariaDB or SQLite store")
 	}
 	return &Execution{db: db}, nil
 }

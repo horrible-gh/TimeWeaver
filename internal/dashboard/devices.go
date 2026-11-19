@@ -11,8 +11,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/horrible-gh/TimeWeaver/internal/access"
+	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
 type Service struct{ access *access.Service }
@@ -20,14 +20,11 @@ type Service struct{ access *access.Service }
 func New(service *access.Service) *Service { return &Service{access: service} }
 func fail(status int, code string) error   { return &access.Error{Status: status, Code: code} }
 func dbError(err error) error {
-	var my *mysql.MySQLError
-	if errors.As(err, &my) {
-		if my.Number == 1062 {
-			return fail(409, "device_name_conflict")
-		}
-		if my.Number == 1451 || my.Number == 1452 {
-			return fail(409, "resource_in_use")
-		}
+	if store.IsUniqueViolation(err) {
+		return fail(409, "device_name_conflict")
+	}
+	if store.IsForeignKeyViolation(err) {
+		return fail(409, "resource_in_use")
 	}
 	return fail(503, "unavailable")
 }
@@ -97,7 +94,7 @@ func (s *Service) Devices(ctx context.Context, token string) ([]Device, error) {
 			var d Device
 			var version, revision sql.NullString
 			var login, heartbeat sql.NullTime
-			if err = rows.Scan(&d.GroupID, &d.ID, &d.Name, &d.GroupName, &d.Status, &version, &login, &heartbeat, &revision); err != nil {
+			if err = rows.Scan(&d.GroupID, &d.ID, &d.Name, &d.GroupName, &d.Status, &version, store.ScanNullTime(&login), store.ScanNullTime(&heartbeat), &revision); err != nil {
 				return dbError(err)
 			}
 			d.Version = nullableString(version)
@@ -124,13 +121,13 @@ type DeviceInput struct {
 	Modifier string `json:"modifier"`
 }
 
-func deviceForEdit(ctx context.Context, tx *sql.Tx, u access.User, id int64) (int64, string, error) {
+func (s *Service) deviceForEdit(ctx context.Context, tx *sql.Tx, u access.User, id int64) (int64, string, error) {
 	if !validID(id, false) {
 		return 0, "", fail(422, "invalid_request")
 	}
 	var group int64
 	var name string
-	err := tx.QueryRowContext(ctx, "SELECT group_id,device_name FROM devices WHERE device_id=? FOR UPDATE", id).Scan(&group, &name)
+	err := tx.QueryRowContext(ctx, "SELECT group_id,device_name FROM devices WHERE device_id=?"+s.lock(), id).Scan(&group, &name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, "", fail(404, "not_found")
 	}
@@ -161,7 +158,7 @@ func (s *Service) SaveDevice(ctx context.Context, token, csrf string, in DeviceI
 				return fail(403, "forbidden")
 			}
 			var status string
-			err := tx.QueryRowContext(ctx, "SELECT status FROM `groups` WHERE group_id=? FOR UPDATE", group).Scan(&status)
+			err := tx.QueryRowContext(ctx, "SELECT status FROM `groups` WHERE group_id=?"+s.lock(), group).Scan(&status)
 			if errors.Is(err, sql.ErrNoRows) {
 				return fail(422, "group_not_found")
 			}
@@ -171,7 +168,7 @@ func (s *Service) SaveDevice(ctx context.Context, token, csrf string, in DeviceI
 			if status != "active" {
 				return fail(422, "group_inactive")
 			}
-			result, err := tx.ExecContext(ctx, "INSERT INTO devices(group_id,device_name,status,creator,created_at) VALUES(?,?,?,?,UTC_TIMESTAMP())", group, in.Name, in.Status, u.ID)
+			result, err := tx.ExecContext(ctx, "INSERT INTO devices(group_id,device_name,status,creator,created_at) VALUES(?,?,?,?,"+s.nowSQL()+")", group, in.Name, in.Status, u.ID)
 			if err != nil {
 				return dbError(err)
 			}
@@ -181,7 +178,7 @@ func (s *Service) SaveDevice(ctx context.Context, token, csrf string, in DeviceI
 			}
 		} else {
 			var err error
-			group, _, err = deviceForEdit(ctx, tx, u, id)
+			group, _, err = s.deviceForEdit(ctx, tx, u, id)
 			if err != nil {
 				return err
 			}
@@ -190,7 +187,7 @@ func (s *Service) SaveDevice(ctx context.Context, token, csrf string, in DeviceI
 			if in.GroupID != nil && *in.GroupID != group {
 				return fail(409, "device_group_changed")
 			}
-			if _, err = tx.ExecContext(ctx, "UPDATE devices SET device_name=?,status=?,modifier=?,modified_at=UTC_TIMESTAMP() WHERE device_id=?", in.Name, in.Status, u.ID, id); err != nil {
+			if _, err = tx.ExecContext(ctx, "UPDATE devices SET device_name=?,status=?,modifier=?,modified_at="+s.nowSQL()+" WHERE device_id=?", in.Name, in.Status, u.ID, id); err != nil {
 				return dbError(err)
 			}
 			action = "device_update"
@@ -204,7 +201,7 @@ func (s *Service) SaveDevice(ctx context.Context, token, csrf string, in DeviceI
 }
 func (s *Service) DeleteDevice(ctx context.Context, token, csrf string, id int64) error {
 	return s.access.WithMutation(ctx, token, csrf, func(tx *sql.Tx, u access.User) error {
-		group, name, err := deviceForEdit(ctx, tx, u, id)
+		group, name, err := s.deviceForEdit(ctx, tx, u, id)
 		if err != nil {
 			return err
 		}
@@ -218,7 +215,7 @@ func (s *Service) DeleteDevice(ctx context.Context, token, csrf string, id int64
 			{"SELECT EXISTS(SELECT 1 FROM schedule_group WHERE target_device=?)", []any{id}},
 			{"SELECT EXISTS(SELECT 1 FROM agent_device_credential WHERE device_id=?)", []any{id}},
 			{"SELECT EXISTS(SELECT 1 FROM agent_event WHERE device_id=?)", []any{id}},
-			{"SELECT EXISTS(SELECT 1 FROM agent_enrollment_token WHERE used_by_device_id=? OR (group_id=? AND device_name=? AND used_at IS NULL AND revoked_at IS NULL AND expires_at>UTC_TIMESTAMP()))", []any{id, group, name}},
+			{"SELECT EXISTS(SELECT 1 FROM agent_enrollment_token WHERE used_by_device_id=? OR (group_id=? AND device_name=? AND used_at IS NULL AND revoked_at IS NULL AND expires_at>" + s.nowSQL() + "))", []any{id, group, name}},
 		}
 		for _, c := range checks {
 			var exists bool

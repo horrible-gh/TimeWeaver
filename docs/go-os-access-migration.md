@@ -284,8 +284,10 @@ document does not assert that a new remote CI run has passed.
   real PAM or Windows password verification is exercised separately by the
   native tests, not claimed as browser end-to-end coverage.
 
-Real domain authentication, native Windows browser/end-to-end deployment checks,
-SQLite's complete production schema/dialect path, deployment inventory and
+The subsequent [SQLite slice](go-sqlite-migration.md) adds the native schema,
+query and service path, including the local/OS access scenarios on real SQLite
+files. Real domain authentication, native Windows browser/end-to-end deployment
+checks, deployment inventory and
 production cutover remain separate gates. Passing the native provider tests does
 not unlock production `serve` or authorize running application tasks with OS
 credentials. A Python rollback still does not enforce the Go RBAC/status model.

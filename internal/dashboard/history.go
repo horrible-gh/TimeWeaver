@@ -34,28 +34,43 @@ func historyRange(start, end string, now time.Time) (time.Time, time.Time, error
 }
 
 func historyQuery(u access.User) (string, []any, error) {
-	if businessQueryError != nil {
+	return historyQueryDialect("mysql", u)
+}
+
+func historyQueryDialect(dialect string, u access.User) (string, []any, error) {
+	catalog, catalogErr := businessCatalog(dialect)
+	if catalogErr != nil {
 		return "", nil, fail(503, "unavailable")
 	}
-	q, err := businessQueries.Get("get_execution_logs")
+	q, err := catalog.Get("get_execution_logs")
 	if err != nil {
 		return "", nil, fail(503, "unavailable")
 	}
-	return scopeHistoryQuery(q, u)
+	return scopeHistoryQueryDialect(dialect, q, u)
 }
 
 func scopeHistoryQuery(q string, u access.User) (string, []any, error) {
+	return scopeHistoryQueryDialect("mysql", q, u)
+}
+
+func scopeHistoryQueryDialect(dialect, q string, u access.User) (string, []any, error) {
 	// Windows checkouts can embed CRLF. Normalize the derived query in memory;
 	// the frozen SQL source stays byte-for-byte unchanged on every platform.
 	q = strings.ReplaceAll(q, "\r\n", "\n")
 	// Derive the read from the frozen catalog without altering its bytes. Match
 	// the recorded parent as well as detail ID, so a legacy move cannot reveal
 	// another group's current command/path or make its old history visible.
+	jsonValue := "JSON_VALUE(environment_info, '$.device_name')"
+	guardedJSON := "CASE WHEN JSON_VALID(el.environment_info) THEN JSON_VALUE(el.environment_info, '$.device_name') ELSE NULL END"
+	if dialect == "sqlite" {
+		jsonValue = "json_extract(environment_info, '$.device_name')"
+		guardedJSON = "CASE WHEN json_valid(el.environment_info) THEN json_extract(el.environment_info, '$.device_name') ELSE NULL END"
+	}
 	replacements := [][2]string{
 		{"td.detail_id\n", "sd.detail_id\n        , sg.schedule_id\n"},
 		{"el.execution_id\n", "el.execution_id\n    , el.execution_grp_id AS execution_uuid\n    , el.attempt\n    , el.manual_id\n    , el.schedule_id\n"},
 		{"ON sh.detail_id = el.detail_id", "ON sh.detail_id = el.detail_id AND sh.schedule_id = el.schedule_id"},
-		{"JSON_VALUE(environment_info, '$.device_name')", "CASE WHEN JSON_VALID(el.environment_info) THEN JSON_VALUE(el.environment_info, '$.device_name') ELSE NULL END"},
+		{jsonValue, guardedJSON},
 		{"WHERE start_time >= ? AND start_time <= ?", "LEFT JOIN schedule_group scope_sg ON scope_sg.schedule_id=el.schedule_id\nLEFT JOIN devices scope_device ON scope_device.device_id=scope_sg.target_device\nWHERE start_time >= ? AND start_time <= ? AND "},
 	}
 	for _, pair := range replacements {
@@ -90,7 +105,7 @@ func scopeHistoryQuery(q string, u access.User) (string, []any, error) {
 func (s *Service) ExecutionHistory(ctx context.Context, token, start, end string) ([]map[string]any, error) {
 	out := []map[string]any{}
 	err := s.access.WithRead(ctx, token, func(tx *sql.Tx, u access.User) error {
-		now, err := dashboardNow(ctx, tx)
+		now, err := s.dashboardNow(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -98,11 +113,11 @@ func (s *Service) ExecutionHistory(ctx context.Context, token, start, end string
 		if err != nil {
 			return err
 		}
-		q, args, err := historyQuery(u)
+		q, args, err := historyQueryDialect(s.access.Dialect(), u)
 		if err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, q, append([]any{from, to}, args...)...)
+		rows, err := tx.QueryContext(ctx, q, append([]any{s.timeValue(from), s.timeValue(to)}, args...)...)
 		if err != nil {
 			return dbError(err)
 		}
@@ -125,7 +140,11 @@ func (s *Service) ExecutionHistory(ctx context.Context, token, start, end string
 			}
 			row := map[string]any{}
 			for i, c := range cols {
-				switch v := values[i].(type) {
+				value, err := jsonDateColumn(c, values[i])
+				if err != nil {
+					return err
+				}
+				switch v := value.(type) {
 				case []byte:
 					if c == "execution_uuid" {
 						row[c] = uuidString(v)

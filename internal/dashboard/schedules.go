@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/horrible-gh/TimeWeaver/internal/access"
 	"github.com/horrible-gh/TimeWeaver/internal/store"
@@ -13,15 +14,18 @@ import (
 
 var businessQueries, businessQueryError = store.Queries("mysql")
 
-func businessExec(ctx context.Context, tx *sql.Tx, key string, args ...any) (sql.Result, error) {
-	if businessQueryError != nil {
-		return nil, fail(503, "unavailable")
-	}
-	q, err := businessQueries.Get(key)
+func (s *Service) businessExec(ctx context.Context, tx *sql.Tx, key string, args ...any) (sql.Result, error) {
+	q, err := s.query(key)
 	if err != nil {
-		return nil, fail(503, "unavailable")
+		return nil, err
 	}
-	result, err := tx.ExecContext(ctx, q, args...)
+	bound := append([]any(nil), args...)
+	for i, value := range bound {
+		if stamp, ok := value.(time.Time); ok {
+			bound[i] = s.timeValue(stamp)
+		}
+	}
+	result, err := tx.ExecContext(ctx, q, bound...)
 	if err != nil {
 		return nil, dbError(err)
 	}
@@ -92,12 +96,12 @@ type scheduleLock struct {
 	capabilities               string
 }
 
-func lockSchedule(ctx context.Context, tx *sql.Tx, u access.User, id int64) (scheduleLock, error) {
+func (s *Service) lockSchedule(ctx context.Context, tx *sql.Tx, u access.User, id int64) (scheduleLock, error) {
 	var v scheduleLock
 	if !validID(id, false) {
 		return v, fail(422, "invalid_request")
 	}
-	err := tx.QueryRowContext(ctx, "SELECT group_id,target_device FROM schedule_group WHERE schedule_id=? FOR UPDATE", id).Scan(&v.group, &v.device)
+	err := tx.QueryRowContext(ctx, "SELECT group_id,target_device FROM schedule_group WHERE schedule_id=?"+s.lock(), id).Scan(&v.group, &v.device)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, fail(404, "not_found")
 	}
@@ -107,7 +111,7 @@ func lockSchedule(ctx context.Context, tx *sql.Tx, u access.User, id int64) (sch
 	if !u.Can(v.group, "editor") {
 		return v, fail(403, "forbidden")
 	}
-	err = tx.QueryRowContext(ctx, "SELECT group_id,agent_capabilities FROM devices WHERE device_id=? FOR UPDATE", v.device).Scan(&v.deviceGroup, &v.capabilities)
+	err = tx.QueryRowContext(ctx, "SELECT group_id,agent_capabilities FROM devices WHERE device_id=?"+s.lock(), v.device).Scan(&v.deviceGroup, &v.capabilities)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, fail(409, "device_not_found")
 	}
@@ -119,9 +123,9 @@ func lockSchedule(ctx context.Context, tx *sql.Tx, u access.User, id int64) (sch
 	}
 	return v, nil
 }
-func requireActiveGroup(ctx context.Context, tx *sql.Tx, id int64) error {
+func (s *Service) requireActiveGroup(ctx context.Context, tx *sql.Tx, id int64) error {
 	var status string
-	err := tx.QueryRowContext(ctx, "SELECT status FROM `groups` WHERE group_id=? FOR UPDATE", id).Scan(&status)
+	err := tx.QueryRowContext(ctx, "SELECT status FROM `groups` WHERE group_id=?"+s.lock(), id).Scan(&status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fail(422, "group_not_found")
 	}
@@ -160,7 +164,7 @@ func (s *Service) SaveSchedule(ctx context.Context, token, csrf string, in Sched
 		var old scheduleLock
 		if !create {
 			var err error
-			old, err = lockSchedule(ctx, tx, u, id)
+			old, err = s.lockSchedule(ctx, tx, u, id)
 			if err != nil {
 				return err
 			}
@@ -170,7 +174,7 @@ func (s *Service) SaveSchedule(ctx context.Context, token, csrf string, in Sched
 		}
 		var deviceGroup int64
 		var status, caps string
-		err := tx.QueryRowContext(ctx, "SELECT group_id,status,agent_capabilities FROM devices WHERE device_id=? FOR UPDATE", in.DeviceID).Scan(&deviceGroup, &status, &caps)
+		err := tx.QueryRowContext(ctx, "SELECT group_id,status,agent_capabilities FROM devices WHERE device_id=?"+s.lock(), in.DeviceID).Scan(&deviceGroup, &status, &caps)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fail(422, "device_not_found")
 		}
@@ -190,7 +194,7 @@ func (s *Service) SaveSchedule(ctx context.Context, token, csrf string, in Sched
 			return fail(422, "device_inactive")
 		}
 		if !pausing {
-			if err = requireActiveGroup(ctx, tx, in.GroupID); err != nil {
+			if err = s.requireActiveGroup(ctx, tx, in.GroupID); err != nil {
 				return err
 			}
 		}
@@ -217,7 +221,7 @@ func (s *Service) SaveSchedule(ctx context.Context, token, csrf string, in Sched
 			action = "schedule_update"
 			args = append(args, id)
 		}
-		result, err := businessExec(ctx, tx, key, args...)
+		result, err := s.businessExec(ctx, tx, key, args...)
 		if err != nil {
 			return err
 		}
@@ -236,7 +240,7 @@ func (s *Service) SaveSchedule(ctx context.Context, token, csrf string, in Sched
 }
 func (s *Service) DeleteSchedule(ctx context.Context, token, csrf string, id int64) error {
 	return s.access.WithMutation(ctx, token, csrf, func(tx *sql.Tx, u access.User) error {
-		if _, err := lockSchedule(ctx, tx, u, id); err != nil {
+		if _, err := s.lockSchedule(ctx, tx, u, id); err != nil {
 			return err
 		}
 		for _, table := range []string{"schedule_detail", "execution_log", "execution_running"} {
@@ -244,7 +248,7 @@ func (s *Service) DeleteSchedule(ctx context.Context, token, csrf string, id int
 				return err
 			}
 		}
-		if _, err := businessExec(ctx, tx, "schedules.remove_schedule", id); err != nil {
+		if _, err := s.businessExec(ctx, tx, "schedules.remove_schedule", id); err != nil {
 			return err
 		}
 		return audit(ctx, tx, u.ID, "schedule_delete", strconv.FormatInt(id, 10), nil)

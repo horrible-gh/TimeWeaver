@@ -21,21 +21,28 @@ type HealthHTTP struct {
 }
 
 func NewHealthHTTP(db *store.Store, timeout time.Duration, retry int) (*HealthHTTP, error) {
-	if db == nil || db.DB == nil || db.Dialect != "mysql" || !db.ReadOnly() {
-		return nil, errors.New("health requires a separate read-only MySQL/MariaDB store")
+	if db == nil || db.DB == nil || (db.Dialect != "mysql" && db.Dialect != "sqlite") || !db.ReadOnly() {
+		return nil, errors.New("health requires a separate read-only MySQL/MariaDB or SQLite store")
 	}
 	if timeout < time.Millisecond || timeout > 10*time.Second || retry < 1 || retry > 86400 {
 		return nil, errors.New("invalid health probe settings")
 	}
 	db.DB.SetMaxOpenConns(2)
 	db.DB.SetMaxIdleConns(2)
-	return &HealthHTTP{probe: func(ctx context.Context) bool {
-		var count int
-		err := db.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables
+	query := `SELECT COUNT(*) FROM information_schema.tables
    WHERE table_schema=DATABASE() AND table_name IN
    ('devices','groups','schedule_group','schedule_detail','task_detail',
     'manual_execution','execution_log','agent_device_credential',
-    'agent_enrollment_token','agent_event')`).Scan(&count)
+    'agent_enrollment_token','agent_event')`
+	if db.Dialect == "sqlite" {
+		query = `SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name IN
+   ('devices','groups','schedule_group','schedule_detail','task_detail',
+    'manual_execution','execution_log','agent_device_credential',
+    'agent_enrollment_token','agent_event')`
+	}
+	return &HealthHTTP{probe: func(ctx context.Context) bool {
+		var count int
+		err := db.DB.QueryRowContext(ctx, query).Scan(&count)
 		return err == nil && count == 10
 	}, timeout: timeout, retry: retry, slots: make(chan struct{}, 2)}, nil
 }

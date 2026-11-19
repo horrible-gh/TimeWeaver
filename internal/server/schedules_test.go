@@ -18,7 +18,7 @@ import (
 func scheduleInput(t *testing.T, f *deviceFixture, group int64, name string) dashboard.ScheduleInput {
 	t.Helper()
 	var device int64
-	if err := f.db.DB.QueryRow("SELECT device_id FROM devices WHERE group_id=? ORDER BY device_id LIMIT 1", group).Scan(&device); err != nil {
+	if err := fixtureRow(t, f.db, "SELECT device_id FROM devices WHERE group_id=? ORDER BY device_id LIMIT 1", group).Scan(&device); err != nil {
 		t.Fatal(err)
 	}
 	return dashboard.ScheduleInput{GroupID: group, DeviceID: device, Name: name, Status: "active", Creator: "forged"}
@@ -66,7 +66,7 @@ func TestMySQLScheduleTaskScopeAndLifecycle(t *testing.T) {
 	b := createSchedule(t, f, 8, "private-eight")
 	empty := createSchedule(t, f, 7, "empty")
 	var actor string
-	if err = f.db.DB.QueryRow("SELECT creator FROM schedule_group WHERE schedule_id=?", a).Scan(&actor); err != nil || actor != "editor" {
+	if err = fixtureRow(t, f.db, "SELECT creator FROM schedule_group WHERE schedule_id=?", a).Scan(&actor); err != nil || actor != "editor" {
 		t.Fatal(actor, err)
 	}
 	rows, err := f.dashboard.Schedules(ctx, f.sessions["viewer"].token)
@@ -115,7 +115,7 @@ func TestMySQLScheduleTaskScopeAndLifecycle(t *testing.T) {
 	hk := dashboard.TaskInput{ScheduleID: empty, Name: "HK", Status: "active", Type: "housekeep", Destination: &path, KeepDays: &days, Recursive: true}
 	_, err = f.dashboard.SaveTask(ctx, p.token, p.csrf, hk, true)
 	expectCode(t, err, "agent_upgrade_required")
-	if _, err = f.db.DB.Exec("UPDATE devices SET agent_capabilities='housekeep_recursive_v1' WHERE group_id=7"); err != nil {
+	if _, err = fixtureExec(t, f.db, "UPDATE devices SET agent_capabilities='housekeep_recursive_v1' WHERE group_id=7"); err != nil {
 		t.Fatal(err)
 	}
 	hkid, err := f.dashboard.SaveTask(ctx, p.token, p.csrf, hk, true)
@@ -138,7 +138,7 @@ func TestMySQLScheduleTaskScopeAndLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	var deleted sql.NullTime
-	if err = f.db.DB.QueryRow("SELECT deleted_at FROM schedule_detail WHERE detail_id=UNHEX(REPLACE(?,'-',''))", id).Scan(&deleted); err != nil || !deleted.Valid {
+	if err = fixtureRow(t, f.db, "SELECT deleted_at FROM schedule_detail WHERE detail_id=UNHEX(REPLACE(?,'-',''))", id).Scan(&deleted); err != nil || !deleted.Valid {
 		t.Fatal("tombstone missing", err)
 	}
 	expectCode(t, f.dashboard.DeleteSchedule(ctx, p.token, p.csrf, empty), "schedule_in_use")
@@ -153,7 +153,7 @@ func TestMySQLScheduleTaskAtomicityAndHistory(t *testing.T) {
 	a := createSchedule(t, f, 7, "A")
 	b := createSchedule(t, f, 7, "B")
 	id := createTask(t, f, a)
-	_, err := f.db.DB.Exec("INSERT INTO manual_execution(detail_id,status) VALUES(UNHEX(REPLACE(?,'-','')),'wait')", id)
+	_, err := fixtureExec(t, f.db, "INSERT INTO manual_execution(detail_id,status) VALUES(UNHEX(REPLACE(?,'-','')),'wait')", id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,19 +162,19 @@ func TestMySQLScheduleTaskAtomicityAndHistory(t *testing.T) {
 	ti.ID = id
 	_, err = f.dashboard.SaveTask(ctx, p.token, p.csrf, ti, false)
 	expectCode(t, err, "task_in_use")
-	if _, err = f.db.DB.Exec("UPDATE manual_execution SET status='done' WHERE detail_id=UNHEX(REPLACE(?,'-',''))", id); err != nil {
+	if _, err = fixtureExec(t, f.db, "UPDATE manual_execution SET status='done' WHERE detail_id=UNHEX(REPLACE(?,'-',''))", id); err != nil {
 		t.Fatal(err)
 	}
 	_, err = f.dashboard.SaveTask(ctx, p.token, p.csrf, ti, false)
 	expectCode(t, err, "task_in_use")
 	// Audit failure rolls back both task rows as well as every schedule mutation.
-	if _, err = f.db.DB.Exec("RENAME TABLE tw_audit TO tw_audit_offline"); err != nil {
+	if _, err = fixtureExec(t, f.db, "RENAME TABLE tw_audit TO tw_audit_offline"); err != nil {
 		t.Fatal(err)
 	}
 	_, err = f.dashboard.SaveTask(ctx, p.token, p.csrf, taskInput(b), true)
 	expectCode(t, err, "unavailable")
 	var n int
-	if err = f.db.DB.QueryRow("SELECT COUNT(*) FROM schedule_detail WHERE schedule_id=?", b).Scan(&n); err != nil || n != 0 {
+	if err = fixtureRow(t, f.db, "SELECT COUNT(*) FROM schedule_detail WHERE schedule_id=?", b).Scan(&n); err != nil || n != 0 {
 		t.Fatal("partial insert", n, err)
 	}
 	ti = taskInput(a)
@@ -183,18 +183,18 @@ func TestMySQLScheduleTaskAtomicityAndHistory(t *testing.T) {
 	_, err = f.dashboard.SaveTask(ctx, p.token, p.csrf, ti, false)
 	expectCode(t, err, "unavailable")
 	var name string
-	if err = f.db.DB.QueryRow("SELECT schedule_name FROM schedule_detail WHERE detail_id=UNHEX(REPLACE(?,'-',''))", id).Scan(&name); err != nil || name != "Task" {
+	if err = fixtureRow(t, f.db, "SELECT schedule_name FROM schedule_detail WHERE detail_id=UNHEX(REPLACE(?,'-',''))", id).Scan(&name); err != nil || name != "Task" {
 		t.Fatal("update committed", name, err)
 	}
 	expectCode(t, f.dashboard.DeleteTask(ctx, p.token, p.csrf, id), "unavailable")
 	expectCode(t, f.dashboard.DeleteSchedule(ctx, p.token, p.csrf, b), "unavailable")
-	if _, err = f.db.DB.Exec("RENAME TABLE tw_audit_offline TO tw_audit"); err != nil {
+	if _, err = fixtureExec(t, f.db, "RENAME TABLE tw_audit_offline TO tw_audit"); err != nil {
 		t.Fatal(err)
 	}
 	if err = f.dashboard.DeleteTask(ctx, p.token, p.csrf, id); err != nil {
 		t.Fatal(err)
 	}
-	if err = f.db.DB.QueryRow("SELECT COUNT(*) FROM manual_execution WHERE detail_id=UNHEX(REPLACE(?,'-',''))", id).Scan(&n); err != nil || n != 1 {
+	if err = fixtureRow(t, f.db, "SELECT COUNT(*) FROM manual_execution WHERE detail_id=UNHEX(REPLACE(?,'-',''))", id).Scan(&n); err != nil || n != 1 {
 		t.Fatal("history removed", n, err)
 	}
 }
@@ -204,7 +204,7 @@ func TestMySQLScheduleCanBePausedWithInactiveDevice(t *testing.T) {
 	ctx := context.Background()
 	in := scheduleInput(t, f, 7, "pause")
 	id := createSchedule(t, f, 7, "pause")
-	if _, err := f.db.DB.Exec("UPDATE devices SET status='inactive' WHERE device_id=?", in.DeviceID); err != nil {
+	if _, err := fixtureExec(t, f.db, "UPDATE devices SET status='inactive' WHERE device_id=?", in.DeviceID); err != nil {
 		t.Fatal(err)
 	}
 	in.ID = id

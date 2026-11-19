@@ -19,7 +19,10 @@ import (
 //go:embed sql
 var assets embed.FS
 
-var ErrSQLiteIncomplete = errors.New("SQLite schema/query migration is incomplete; no migration was applied")
+// Native SQLite resources are kept outside the byte-frozen legacy directory.
+//
+//go:embed sqlite
+var sqliteAssets embed.FS
 
 type Migration struct {
 	Name       string   `json:"name"`
@@ -43,14 +46,25 @@ func Migrations(dialect string) ([]Migration, error) {
 	if err != nil {
 		return nil, err
 	}
-	names, err := fs.Glob(assets, "sql/migration/"+dialect+"/*.sql")
+	if dialect == "sqlite" {
+		return readMigrationCatalog(sqliteAssets, "sqlite/migrations/*.sql", dialect)
+	}
+	return readMigrationCatalog(assets, "sql/migration/"+dialect+"/*.sql", dialect)
+}
+
+func legacySQLiteMigrations() ([]Migration, error) {
+	return readMigrationCatalog(assets, "sql/migration/sqlite/*.sql", "sqlite")
+}
+
+func readMigrationCatalog(source fs.FS, pattern, dialect string) ([]Migration, error) {
+	names, err := fs.Glob(source, pattern)
 	if err != nil || len(names) == 0 {
 		return nil, errors.New("embedded migration catalog is missing")
 	}
 	sort.Strings(names)
 	out := make([]Migration, 0, len(names))
 	for _, name := range names {
-		data, err := assets.ReadFile(name)
+		data, err := fs.ReadFile(source, name)
 		if err != nil {
 			return nil, err
 		}
@@ -84,7 +98,7 @@ func Queries(dialect string) (QueryCatalog, error) {
 		return nil, err
 	}
 	if dialect == "sqlite" {
-		return nil, ErrSQLiteIncomplete
+		return loadQueries(sqliteAssets, "sqlite/queries", "time_weaver.json", dialect)
 	}
 	return loadQueries(assets, "sql/sqloader/"+dialect, "time_weaver.json", dialect)
 }

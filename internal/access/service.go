@@ -20,6 +20,9 @@ type Service struct {
 	osAuth OSAuthenticator
 }
 
+// Dialect lets authorized data services select SQL without exposing the database.
+func (s *Service) Dialect() string { return s.db.Dialect }
+
 func New(ctx context.Context, db *store.Store, idle time.Duration) (*Service, error) {
 	return NewWithOS(ctx, db, idle, nil)
 }
@@ -60,8 +63,8 @@ func scanUser(row *sql.Row) (User, error) {
 	}
 	return u, nil
 }
-func loadUser(ctx context.Context, tx *sql.Tx, id string) (User, error) {
-	u, err := scanUser(tx.QueryRowContext(ctx, userSelect+" FOR UPDATE", id))
+func (s *Service) loadUser(ctx context.Context, tx *sql.Tx, id string) (User, error) {
+	u, err := scanUser(tx.QueryRowContext(ctx, userSelect+store.LockClause(s.db.Dialect, false), id))
 	if err != nil {
 		return u, err
 	}
@@ -103,7 +106,7 @@ func (s *Service) attempt(ctx context.Context, key string, limit int) error {
 	}
 	var count int
 	var started int64
-	err = tx.QueryRowContext(ctx, "SELECT count,started FROM tw_login_attempt WHERE key_hash=? FOR UPDATE", digest(key)).Scan(&count, &started)
+	err = tx.QueryRowContext(ctx, "SELECT count,started FROM tw_login_attempt WHERE key_hash=?"+store.LockClause(s.db.Dialect, false), digest(key)).Scan(&count, &started)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return unavailable()
 	}
@@ -161,7 +164,7 @@ func (s *Service) Login(ctx context.Context, id, password, peer, oldToken string
 		return Principal{}, "", unavailable()
 	}
 	defer tx.Rollback()
-	u, err := loadUser(ctx, tx, candidate.ID)
+	u, err := s.loadUser(ctx, tx, candidate.ID)
 	if err != nil {
 		return Principal{}, "", err
 	}
@@ -292,13 +295,13 @@ func (s *Service) principalTx(ctx context.Context, tx *sql.Tx, token string) (Pr
 	if err != nil {
 		return empty, unavailable()
 	}
-	u, err := loadUser(ctx, tx, id)
+	u, err := s.loadUser(ctx, tx, id)
 	if err != nil {
 		return empty, err
 	}
 	var version, last, expires int64
 	var csrf, fingerprint, method string
-	err = tx.QueryRowContext(ctx, `SELECT user_version,csrf,password_fingerprint,last_seen,expires_at,auth_method FROM tw_session WHERE digest=? AND user_id=? FOR UPDATE`, hash, u.ID).Scan(&version, &csrf, &fingerprint, &last, &expires, &method)
+	err = tx.QueryRowContext(ctx, `SELECT user_version,csrf,password_fingerprint,last_seen,expires_at,auth_method FROM tw_session WHERE digest=? AND user_id=?`+store.LockClause(s.db.Dialect, false), hash, u.ID).Scan(&version, &csrf, &fingerprint, &last, &expires, &method)
 	if errors.Is(err, sql.ErrNoRows) {
 		return empty, failure(401, "unauthenticated")
 	}

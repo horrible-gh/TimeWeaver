@@ -1,6 +1,7 @@
 package agentapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -15,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
 func strptr(s string) *string { return &s }
@@ -111,7 +114,11 @@ type runtimeFixture struct {
 
 func newRuntimeFixture(t *testing.T) runtimeFixture {
 	t.Helper()
-	db := identityStore(t)
+	return newRuntimeFixtureOn(t, identityStore(t))
+}
+
+func newRuntimeFixtureOn(t *testing.T, db *store.Store) runtimeFixture {
+	t.Helper()
 	id := identityService(t, db, "")
 	auth := httpService(t, id)
 	token, err := id.Enroll(context.Background(), enrollment(t, id, nil, 0), "runtime-device", strptr("runtime-v1"))
@@ -130,16 +137,15 @@ func newRuntimeFixture(t *testing.T) runtimeFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, query := range []string{
-		`INSERT INTO schedule_group(schedule_id,name,target_device) VALUES(12,'runtime-schedule',?)`,
-		`INSERT INTO schedule_detail(detail_id,schedule_id,schedule_name,sequence) VALUES(UNHEX('11111111111111111111111111111111'),12,'runtime-detail',10)`,
-		`INSERT INTO task_detail(detail_id,command) VALUES(UNHEX('11111111111111111111111111111111'),'echo runtime')`,
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO schedule_group(schedule_id,name,target_device) VALUES(12,'runtime-schedule',?)`, []any{principal.DeviceID}},
+		{`INSERT INTO schedule_detail(detail_id,schedule_id,schedule_name,sequence) VALUES(?,12,'runtime-detail',10)`, []any{bytes.Repeat([]byte{0x11}, 16)}},
+		{`INSERT INTO task_detail(detail_id,command) VALUES(?,'echo runtime')`, []any{bytes.Repeat([]byte{0x11}, 16)}},
 	} {
-		var args []any
-		if strings.Contains(query, "?") {
-			args = []any{principal.DeviceID}
-		}
-		if _, err = db.DB.Exec(query, args...); err != nil {
+		if _, err = db.DB.Exec(statement.query, statement.args...); err != nil {
 			t.Fatal(err)
 		}
 	}

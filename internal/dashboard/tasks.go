@@ -17,10 +17,7 @@ import (
 func (s *Service) Tasks(ctx context.Context, token string) ([]map[string]any, error) {
 	out := []map[string]any{}
 	err := s.access.WithRead(ctx, token, func(tx *sql.Tx, u access.User) error {
-		if businessQueryError != nil {
-			return fail(503, "unavailable")
-		}
-		q, err := businessQueries.Get("tasks.get_tasks")
+		q, err := s.query("tasks.get_tasks")
 		if err != nil {
 			return fail(503, "unavailable")
 		}
@@ -58,7 +55,11 @@ func (s *Service) Tasks(ctx context.Context, token string) ([]map[string]any, er
 			}
 			row := map[string]any{}
 			for i, c := range cols {
-				switch v := values[i].(type) {
+				value, err := jsonDateColumn(c, values[i])
+				if err != nil {
+					return err
+				}
+				switch v := value.(type) {
 				case []byte:
 					row[c] = string(v)
 				case time.Time:
@@ -88,7 +89,7 @@ func (s *Service) Tasks(ctx context.Context, token string) ([]map[string]any, er
 
 // Peek, lock parent schedules in ID order, then lock/recheck the detail. This
 // matches the agent's schedule -> detail -> manual order, including task moves.
-func lockTask(ctx context.Context, tx *sql.Tx, u access.User, id []byte, destination int64) (int64, scheduleLock, error) {
+func (s *Service) lockTask(ctx context.Context, tx *sql.Tx, u access.User, id []byte, destination int64) (int64, scheduleLock, error) {
 	var source int64
 	var target scheduleLock
 	err := tx.QueryRowContext(ctx, "SELECT schedule_id FROM schedule_detail WHERE detail_id=? AND deleted_at IS NULL", id).Scan(&source)
@@ -104,7 +105,7 @@ func lockTask(ctx context.Context, tx *sql.Tx, u access.User, id []byte, destina
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	for _, sid := range ids {
-		v, err := lockSchedule(ctx, tx, u, sid)
+		v, err := s.lockSchedule(ctx, tx, u, sid)
 		if err != nil {
 			return 0, target, err
 		}
@@ -113,7 +114,7 @@ func lockTask(ctx context.Context, tx *sql.Tx, u access.User, id []byte, destina
 		}
 	}
 	var actual int64
-	err = tx.QueryRowContext(ctx, "SELECT schedule_id FROM schedule_detail WHERE detail_id=? AND deleted_at IS NULL FOR UPDATE", id).Scan(&actual)
+	err = tx.QueryRowContext(ctx, "SELECT schedule_id FROM schedule_detail WHERE detail_id=? AND deleted_at IS NULL"+s.lock(), id).Scan(&actual)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && actual != source) {
 		return 0, target, fail(409, "resource_changed")
 	}
@@ -131,7 +132,7 @@ func (s *Service) SaveTask(ctx context.Context, token, csrf string, in TaskInput
 		var parent scheduleLock
 		var err error
 		if create {
-			parent, err = lockSchedule(ctx, tx, u, in.ScheduleID)
+			parent, err = s.lockSchedule(ctx, tx, u, in.ScheduleID)
 			if err != nil {
 				return err
 			}
@@ -145,7 +146,7 @@ func (s *Service) SaveTask(ctx context.Context, token, csrf string, in TaskInput
 		} else {
 			raw, _ := parseUUID(id)
 			var source int64
-			source, parent, err = lockTask(ctx, tx, u, raw, in.ScheduleID)
+			source, parent, err = s.lockTask(ctx, tx, u, raw, in.ScheduleID)
 			if err != nil {
 				return err
 			}
@@ -158,7 +159,7 @@ func (s *Service) SaveTask(ctx context.Context, token, csrf string, in TaskInput
 			}
 			// Never report an update as successful when the paired definition is absent.
 			var present []byte
-			err = tx.QueryRowContext(ctx, "SELECT detail_id FROM task_detail WHERE detail_id=? FOR UPDATE", raw).Scan(&present)
+			err = tx.QueryRowContext(ctx, "SELECT detail_id FROM task_detail WHERE detail_id=?"+s.lock(), raw).Scan(&present)
 			if errors.Is(err, sql.ErrNoRows) {
 				return fail(409, "task_incomplete")
 			}
@@ -166,7 +167,7 @@ func (s *Service) SaveTask(ctx context.Context, token, csrf string, in TaskInput
 				return dbError(err)
 			}
 		}
-		if err = requireActiveGroup(ctx, tx, parent.group); err != nil {
+		if err = s.requireActiveGroup(ctx, tx, parent.group); err != nil {
 			return err
 		}
 		if parent.deviceGroup != parent.group {
@@ -189,10 +190,10 @@ func (s *Service) SaveTask(ctx context.Context, token, csrf string, in TaskInput
 			detailArgs = append(detailArgs, id)
 			taskArgs = append(taskArgs, id)
 		}
-		if _, err = businessExec(ctx, tx, detailKey, detailArgs...); err != nil {
+		if _, err = s.businessExec(ctx, tx, detailKey, detailArgs...); err != nil {
 			return err
 		}
-		if _, err = businessExec(ctx, tx, taskKey, taskArgs...); err != nil {
+		if _, err = s.businessExec(ctx, tx, taskKey, taskArgs...); err != nil {
 			return err
 		}
 		return audit(ctx, tx, u.ID, action, id, map[string]any{"schedule_id": in.ScheduleID, "task_type": in.Type})
@@ -208,7 +209,7 @@ func (s *Service) DeleteTask(ctx context.Context, token, csrf, id string) error 
 		if err != nil {
 			return err
 		}
-		if _, _, err = lockTask(ctx, tx, u, raw, 0); err != nil {
+		if _, _, err = s.lockTask(ctx, tx, u, raw, 0); err != nil {
 			return err
 		}
 		if err = countGuard(ctx, tx, "SELECT COUNT(*) FROM execution_running WHERE detail_id=?", "task_in_use", raw); err != nil {
@@ -217,10 +218,10 @@ func (s *Service) DeleteTask(ctx context.Context, token, csrf, id string) error 
 		if err = countGuard(ctx, tx, "SELECT COUNT(*) FROM manual_execution WHERE detail_id=? AND status IN ('active','wait','processing')", "task_in_use", raw); err != nil {
 			return err
 		}
-		if _, err = businessExec(ctx, tx, "tasks.remove_task", id); err != nil {
+		if _, err = s.businessExec(ctx, tx, "tasks.remove_task", id); err != nil {
 			return err
 		}
-		if _, err = businessExec(ctx, tx, "tasks.remove_schedule_detail", id); err != nil {
+		if _, err = s.businessExec(ctx, tx, "tasks.remove_schedule_detail", id); err != nil {
 			return err
 		}
 		// Keep the detail tombstone and execution history for delayed result reports.

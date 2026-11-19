@@ -35,6 +35,9 @@ import (
 // with random disposable DBs and commands that write inside t.TempDir().
 func serverDatabase(t *testing.T) (*store.Store, *store.Store) {
 	t.Helper()
+	if sqliteFixtureEnabled() {
+		return sqliteServerDatabase(t)
+	}
 	if os.Getenv("TIMEWEAVER_TEST_MYSQL_ALLOW_CREATE") != "1" {
 		t.Skip("requires explicit disposable DB permission")
 	}
@@ -231,7 +234,7 @@ func TestGoAgentEndToEnd(t *testing.T) {
 	if _, err = db.RepairCriticalSchema(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.DB.Exec("UPDATE users SET password=? WHERE user_id='timeweaver'", deviceTestHash); err != nil {
+	if _, err = fixtureExec(t, db, "UPDATE users SET password=? WHERE user_id='timeweaver'", deviceTestHash); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = access.Initialize(context.Background(), db); err != nil {
@@ -269,7 +272,7 @@ func TestGoAgentEndToEnd(t *testing.T) {
 		t.Fatal("enrollment output disclosed token")
 	}
 	var deviceID int64
-	if err = db.DB.QueryRow("SELECT device_id FROM devices WHERE device_name='surface-agent'").Scan(&deviceID); err != nil {
+	if err = fixtureRow(t, db, "SELECT device_id FROM devices WHERE device_name='surface-agent'").Scan(&deviceID); err != nil {
 		t.Fatal(err)
 	}
 	// Build the schedules, paired tasks and manual requests through the human
@@ -302,7 +305,7 @@ func TestGoAgentEndToEnd(t *testing.T) {
 			// The reservation and all early-execution assertions use the database
 			// clock, independently of the runner's timezone or wall-clock offset.
 			var databaseNow time.Time
-			if err := db.DB.QueryRow("SELECT UTC_TIMESTAMP()").Scan(&databaseNow); err != nil {
+			if err := fixtureRow(t, db, "SELECT UTC_TIMESTAMP()").Scan(&databaseNow); err != nil {
 				t.Fatal(err)
 			}
 			ids, err := management.QueueManual(context.Background(), session, principal.CSRF, dashboard.ManualInput{DetailID: tid, ScheduleDatetime: databaseNow.UTC().Add(15 * time.Second).Format(time.RFC3339)})
@@ -326,7 +329,7 @@ func TestGoAgentEndToEnd(t *testing.T) {
 	count := func(query string) int64 {
 		t.Helper()
 		var n int64
-		if err := db.DB.QueryRow(query).Scan(&n); err != nil {
+		if err := fixtureRow(t, db, query).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
@@ -388,7 +391,7 @@ func TestGoAgentEndToEnd(t *testing.T) {
 		var now, reserved time.Time
 		var status string
 		var results, running int64
-		if err := db.DB.QueryRow(`SELECT UTC_TIMESTAMP(),me.schedule_datetime,me.status,
+		if err := fixtureRow(t, db, `SELECT UTC_TIMESTAMP(),me.schedule_datetime,me.status,
  (SELECT COUNT(*) FROM execution_log el WHERE el.manual_id=me.manual_id),
  (SELECT COUNT(*) FROM execution_running er WHERE er.detail_id=me.detail_id)
  FROM manual_execution me WHERE me.manual_id=?`, reservationID).Scan(&now, &reserved, &status, &results, &running); err != nil {

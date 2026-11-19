@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
 const executionTestID = "22222222-2222-2222-2222-222222222222"
@@ -105,7 +107,12 @@ type executionFixture struct {
 
 func newExecutionFixture(t *testing.T) executionFixture {
 	t.Helper()
-	f := newRuntimeFixture(t)
+	return newExecutionFixtureOn(t, identityStore(t))
+}
+
+func newExecutionFixtureOn(t *testing.T, db *store.Store) executionFixture {
+	t.Helper()
+	f := newRuntimeFixtureOn(t, db)
 	service, err := NewExecution(f.runtime.db)
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +121,11 @@ func newExecutionFixture(t *testing.T) executionFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.runtime.db.DB.Exec(`INSERT INTO manual_execution(manual_id,detail_id,status,schedule_datetime) VALUES(41,UNHEX('11111111111111111111111111111111'),'wait',UTC_TIMESTAMP())`)
+	now, err := store.DBNow(context.Background(), db.DB, db.Dialect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.DB.Exec(`INSERT INTO manual_execution(manual_id,detail_id,status,schedule_datetime) VALUES(41,?,'wait',?)`, bytes.Repeat([]byte{0x11}, 16), store.TimeValue(db.Dialect, now))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -42,8 +42,8 @@ var metadataName = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 // CriticalSchema inspects the legacy invariants. A failure is explicit rather
 // than silently declaring a broken schema healthy. No writes occur here.
 func (s *Store) CriticalSchema(ctx context.Context) (SchemaReport, error) {
-	if s.Dialect != "mysql" {
-		return SchemaReport{}, ErrSQLiteIncomplete
+	if s.Dialect == "sqlite" {
+		return inspectSQLiteCritical(ctx, s.DB)
 	}
 	return inspectCritical(ctx, s.DB)
 }
@@ -108,8 +108,8 @@ func (s *Store) RepairCriticalSchema(ctx context.Context) (SchemaReport, error) 
 	if s.readOnly {
 		return result, errors.New("schema repair requires an explicitly writable database")
 	}
-	if s.Dialect != "mysql" {
-		return result, ErrSQLiteIncomplete
+	if s.Dialect == "sqlite" {
+		return s.repairSQLiteCritical(ctx)
 	}
 	conn, err := s.DB.Conn(ctx)
 	if err != nil {

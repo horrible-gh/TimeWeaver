@@ -38,10 +38,6 @@ func runAccess(args []string, out, diagnostics io.Writer) int {
 		fmt.Fprintln(diagnostics, err)
 		return 2
 	}
-	if settings.Database.Type != "mysql" {
-		fmt.Fprintln(diagnostics, "human access currently requires MySQL/MariaDB")
-		return 2
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	db, err := store.Open(ctx, settings.Database, args[0] == "status")

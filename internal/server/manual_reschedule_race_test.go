@@ -22,7 +22,7 @@ func TestMySQLManualRescheduleRejectsCachedClaim(t *testing.T) {
 	}
 	var device int64
 	var due time.Time
-	if err = f.db.DB.QueryRow("SELECT target_device,UTC_TIMESTAMP()+INTERVAL 1 HOUR FROM schedule_group WHERE schedule_id=?", schedule).Scan(&device, &due); err != nil {
+	if err = fixtureRow(t, f.db, "SELECT target_device,UTC_TIMESTAMP()+INTERVAL 1 HOUR FROM schedule_group WHERE schedule_id=?", schedule).Scan(&device, &due); err != nil {
 		t.Fatal(err)
 	}
 	runtime, err := agentapi.NewRuntime(f.db)
@@ -49,10 +49,10 @@ func TestMySQLManualRescheduleRejectsCachedClaim(t *testing.T) {
 	var oldStatus, newStatus string
 	var oldToken, newToken sql.NullString
 	var storedDue time.Time
-	if err = f.db.DB.QueryRow("SELECT status,claim_token FROM manual_execution WHERE manual_id=?", ids[0]).Scan(&oldStatus, &oldToken); err != nil || oldStatus != "failed" || oldToken.Valid {
+	if err = fixtureRow(t, f.db, "SELECT status,claim_token FROM manual_execution WHERE manual_id=?", ids[0]).Scan(&oldStatus, &oldToken); err != nil || oldStatus != "failed" || oldToken.Valid {
 		t.Fatal("old request was not retired", oldStatus, err)
 	}
-	if err = f.db.DB.QueryRow("SELECT status,claim_token,schedule_datetime FROM manual_execution WHERE manual_id=?", replacement).Scan(&newStatus, &newToken, &storedDue); err != nil || newStatus != "wait" || newToken.Valid || !storedDue.Equal(due) {
+	if err = fixtureRow(t, f.db, "SELECT status,claim_token,schedule_datetime FROM manual_execution WHERE manual_id=?", replacement).Scan(&newStatus, &newToken, &storedDue); err != nil || newStatus != "wait" || newToken.Valid || !storedDue.Equal(due) {
 		t.Fatal("replacement reservation changed", newStatus, storedDue, err)
 	}
 	current, err := runtime.Snapshot(ctx, principal)
@@ -72,7 +72,7 @@ func TestMySQLManualRescheduleAfterClaimHasNoReplacement(t *testing.T) {
 		t.Fatal(ids, err)
 	}
 	var device int64
-	if err = f.db.DB.QueryRow("SELECT target_device FROM schedule_group WHERE schedule_id=?", schedule).Scan(&device); err != nil {
+	if err = fixtureRow(t, f.db, "SELECT target_device FROM schedule_group WHERE schedule_id=?", schedule).Scan(&device); err != nil {
 		t.Fatal(err)
 	}
 	executions, err := agentapi.NewExecution(f.db)
@@ -90,10 +90,10 @@ func TestMySQLManualRescheduleAfterClaimHasNoReplacement(t *testing.T) {
 	}
 	var count int
 	var status, token string
-	if err = f.db.DB.QueryRow("SELECT COUNT(*) FROM manual_execution").Scan(&count); err != nil || count != 1 {
+	if err = fixtureRow(t, f.db, "SELECT COUNT(*) FROM manual_execution").Scan(&count); err != nil || count != 1 {
 		t.Fatal("claimed request was duplicated", count, err)
 	}
-	if err = f.db.DB.QueryRow("SELECT status,claim_token FROM manual_execution WHERE manual_id=?", ids[0]).Scan(&status, &token); err != nil || status != "processing" || token != claim.Token {
+	if err = fixtureRow(t, f.db, "SELECT status,claim_token FROM manual_execution WHERE manual_id=?", ids[0]).Scan(&status, &token); err != nil || status != "processing" || token != claim.Token {
 		t.Fatal("claimed request changed", status, err)
 	}
 }

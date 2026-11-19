@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/horrible-gh/TimeWeaver/internal/access"
+	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
 // The agent consumes wait rows. Clients may choose when a request becomes due,
@@ -53,9 +54,9 @@ func parseDashboardTime(value string) (time.Time, error) {
 	return t.UTC(), nil
 }
 
-func dashboardNow(ctx context.Context, tx *sql.Tx) (time.Time, error) {
+func (s *Service) dashboardNow(ctx context.Context, tx *sql.Tx) (time.Time, error) {
 	var now time.Time
-	if err := tx.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP()").Scan(&now); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT "+s.nowSQL()).Scan(store.ScanTime(&now)); err != nil {
 		return now, dbError(err)
 	}
 	return now.UTC(), nil
@@ -68,9 +69,9 @@ type manualTarget struct {
 
 // Keep the agent's schedule -> detail -> manual lock order. Device/group locks
 // occur while the parent is held, as in the existing schedule editing service.
-func lockManualTarget(ctx context.Context, tx *sql.Tx, u access.User, id int64) (manualTarget, error) {
+func (s *Service) lockManualTarget(ctx context.Context, tx *sql.Tx, u access.User, id int64) (manualTarget, error) {
 	var v manualTarget
-	err := tx.QueryRowContext(ctx, "SELECT group_id,target_device,status FROM schedule_group WHERE schedule_id=? FOR UPDATE", id).Scan(&v.group, &v.device, &v.status)
+	err := tx.QueryRowContext(ctx, "SELECT group_id,target_device,status FROM schedule_group WHERE schedule_id=?"+s.lock(), id).Scan(&v.group, &v.device, &v.status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, fail(404, "not_found")
 	}
@@ -80,7 +81,7 @@ func lockManualTarget(ctx context.Context, tx *sql.Tx, u access.User, id int64) 
 	if !u.Can(v.group, "operator") {
 		return v, fail(403, "forbidden")
 	}
-	err = tx.QueryRowContext(ctx, "SELECT group_id,status,agent_capabilities FROM devices WHERE device_id=? FOR UPDATE", v.device).Scan(&v.deviceGroup, &v.deviceStatus, &v.capabilities)
+	err = tx.QueryRowContext(ctx, "SELECT group_id,status,agent_capabilities FROM devices WHERE device_id=?"+s.lock(), v.device).Scan(&v.deviceGroup, &v.deviceStatus, &v.capabilities)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, fail(409, "device_not_found")
 	}
@@ -93,18 +94,18 @@ func lockManualTarget(ctx context.Context, tx *sql.Tx, u access.User, id int64) 
 	return v, nil
 }
 
-func (v manualTarget) runnable(ctx context.Context, tx *sql.Tx) error {
+func (s *Service) requireRunnableTarget(ctx context.Context, tx *sql.Tx, v manualTarget) error {
 	if v.status != "active" {
 		return fail(409, "schedule_inactive")
 	}
 	if v.deviceStatus != "active" {
 		return fail(409, "device_inactive")
 	}
-	if err := requireActiveGroup(ctx, tx, v.group); err != nil {
+	if err := s.requireActiveGroup(ctx, tx, v.group); err != nil {
 		return err
 	}
 	if v.deviceGroup != v.group {
-		return requireActiveGroup(ctx, tx, v.deviceGroup)
+		return s.requireActiveGroup(ctx, tx, v.deviceGroup)
 	}
 	return nil
 }
@@ -137,7 +138,7 @@ const manualDetailSelect = `SELECT sd.detail_id,sd.schedule_id,sd.status,sd.dele
 
 func scanManualDetail(row interface{ Scan(...any) error }) (manualDetail, error) {
 	var d manualDetail
-	err := row.Scan(&d.id, &d.schedule, &d.status, &d.deleted, &d.definition, &d.taskType, &d.recursive)
+	err := row.Scan(&d.id, &d.schedule, &d.status, store.ScanNullTime(&d.deleted), &d.definition, &d.taskType, &d.recursive)
 	return d, err
 }
 
@@ -163,11 +164,11 @@ func (s *Service) QueueManual(ctx context.Context, token, csrf string, in Manual
 				return dbError(err)
 			}
 		}
-		target, err := lockManualTarget(ctx, tx, u, schedule)
+		target, err := s.lockManualTarget(ctx, tx, u, schedule)
 		if err != nil {
 			return err
 		}
-		if err = target.runnable(ctx, tx); err != nil {
+		if err = s.requireRunnableTarget(ctx, tx, target); err != nil {
 			return err
 		}
 		q := manualDetailSelect + " WHERE sd.schedule_id=? AND sd.deleted_at IS NULL"
@@ -178,7 +179,7 @@ func (s *Service) QueueManual(ctx context.Context, token, csrf string, in Manual
 		} else {
 			q += " AND sd.status='active'"
 		}
-		rows, err := tx.QueryContext(ctx, q+" ORDER BY sd.detail_id LIMIT 501 FOR UPDATE", args...)
+		rows, err := tx.QueryContext(ctx, q+" ORDER BY sd.detail_id LIMIT 501"+s.lock(), args...)
 		if err != nil {
 			return dbError(err)
 		}
@@ -205,7 +206,7 @@ func (s *Service) QueueManual(ctx context.Context, token, csrf string, in Manual
 			}
 			return fail(409, "no_runnable_tasks")
 		}
-		now, err := dashboardNow(ctx, tx)
+		now, err := s.dashboardNow(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -217,7 +218,7 @@ func (s *Service) QueueManual(ctx context.Context, token, csrf string, in Manual
 			if err = d.runnable(target); err != nil {
 				return err
 			}
-			mid, e := insertManual(ctx, tx, in.Immediate, due, u.ID, d.id)
+			mid, e := s.insertManual(ctx, tx, in.Immediate, due, u.ID, d.id)
 			if e != nil {
 				return e
 			}
@@ -231,10 +232,10 @@ func (s *Service) QueueManual(ctx context.Context, token, csrf string, in Manual
 	return ids, nil
 }
 
-func insertManual(ctx context.Context, tx *sql.Tx, immediate FormBool, due time.Time, actor string, raw []byte) (int64, error) {
+func (s *Service) insertManual(ctx context.Context, tx *sql.Tx, immediate FormBool, due time.Time, actor string, raw []byte) (int64, error) {
 	// Reuse the frozen insert with one prelocked, validated active detail.
 	id := uuidString(raw)
-	result, err := businessExec(ctx, tx, "manual_execution.insert_manual_execution", bool(immediate), bool(immediate), due, "wait", actor, nil, nil, id, id)
+	result, err := s.businessExec(ctx, tx, "manual_execution.insert_manual_execution", bool(immediate), bool(immediate), due, "wait", actor, nil, nil, id, id)
 	if err != nil {
 		return 0, err
 	}
@@ -251,7 +252,7 @@ func insertManual(ctx context.Context, tx *sql.Tx, immediate FormBool, due time.
 
 // A candidate lookup never grants permission. Recheck both relationships after
 // acquiring the parent/detail/manual locks, including legacy task tombstones.
-func lockPendingManual(ctx context.Context, tx *sql.Tx, u access.User, id int64) (manualTarget, manualDetail, error) {
+func (s *Service) lockPendingManual(ctx context.Context, tx *sql.Tx, u access.User, id int64) (manualTarget, manualDetail, error) {
 	var target manualTarget
 	var detail manualDetail
 	if !validID(id, false) {
@@ -266,11 +267,11 @@ func lockPendingManual(ctx context.Context, tx *sql.Tx, u access.User, id int64)
 	if err != nil {
 		return target, detail, dbError(err)
 	}
-	target, err = lockManualTarget(ctx, tx, u, schedule)
+	target, err = s.lockManualTarget(ctx, tx, u, schedule)
 	if err != nil {
 		return target, detail, err
 	}
-	detail, err = scanManualDetail(tx.QueryRowContext(ctx, manualDetailSelect+" WHERE sd.detail_id=? FOR UPDATE", raw))
+	detail, err = scanManualDetail(tx.QueryRowContext(ctx, manualDetailSelect+" WHERE sd.detail_id=?"+s.lock(), raw))
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && detail.schedule != schedule) {
 		return target, detail, fail(409, "resource_changed")
 	}
@@ -279,7 +280,7 @@ func lockPendingManual(ctx context.Context, tx *sql.Tx, u access.User, id int64)
 	}
 	var lockedRaw []byte
 	var status string
-	err = tx.QueryRowContext(ctx, "SELECT detail_id,status FROM manual_execution WHERE manual_id=? FOR UPDATE", id).Scan(&lockedRaw, &status)
+	err = tx.QueryRowContext(ctx, "SELECT detail_id,status FROM manual_execution WHERE manual_id=?"+s.lock(), id).Scan(&lockedRaw, &status)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !bytes.Equal(raw, lockedRaw)) {
 		return target, detail, fail(409, "resource_changed")
 	}
@@ -300,17 +301,17 @@ func (s *Service) UpdateManual(ctx context.Context, token, csrf string, in Manua
 		if in.ScheduleID != 0 || in.DetailID != "" {
 			return fail(422, "invalid_request")
 		}
-		target, d, err := lockPendingManual(ctx, tx, u, in.ManualID)
+		target, d, err := s.lockPendingManual(ctx, tx, u, in.ManualID)
 		if err != nil {
 			return err
 		}
-		if err = target.runnable(ctx, tx); err != nil {
+		if err = s.requireRunnableTarget(ctx, tx, target); err != nil {
 			return err
 		}
 		if err = d.runnable(target); err != nil {
 			return err
 		}
-		now, err := dashboardNow(ctx, tx)
+		now, err := s.dashboardNow(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -318,11 +319,11 @@ func (s *Service) UpdateManual(ctx context.Context, token, csrf string, in Manua
 		if err != nil {
 			return err
 		}
-		replacement, err = insertManual(ctx, tx, in.Immediate, due, u.ID, d.id)
+		replacement, err = s.insertManual(ctx, tx, in.Immediate, due, u.ID, d.id)
 		if err != nil {
 			return err
 		}
-		if _, err = businessExec(ctx, tx, "manual_execution.update_abandon_manual_execution", "failed", u.ID, in.ManualID); err != nil {
+		if _, err = s.businessExec(ctx, tx, "manual_execution.update_abandon_manual_execution", "failed", u.ID, in.ManualID); err != nil {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, "UPDATE manual_execution SET claim_token=NULL,claim_expires_at=NULL WHERE manual_id=?", in.ManualID); err != nil {
@@ -338,10 +339,10 @@ func (s *Service) UpdateManual(ctx context.Context, token, csrf string, in Manua
 
 func (s *Service) CancelManual(ctx context.Context, token, csrf string, id int64) error {
 	return s.access.WithMutation(ctx, token, csrf, func(tx *sql.Tx, u access.User) error {
-		if _, _, err := lockPendingManual(ctx, tx, u, id); err != nil {
+		if _, _, err := s.lockPendingManual(ctx, tx, u, id); err != nil {
 			return err
 		}
-		if _, err := businessExec(ctx, tx, "manual_execution.update_abandon_manual_execution", "failed", u.ID, id); err != nil {
+		if _, err := s.businessExec(ctx, tx, "manual_execution.update_abandon_manual_execution", "failed", u.ID, id); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE manual_execution SET claim_token=NULL,claim_expires_at=NULL WHERE manual_id=?", id); err != nil {
@@ -389,7 +390,7 @@ func (s *Service) ManualRuns(ctx context.Context, token string) ([]ManualRun, er
 			var target manualTarget
 			var due sql.NullTime
 			var groupStatus, deviceGroupStatus string
-			if err = rows.Scan(&v.ID, &v.ScheduleID, &d.id, &v.Name, &v.TaskName, &v.Immediate, &due, &v.Status, &target.group, &target.deviceGroup, &target.status, &target.deviceStatus, &groupStatus, &deviceGroupStatus, &d.status, &d.deleted, &d.definition, &d.taskType, &d.recursive, &target.capabilities); err != nil {
+			if err = rows.Scan(&v.ID, &v.ScheduleID, &d.id, &v.Name, &v.TaskName, &v.Immediate, store.ScanNullTime(&due), &v.Status, &target.group, &target.deviceGroup, &target.status, &target.deviceStatus, &groupStatus, &deviceGroupStatus, &d.status, store.ScanNullTime(&d.deleted), &d.definition, &d.taskType, &d.recursive, &target.capabilities); err != nil {
 				return dbError(err)
 			}
 			v.DetailID, v.Due = uuidString(d.id), nullableDate(due)

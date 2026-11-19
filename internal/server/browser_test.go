@@ -35,7 +35,7 @@ func TestBrowserSessionFlow(t *testing.T) {
 	}
 	ab64 := func(b []byte) string { return strings.ReplaceAll(base64.RawStdEncoding.EncodeToString(b), "+", ".") }
 	hash := "$pbkdf2-sha256$29000$" + ab64(salt) + "$" + ab64(key)
-	if _, err = db.DB.Exec("INSERT INTO users(user_id,name,password,role,group_id) VALUES('browser','Browser Tester',?,'user',0)", hash); err != nil {
+	if _, err = fixtureExec(t, db, "INSERT INTO users(user_id,name,password,role,group_id) VALUES('browser','Browser Tester',?,'user',0)", hash); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = db.RepairCriticalSchema(ctx); err != nil {
@@ -44,7 +44,7 @@ func TestBrowserSessionFlow(t *testing.T) {
 	if _, err = access.Initialize(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.DB.Exec("UPDATE tw_user_auth SET must_change_password=1 WHERE user_id='browser'"); err != nil {
+	if _, err = fixtureExec(t, db, "UPDATE tw_user_auth SET must_change_password=1 WHERE user_id='browser'"); err != nil {
 		t.Fatal(err)
 	}
 	settings := config.Settings{Context: "/timeweaver_svr", SecretKey: "browser-only-0123456789abcdef0123456789abcdef", HTTP: config.DefaultHTTPSettings(), IdleTimeout: 30 * time.Minute}

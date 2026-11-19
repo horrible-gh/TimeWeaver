@@ -18,7 +18,7 @@ import (
 
 func manualExec(t *testing.T, f *deviceFixture, q string, args ...any) {
 	t.Helper()
-	if _, err := f.db.DB.Exec(q, args...); err != nil {
+	if _, err := fixtureExec(t, f.db, q, args...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -36,7 +36,7 @@ func queueManualTask(t *testing.T, f *deviceFixture, detail string) int64 {
 func manualCount(t *testing.T, f *deviceFixture) int {
 	t.Helper()
 	var n int
-	if err := f.db.DB.QueryRow("SELECT COUNT(*) FROM manual_execution").Scan(&n); err != nil {
+	if err := fixtureRow(t, f.db, "SELECT COUNT(*) FROM manual_execution").Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -60,10 +60,10 @@ func TestMySQLManualScopeFanoutAndForcedActor(t *testing.T) {
 		t.Fatal("schedule fanout must enqueue exactly its active details", ids, err)
 	}
 	var n int
-	if err = f.db.DB.QueryRow("SELECT COUNT(*) FROM manual_execution WHERE creator='operator' AND status='wait' AND detail_id IN (UNHEX(REPLACE(?,'-','')),UNHEX(REPLACE(?,'-','')))", first, second).Scan(&n); err != nil || n != 2 {
+	if err = fixtureRow(t, f.db, "SELECT COUNT(*) FROM manual_execution WHERE creator='operator' AND status='wait' AND detail_id IN (UNHEX(REPLACE(?,'-','')),UNHEX(REPLACE(?,'-','')))", first, second).Scan(&n); err != nil || n != 2 {
 		t.Fatal("actor or selected task changed", n, err)
 	}
-	if err = f.db.DB.QueryRow("SELECT COUNT(*) FROM tw_audit WHERE action='manual_create' AND actor='operator'").Scan(&n); err != nil || n != 1 {
+	if err = fixtureRow(t, f.db, "SELECT COUNT(*) FROM tw_audit WHERE action='manual_create' AND actor='operator'").Scan(&n); err != nil || n != 1 {
 		t.Fatal("batch audit not attributable", n, err)
 	}
 	for _, request := range []dashboard.ManualInput{{ScheduleID: b, Immediate: true}, {DetailID: hidden, Immediate: true}} {
@@ -115,7 +115,7 @@ func TestMySQLManualTimingStateAndPendingCancellation(t *testing.T) {
 	a := createSchedule(t, f, 7, "Reservations")
 	detail := createTask(t, f, a)
 	var future time.Time
-	if err := f.db.DB.QueryRow("SELECT UTC_TIMESTAMP()+INTERVAL 2 HOUR").Scan(&future); err != nil {
+	if err := fixtureRow(t, f.db, "SELECT UTC_TIMESTAMP()+INTERVAL 2 HOUR").Scan(&future); err != nil {
 		t.Fatal(err)
 	}
 	in := dashboard.ManualInput{DetailID: detail, ScheduleDatetime: future.In(time.FixedZone("test", 9*3600)).Format(time.RFC3339), Status: "wait", Creator: "forged"}
@@ -125,7 +125,7 @@ func TestMySQLManualTimingStateAndPendingCancellation(t *testing.T) {
 	}
 	var due time.Time
 	var immediate bool
-	if err = f.db.DB.QueryRow("SELECT schedule_datetime,is_immediate FROM manual_execution WHERE manual_id=?", ids[0]).Scan(&due, &immediate); err != nil || immediate || !due.Equal(future) {
+	if err = fixtureRow(t, f.db, "SELECT schedule_datetime,is_immediate FROM manual_execution WHERE manual_id=?", ids[0]).Scan(&due, &immediate); err != nil || immediate || !due.Equal(future) {
 		t.Fatal("reservation timezone changed", due, err)
 	}
 	for _, value := range []string{"", "2000-01-01T00:00:00Z", "2099-01-01T09:00:00", "2099-02-30T09:00:00Z"} {
@@ -176,7 +176,7 @@ func TestMySQLManualTimingStateAndPendingCancellation(t *testing.T) {
 	var status, modifier string
 	var claim sql.NullString
 	var expiry sql.NullTime
-	if err = f.db.DB.QueryRow("SELECT status,modifier,claim_token,claim_expires_at FROM manual_execution WHERE manual_id=?", legacyPending).Scan(&status, &modifier, &claim, &expiry); err != nil || status != "failed" || modifier != "operator" || claim.Valid || expiry.Valid {
+	if err = fixtureRow(t, f.db, "SELECT status,modifier,claim_token,claim_expires_at FROM manual_execution WHERE manual_id=?", legacyPending).Scan(&status, &modifier, &claim, &expiry); err != nil || status != "failed" || modifier != "operator" || claim.Valid || expiry.Valid {
 		t.Fatal("cancellation changed ownership or retained a lease", status, modifier, claim, expiry, err)
 	}
 	expectCode(t, f.dashboard.CancelManual(ctx, p.token, p.csrf, legacyPending), "manual_not_pending")
@@ -206,7 +206,7 @@ func TestMySQLManualAuditFailureRollsBackBatchAndReplacement(t *testing.T) {
 	expectCode(t, f.dashboard.CancelManual(ctx, p.token, p.csrf, id), "unavailable")
 	var status string
 	var modifier sql.NullString
-	if err = f.db.DB.QueryRow("SELECT status,modifier FROM manual_execution WHERE manual_id=?", id).Scan(&status, &modifier); err != nil || status != "wait" || modifier.Valid {
+	if err = fixtureRow(t, f.db, "SELECT status,modifier FROM manual_execution WHERE manual_id=?", id).Scan(&status, &modifier); err != nil || status != "wait" || modifier.Valid {
 		t.Fatal("failed audit retired the original request", status, modifier, err)
 	}
 }
@@ -217,7 +217,7 @@ func insertManualHistory(t *testing.T, f *deviceFixture, schedule int64, detail,
 	if _, err := rand.Read(raw); err != nil {
 		t.Fatal(err)
 	}
-	r, err := f.db.DB.Exec("INSERT INTO execution_log(execution_grp_id,schedule_id,detail_id,start_time,end_time,result_code,result_message,environment_info) VALUES(?,?,UNHEX(REPLACE(?,'-','')),'2030-02-01 01:00:00','2030-02-01 01:00:01',0,?,'not-json')", raw, schedule, detail, message)
+	r, err := fixtureExec(t, f.db, "INSERT INTO execution_log(execution_grp_id,schedule_id,detail_id,start_time,end_time,result_code,result_message,environment_info) VALUES(?,?,UNHEX(REPLACE(?,'-','')),'2030-02-01 01:00:00','2030-02-01 01:00:01',0,?,'not-json')", raw, schedule, detail, message)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestMySQLManualHistoryRejectsTruncatedResults(t *testing.T) {
 	}
 	defer tx.Rollback()
 	for i := 1; i <= 1000; i++ {
-		if _, err = tx.Exec("INSERT INTO execution_log(execution_grp_id,schedule_id,detail_id,start_time,result_code) VALUES(UNHEX(LPAD(HEX(?),32,'0')),?,UNHEX(REPLACE(?,'-','')),'2030-02-01 01:00:00',0)", i, schedule, detail); err != nil {
+		if _, err = tx.Exec(fixtureSQL(f.db.Dialect, "INSERT INTO execution_log(execution_grp_id,schedule_id,detail_id,start_time,result_code) VALUES(UNHEX(LPAD(HEX(?),32,'0')),?,UNHEX(REPLACE(?,'-','')),'2030-02-01 01:00:00',0)"), i, schedule, detail); err != nil {
 			t.Fatal(err)
 		}
 	}

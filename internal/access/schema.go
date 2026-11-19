@@ -29,8 +29,11 @@ type SchemaStatus struct {
 
 func Status(ctx context.Context, db *store.Store) (SchemaStatus, error) {
 	r := SchemaStatus{State: "missing", ReadOnly: true}
-	if db == nil || db.DB == nil || db.Dialect != "mysql" {
-		return r, errors.New("human authentication currently requires MySQL/MariaDB")
+	if db == nil || db.DB == nil || (db.Dialect != "mysql" && db.Dialect != "sqlite") {
+		return r, errors.New("human authentication requires MySQL/MariaDB or SQLite")
+	}
+	if db.Dialect == "sqlite" {
+		return sqliteAccessStatus(ctx, db.DB)
 	}
 	var n int
 	if err := db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='tw_access_schema'").Scan(&n); err != nil {
@@ -83,8 +86,8 @@ func Status(ctx context.Context, db *store.Store) (SchemaStatus, error) {
 // stopped legacy server and a backup. It never changes existing users/groups.
 func Initialize(ctx context.Context, db *store.Store) (SchemaStatus, error) {
 	empty := SchemaStatus{}
-	if db == nil || db.DB == nil || db.Dialect != "mysql" || db.ReadOnly() {
-		return empty, errors.New("access initialization requires an explicitly writable MySQL/MariaDB database")
+	if db == nil || db.DB == nil || (db.Dialect != "mysql" && db.Dialect != "sqlite") || db.ReadOnly() {
+		return empty, errors.New("access initialization requires an explicitly writable MySQL/MariaDB or SQLite database")
 	}
 	baseline, err := db.Status(ctx)
 	if err != nil {
@@ -99,6 +102,9 @@ func Initialize(ctx context.Context, db *store.Store) (SchemaStatus, error) {
 	}
 	if len(guard.Issues) > 0 {
 		return empty, errors.New("repair the critical legacy schema before initializing human access")
+	}
+	if db.Dialect == "sqlite" {
+		return initializeSQLiteAccess(ctx, db)
 	}
 	conn, err := db.DB.Conn(ctx)
 	if err != nil {

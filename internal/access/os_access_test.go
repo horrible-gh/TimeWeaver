@@ -123,7 +123,11 @@ func linkedOSInput(user AdminUser) UserInput {
 }
 
 func TestMySQLOSIdentityIsolationAndExplicitGrants(t *testing.T) {
-	s, admin, adminToken, provider := linkedOSFixture(t)
+	testOSIdentityIsolationAndExplicitGrants(t, linkedOSFixture)
+}
+
+func testOSIdentityIsolationAndExplicitGrants(t *testing.T, fixture osAccessFixture) {
+	s, admin, adminToken, provider := fixture(t)
 	ctx := context.Background()
 	var before, after int
 	if err := s.db.DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&before); err != nil {
@@ -191,7 +195,11 @@ func TestMySQLOSIdentityIsolationAndExplicitGrants(t *testing.T) {
 }
 
 func TestMySQLOSManagementBindingAndPasswordBoundaries(t *testing.T) {
-	s, admin, adminToken, provider := linkedOSFixture(t)
+	testOSManagementBindingAndPasswordBoundaries(t, linkedOSFixture)
+}
+
+func testOSManagementBindingAndPasswordBoundaries(t *testing.T, fixture osAccessFixture) {
+	s, admin, adminToken, provider := fixture(t)
 	ctx := context.Background()
 	user := linkedOSCreate(t, s, admin, adminToken, "os-linked", "host-one", "user", []Membership{{7, "viewer"}})
 	duplicate := UserInput{ID: "os-duplicate", Name: "Duplicate", Role: "user", Status: "active", AuthMethod: "os", OSName: "host-alias"}
@@ -265,7 +273,11 @@ func TestMySQLOSManagementBindingAndPasswordBoundaries(t *testing.T) {
 }
 
 func TestMySQLOSMissingAdminTargetsPreserveSession(t *testing.T) {
-	s, admin, token, _ := linkedOSFixture(t)
+	testOSMissingAdminTargetsPreserveSession(t, linkedOSFixture)
+}
+
+func testOSMissingAdminTargetsPreserveSession(t *testing.T, fixture osAccessFixture) {
+	s, admin, token, _ := fixture(t)
 	ctx := context.Background()
 	for _, operation := range []string{"update", "reset-password"} {
 		t.Run(operation, func(t *testing.T) {
@@ -288,7 +300,11 @@ func TestMySQLOSMissingAdminTargetsPreserveSession(t *testing.T) {
 }
 
 func TestMySQLOSReleasedIdentityGetsDistinctGeneratedUser(t *testing.T) {
-	s, admin, token, _ := linkedOSFixture(t)
+	testOSReleasedIdentityGetsDistinctGeneratedUser(t, linkedOSFixture)
+}
+
+func testOSReleasedIdentityGetsDistinctGeneratedUser(t *testing.T, fixture osAccessFixture) {
+	s, admin, token, _ := fixture(t)
 	ctx := context.Background()
 	first := linkedOSCreate(t, s, admin, token, "", "host-one", "user", []Membership{{7, "viewer"}})
 	in := linkedOSInput(first)
@@ -312,9 +328,13 @@ func TestMySQLOSReleasedIdentityGetsDistinctGeneratedUser(t *testing.T) {
 }
 
 func TestMySQLOSSessionChecksIdentityProviderAndExpiry(t *testing.T) {
+	testOSSessionChecksIdentityProviderAndExpiry(t, linkedOSFixture)
+}
+
+func testOSSessionChecksIdentityProviderAndExpiry(t *testing.T, fixture osAccessFixture) {
 	for _, change := range []string{"unlink", "rebind-without-version", "provider-disabled", "local-only-restart", "absolute-expiry", "idle-expiry"} {
 		t.Run(change, func(t *testing.T) {
-			s, admin, adminToken, provider := linkedOSFixture(t)
+			s, admin, adminToken, provider := fixture(t)
 			ctx := context.Background()
 			user := linkedOSCreate(t, s, admin, adminToken, "os-linked", "host-one", "user", []Membership{{7, "viewer"}})
 			_, token, err := s.LoginOS(ctx, "host-one", linkedOSPassword, "127.0.0.2", "")
@@ -348,9 +368,13 @@ func TestMySQLOSSessionChecksIdentityProviderAndExpiry(t *testing.T) {
 }
 
 func TestMySQLOSLateAuthenticationCannotRestoreChangedBinding(t *testing.T) {
+	testOSLateAuthenticationCannotRestoreChangedBinding(t, linkedOSFixture)
+}
+
+func testOSLateAuthenticationCannotRestoreChangedBinding(t *testing.T, fixture osAccessFixture) {
 	for _, change := range []string{"disable", "rebind"} {
 		t.Run(change, func(t *testing.T) {
-			s, admin, adminToken, provider := linkedOSFixture(t)
+			s, admin, adminToken, provider := fixture(t)
 			user := linkedOSCreate(t, s, admin, adminToken, "os-linked", "host-one", "user", []Membership{{7, "viewer"}})
 			provider.entered, provider.release = make(chan struct{}, 1), make(chan struct{})
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -396,7 +420,11 @@ func TestMySQLOSLateAuthenticationCannotRestoreChangedBinding(t *testing.T) {
 }
 
 func TestMySQLOSAdminCannotReplaceLocalRecoveryAdmin(t *testing.T) {
-	s, admin, token, _ := linkedOSFixture(t)
+	testOSAdminCannotReplaceLocalRecoveryAdmin(t, linkedOSFixture)
+}
+
+func testOSAdminCannotReplaceLocalRecoveryAdmin(t *testing.T, fixture osAccessFixture) {
+	s, admin, token, _ := fixture(t)
 	ctx := context.Background()
 	linkedOSCreate(t, s, admin, token, "os-admin", "host-one", "admin", nil)
 	in := UserInput{ID: admin.User.ID, Name: admin.User.Name, Role: "user", Status: "active", Version: admin.User.version, AuthMethod: "local", Groups: []Membership{}}
@@ -413,8 +441,12 @@ func TestMySQLOSAdminCannotReplaceLocalRecoveryAdmin(t *testing.T) {
 }
 
 func TestMySQLOSCanonicalAccountRateLimitAndAuditRollback(t *testing.T) {
+	testOSCanonicalAccountRateLimitAndAuditRollback(t, linkedOSFixture)
+}
+
+func testOSCanonicalAccountRateLimitAndAuditRollback(t *testing.T, fixture osAccessFixture) {
 	t.Run("aliases-share-rate-limit", func(t *testing.T) {
-		s, admin, token, provider := linkedOSFixture(t)
+		s, admin, token, provider := fixture(t)
 		ctx := context.Background()
 		linkedOSCreate(t, s, admin, token, "os-linked", "host-one", "user", nil)
 		for i := 0; i < 5; i++ {
@@ -433,13 +465,17 @@ func TestMySQLOSCanonicalAccountRateLimitAndAuditRollback(t *testing.T) {
 		requireError(t, err, "login_limited")
 	})
 	t.Run("audit-rolls-back-session-and-rebind", func(t *testing.T) {
-		s, admin, token, _ := linkedOSFixture(t)
+		s, admin, token, _ := fixture(t)
 		ctx := context.Background()
 		user := linkedOSCreate(t, s, admin, token, "os-linked", "host-one", "user", []Membership{{7, "viewer"}})
-		if _, err := s.db.DB.Exec("RENAME TABLE tw_audit TO os_audit_offline"); err != nil {
+		offline, restore := "RENAME TABLE tw_audit TO os_audit_offline", "RENAME TABLE os_audit_offline TO tw_audit"
+		if s.db.Dialect == "sqlite" {
+			offline, restore = "ALTER TABLE tw_audit RENAME TO os_audit_offline", "ALTER TABLE os_audit_offline RENAME TO tw_audit"
+		}
+		if _, err := s.db.DB.Exec(offline); err != nil {
 			t.Fatal(err)
 		}
-		defer s.db.DB.Exec("RENAME TABLE os_audit_offline TO tw_audit")
+		defer s.db.DB.Exec(restore)
 		_, issued, err := s.LoginOS(ctx, "host-one", linkedOSPassword, "127.0.0.2", "")
 		requireError(t, err, "unavailable")
 		var count int
@@ -463,7 +499,11 @@ func TestMySQLOSCanonicalAccountRateLimitAndAuditRollback(t *testing.T) {
 }
 
 func TestMySQLOSAccessV2UpgradePreservesLocalSessionsAndRemovedGrants(t *testing.T) {
-	local, _, _ := adminFixture(t)
+	testOSAccessV2UpgradePreservesLocalSessionsAndRemovedGrants(t, linkedOSFixture)
+}
+
+func testOSAccessV2UpgradePreservesLocalSessionsAndRemovedGrants(t *testing.T, fixture osAccessFixture) {
+	local, _, _, _ := fixture(t)
 	ctx := context.Background()
 	_, token, err := local.Login(ctx, "reader", testPassword, "127.0.0.2", "")
 	if err != nil {
@@ -513,7 +553,11 @@ func TestMySQLOSAccessV2UpgradePreservesLocalSessionsAndRemovedGrants(t *testing
 }
 
 func TestMySQLOSHTTPMethodsTransportAndNoFallback(t *testing.T) {
-	s, admin, token, provider := linkedOSFixture(t)
+	testOSHTTPMethodsTransportAndNoFallback(t, linkedOSFixture)
+}
+
+func testOSHTTPMethodsTransportAndNoFallback(t *testing.T, fixture osAccessFixture) {
+	s, admin, token, provider := fixture(t)
 	linkedOSCreate(t, s, admin, token, "os-linked", "host-one", "user", []Membership{{7, "viewer"}})
 	h, err := NewHTTP(s, "/timeweaver_svr", HTTPOptions{Origin: "https://tw.example"})
 	if err != nil {

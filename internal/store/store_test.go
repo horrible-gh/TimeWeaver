@@ -46,7 +46,7 @@ func TestReadOnlySQLiteNeverCreatesAndCannotWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.HistoryExists || report.Pending != 7 || report.WriteSupported || !report.ReadOnly {
+	if report.HistoryExists || report.Pending != 1 || !report.WriteSupported || !report.ReadOnly {
 		t.Fatal(report)
 	}
 	if _, err = ro.DB.Exec("DELETE FROM preserved"); err == nil {
@@ -61,19 +61,37 @@ func TestReadOnlySQLiteNeverCreatesAndCannotWrite(t *testing.T) {
 		t.Fatal("status changed database bytes")
 	}
 }
-func TestSQLiteMigrationBlockedWithoutSchemaChanges(t *testing.T) {
+func TestSQLiteFreshMigration(t *testing.T) {
 	cfg := config.Database{Type: "sqlite3", Path: filepath.Join(t.TempDir(), "test.sqlite3")}
 	s, err := Open(context.Background(), cfg, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if _, err = s.Migrate(context.Background()); !errors.Is(err, ErrSQLiteIncomplete) {
-		t.Fatal(err)
+	r, err := s.Migrate(context.Background())
+	if err != nil || r.Pending != 0 || r.Blocked || r.ReadOnly {
+		t.Fatal(r, err)
 	}
 	var count int
-	if err = s.DB.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table'").Scan(&count); err != nil || count != 0 {
-		t.Fatal("incomplete migration wrote schema", count, err)
+	if err = s.DB.QueryRow("SELECT COUNT(*) FROM migrations").Scan(&count); err != nil || count != 1 {
+		t.Fatal("fresh migration invented predecessor history", count, err)
+	}
+	var password string
+	if err = s.DB.QueryRow("SELECT password FROM users WHERE user_id='timeweaver'").Scan(&password); err != nil || password != sqliteSeedHash {
+		t.Fatal(password, err)
+	}
+	if _, err = s.DB.Exec("UPDATE users SET password='unchanged-secret' WHERE user_id='timeweaver'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DB.QueryRow("SELECT password FROM users WHERE user_id='timeweaver'").Scan(&password); err != nil || password != "unchanged-secret" {
+		t.Fatal("migration reset password", err)
+	}
+	guard, err := s.CriticalSchema(context.Background())
+	if err != nil || len(guard.Issues) != 0 {
+		t.Fatal(guard, err)
 	}
 }
 func TestUnknownAndUnfinishedHistory(t *testing.T) {

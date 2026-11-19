@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"strconv"
+
+	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
 type Group struct {
@@ -53,7 +55,7 @@ func (s *Service) SaveGroup(ctx context.Context, token, csrf string, in GroupInp
 		}
 		action := "group_create"
 		if create {
-			r, err := tx.ExecContext(ctx, "INSERT INTO `groups`(group_name,status,creator,created_at) VALUES(?,?,?,UTC_TIMESTAMP())", in.Name, in.Status, u.ID)
+			r, err := tx.ExecContext(ctx, "INSERT INTO `groups`(group_name,status,creator,created_at) VALUES(?,?,?,"+store.NowExpr(s.db.Dialect)+")", in.Name, in.Status, u.ID)
 			if err != nil {
 				return adminFailure(err)
 			}
@@ -65,10 +67,10 @@ func (s *Service) SaveGroup(ctx context.Context, token, csrf string, in GroupInp
 			if id <= 0 {
 				return failure(400, "group_reserved")
 			}
-			if err := requireGroup(ctx, tx, id); err != nil {
+			if err := s.requireGroup(ctx, tx, id); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, "UPDATE `groups` SET group_name=?,status=?,modifier=?,modified_at=UTC_TIMESTAMP() WHERE group_id=?", in.Name, in.Status, u.ID, id); err != nil {
+			if _, err := tx.ExecContext(ctx, "UPDATE `groups` SET group_name=?,status=?,modifier=?,modified_at="+store.NowExpr(s.db.Dialect)+" WHERE group_id=?", in.Name, in.Status, u.ID, id); err != nil {
 				return unavailable()
 			}
 			action = "group_update"
@@ -104,21 +106,21 @@ func (s *Service) DeleteGroup(ctx context.Context, token, csrf string, id int64)
 		}
 		affected := []User{}
 		for _, uid := range ids {
-			u, err := loadUser(ctx, tx, uid)
+			u, err := s.loadUser(ctx, tx, uid)
 			if err != nil {
 				return err
 			}
 			affected = append(affected, u)
 		}
-		if err = requireGroup(ctx, tx, 0); err != nil {
+		if err = s.requireGroup(ctx, tx, 0); err != nil {
 			return err
 		}
-		if err = requireGroup(ctx, tx, id); err != nil {
+		if err = s.requireGroup(ctx, tx, id); err != nil {
 			return err
 		}
 		// Keep legacy resource reassignment, but an unused enrollment secret must
 		// not suddenly enroll a new device into the global/default group.
-		if _, err = tx.ExecContext(ctx, "UPDATE agent_enrollment_token SET revoked_at=COALESCE(revoked_at,UTC_TIMESTAMP()) WHERE group_id=? AND used_at IS NULL", id); err != nil {
+		if _, err = tx.ExecContext(ctx, "UPDATE agent_enrollment_token SET revoked_at=COALESCE(revoked_at,"+store.NowExpr(s.db.Dialect)+") WHERE group_id=? AND used_at IS NULL", id); err != nil {
 			return unavailable()
 		}
 		for _, table := range []string{"devices", "schedule_group", "agent_enrollment_token"} {

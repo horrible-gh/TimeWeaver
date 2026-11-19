@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/horrible-gh/TimeWeaver/internal/access"
+	"github.com/horrible-gh/TimeWeaver/internal/store"
 )
 
 // Typed counts keep empty aggregates numeric in JSON on both supported stores.
@@ -35,7 +36,12 @@ type LatestSchedule struct {
 }
 
 func chartQuery(kind string, u access.User) (string, []any, error) {
-	if businessQueryError != nil {
+	return chartQueryDialect("mysql", kind, u)
+}
+
+func chartQueryDialect(dialect, kind string, u access.User) (string, []any, error) {
+	catalog, catalogErr := businessCatalog(dialect)
+	if catalogErr != nil {
 		return "", nil, fail(503, "unavailable")
 	}
 	key := ""
@@ -51,7 +57,7 @@ func chartQuery(kind string, u access.User) (string, []any, error) {
 	default:
 		return "", nil, fail(503, "unavailable")
 	}
-	q, err := businessQueries.Get(key)
+	q, err := catalog.Get(key)
 	if err != nil {
 		return "", nil, fail(503, "unavailable")
 	}
@@ -114,7 +120,7 @@ func scopeChartQuery(kind, q string, u access.User) (string, []any, error) {
 func (s *Service) statusChart(ctx context.Context, token, kind string) (StatusChart, error) {
 	var out StatusChart
 	err := s.access.WithRead(ctx, token, func(tx *sql.Tx, u access.User) error {
-		q, args, err := chartQuery(kind, u)
+		q, args, err := chartQueryDialect(s.access.Dialect(), kind, u)
 		if err != nil {
 			return err
 		}
@@ -137,7 +143,7 @@ func (s *Service) ScheduleChart(ctx context.Context, token string) (StatusChart,
 func (s *Service) TaskChart(ctx context.Context, token string) (TaskStatusChart, error) {
 	var out TaskStatusChart
 	err := s.access.WithRead(ctx, token, func(tx *sql.Tx, u access.User) error {
-		q, args, err := chartQuery("tasks", u)
+		q, args, err := chartQueryDialect(s.access.Dialect(), "tasks", u)
 		if err != nil {
 			return err
 		}
@@ -152,7 +158,7 @@ func (s *Service) TaskChart(ctx context.Context, token string) (TaskStatusChart,
 func (s *Service) LatestSchedules(ctx context.Context, token string) ([]LatestSchedule, error) {
 	out := []LatestSchedule{}
 	err := s.access.WithRead(ctx, token, func(tx *sql.Tx, u access.User) error {
-		q, args, err := chartQuery("latest", u)
+		q, args, err := chartQueryDialect(s.access.Dialect(), "latest", u)
 		if err != nil {
 			return err
 		}
@@ -165,7 +171,7 @@ func (s *Service) LatestSchedules(ctx context.Context, token string) ([]LatestSc
 			var v LatestSchedule
 			var start, end sql.NullTime
 			var groupStatus, summary sql.NullString
-			if err = rows.Scan(&v.ID, &v.Status, &v.DeviceName, &v.Name, &groupStatus, &v.TaskCount, &start, &end, &summary); err != nil {
+			if err = rows.Scan(&v.ID, &v.Status, &v.DeviceName, &v.Name, &groupStatus, &v.TaskCount, store.ScanNullTime(&start), store.ScanNullTime(&end), &summary); err != nil {
 				return dbError(err)
 			}
 			v.GroupStatus = nullableString(groupStatus)
