@@ -51,7 +51,7 @@ func (s *BrowserSurface) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	p := strings.TrimSuffix(r.URL.Path, "/")
 	switch p {
-	case s.context + "/login", s.context + "/logout", s.context + "/auth/me", s.context + "/auth/methods", s.context + "/auth/password":
+	case s.context + "/login", s.context + "/logout", s.context + "/auth/me", s.context + "/auth/methods", s.context + "/auth/password", s.context + "/auth/refresh":
 		s.human.ServeHTTP(w, r)
 	default:
 		if strings.HasPrefix(p, s.context+"/dashboard/users") || strings.HasPrefix(p, s.context+"/dashboard/groups/") {

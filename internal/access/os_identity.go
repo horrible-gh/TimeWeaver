@@ -61,6 +61,10 @@ func identityFailure(err error) error {
 // OS authentication is an explicit method. Only a pre-linked identity can reach
 // the native password verifier, and it never falls back to a local password.
 func (s *Service) LoginOS(ctx context.Context, name, password, peer, oldToken string) (Principal, string, error) {
+	return s.LoginOSWithRemember(ctx, name, password, peer, oldToken, false)
+}
+
+func (s *Service) LoginOSWithRemember(ctx context.Context, name, password, peer, oldToken string, remember bool) (Principal, string, error) {
 	if err := s.attempt(ctx, "peer:"+peer, 50); err != nil {
 		return Principal{}, "", err
 	}
@@ -125,7 +129,7 @@ func (s *Service) LoginOS(ctx context.Context, name, password, peer, oldToken st
 		return Principal{}, "", unavailable()
 	}
 	u.OSName = verified.Name
-	p, token, err := s.issueSession(ctx, tx, u, oldToken)
+	p, token, err := s.issueSession(ctx, tx, u, oldToken, remember)
 	if err != nil {
 		return Principal{}, "", err
 	}

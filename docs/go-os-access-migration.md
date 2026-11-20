@@ -232,9 +232,12 @@ undone by a late password-verification result. User/binding/group/audit changes
 remain atomic, and audit details contain policy changes rather than credentials
 or native tokens.
 
-The existing session policy remains: random opaque cookies, stored digests,
+The original session policy uses random opaque cookies, stored digests,
 HttpOnly/SameSite/HTTPS attributes, CSRF, idle expiry, 12-hour absolute expiry,
-and a ten-session cap. `tw_session.auth_method` records the method. OS sessions
+and a ten-session cap. The subsequent
+[remembered-session slice](go-remembered-session-migration.md) adds the same
+fixed 30-day opt-in and credential renewal for local and OS accounts, preserving
+these original limits for ordinary sessions. `tw_session.auth_method` records the method. OS sessions
 fingerprint `os` plus their exact subject, rather than the shared `!os` marker.
 Method mismatches, missing/rebound identities, application status/version
 changes, and provider unavailability reject those sessions.

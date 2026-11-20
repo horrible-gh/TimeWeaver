@@ -21,6 +21,12 @@
           <label for="auth-password">{{ changing ? text.current : $t('password') }}</label>
           <input id="auth-password" name="password" type="password" v-model="password" :disabled="isLoading" autocomplete="current-password" required />
         </div>
+        <div class="field full" v-if="sessionMode && !changing">
+          <label class="auth-remember" for="auth-remember">
+            <input id="auth-remember" name="remember" type="checkbox" v-model="remember" :disabled="isLoading" />
+            {{ text.remember }}
+          </label>
+        </div>
         <template v-if="changing">
           <div class="field full">
             <label for="auth-new-password">{{ text.next }}</label>
@@ -49,20 +55,25 @@
 </template>
 <script>
 import { login, ensureSession, changePassword, sessionMode, getLoginMethods } from "@api";
-import { sessionMessages } from "../../../session.mjs";
+import { isUnauthenticated, isSessionChanged, sessionMessages } from "../../../session.mjs";
 export default {
   name: 'LoginForm',
-  data: () => ({ id: '', password: '', nextPassword: '', confirmation: '', changing: false, isLoading: false, error: '', notice: '', method: 'local', loginMethods: ['local'], sessionMode }),
+  data: () => ({ id: '', password: '', nextPassword: '', confirmation: '', remember: false, changing: false, isLoading: false, error: '', notice: '', method: 'local', loginMethods: ['local'], sessionMode }),
   computed: { text() { return sessionMessages[this.$i18n.locale] || sessionMessages.en; } },
   async mounted() {
     const methodsRequest = sessionMode ? getLoginMethods().then(methods => { this.loginMethods = methods; }).catch(() => { this.loginMethods = ['local']; }) : Promise.resolve();
-    if (sessionMode && new URLSearchParams(window.location.search).get('password') === 'required') {
+    if (sessionMode) {
+      this.isLoading = true;
       try {
         const data = await ensureSession();
         this.id = data.user.user_id;
         this.changing = data.user.must_change_password;
         if (this.changing) this.notice = this.text.required;
-      } catch { this.error = this.text.unavailable; }
+        else window.location.replace('/dashboard');
+      } catch (error) {
+        if (isUnauthenticated(error)) window.history.replaceState(null, '', '/login');
+        else if (!isSessionChanged(error)) this.error = this.text.unavailable;
+      } finally { this.isLoading = false; }
     }
     await methodsRequest;
   },
@@ -80,15 +91,21 @@ export default {
           this.password = ''; this.nextPassword = ''; this.confirmation = '';
           window.history.replaceState(null, '', '/login');
         } else {
-          const data = await login(this.id, this.password, this.method);
+          const data = await login(this.id, this.password, this.method, this.remember);
           this.password = '';
           if (sessionMode && data.user.must_change_password) {
-            this.changing = true; this.notice = this.text.required;
+            this.remember = false; this.changing = true; this.notice = this.text.required;
           } else { window.location.href = '/dashboard'; }
         }
       } catch (error) {
         const code = error.response?.data?.detail?.code;
-        if (code === 'os_login_unavailable') this.error = this.text.osUnavailable;
+        if (isUnauthenticated(error)) {
+          this.changing = false; this.notice = '';
+          this.password = ''; this.nextPassword = ''; this.confirmation = '';
+          window.history.replaceState(null, '', '/login');
+          this.error = this.$t('login_failed');
+        }
+        else if (code === 'os_login_unavailable') this.error = this.text.osUnavailable;
         else if (code === 'login_limited') this.error = this.text.limited;
         else if (code === 'password_policy' || code === 'password_unchanged') this.error = this.text.policy;
         else if (!error.response || error.response.status >= 500) this.error = this.text.unavailable;

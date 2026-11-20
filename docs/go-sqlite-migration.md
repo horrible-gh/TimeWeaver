@@ -2,8 +2,10 @@
 
 Branch: `feature/go-server-unified`, following OS-account baseline `3284eb4`.
 This slice adds SQLite to the implemented Go application services. Production
-`serve` remains gated; deployment inventory, remembered-session continuity,
-installable startup and deployment/rollback verification remain separate work.
+`serve` remains gated; deployment inventory, installable startup and
+deployment/rollback verification remain separate work. The subsequent
+[remembered-session slice](go-remembered-session-migration.md) adds browser
+continuity and access schema v4 on all three database engines.
 
 ## Scope
 

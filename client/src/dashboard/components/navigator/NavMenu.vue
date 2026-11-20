@@ -19,8 +19,8 @@
 </template>
 
 <script setup>
-import { computed, defineEmits, onMounted, ref } from "vue";
-import { ensureSession, sessionMode } from "@api";
+import { computed, defineEmits } from "vue";
+import { sessionMode, sessionUser } from "@api";
 import { useRoute } from "vue-router";
 
 defineEmits(["navigate"]);
@@ -30,8 +30,7 @@ const route = useRoute();
 // ✅ `href` keeps the previous full-page navigation behaviour untouched;
 //    `path` is the router path used only to decide the active highlight.
 //    The router base is "/dashboard/", so the two differ by that prefix.
-const admin = ref(false);
-onMounted(async () => { if (sessionMode) { try { admin.value = (await ensureSession()).user.role === "admin"; } catch { admin.value = false; } } });
+const admin = computed(() => sessionUser.value?.role === "admin");
 const navigation = [
   {
     label: "shell_nav_workspace",

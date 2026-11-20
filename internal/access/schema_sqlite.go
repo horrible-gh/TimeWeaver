@@ -17,7 +17,7 @@ type accessCatalog interface {
 var sqliteAccessColumns = map[string][]string{
 	"tw_user_auth":     {"user_id", "status", "version", "must_change_password", "password_changed_at", "last_login_at"},
 	"tw_group_member":  {"user_id", "group_id", "role"},
-	"tw_session":       {"digest", "user_id", "user_version", "csrf", "password_fingerprint", "created_at", "last_seen", "expires_at", "auth_method"},
+	"tw_session":       {"digest", "user_id", "user_version", "csrf", "password_fingerprint", "created_at", "last_seen", "expires_at", "auth_method", "token_digest", "previous_digest", "previous_until", "rotation_seed", "rotated_at", "remembered"},
 	"tw_audit":         {"id", "at", "actor", "action", "result", "target", "detail"},
 	"tw_login_attempt": {"key_hash", "count", "started"},
 	"tw_user_identity": {"subject", "user_id", "os_name", "created_at"},
@@ -79,6 +79,15 @@ func sqliteAccessStatus(ctx context.Context, q accessCatalog) (SchemaStatus, err
 	}
 	if r.Ready {
 		valid, err := sqliteAccessKeys(ctx, q, r.Version)
+		if err != nil {
+			return r, err
+		}
+		if !valid {
+			r.Ready, r.State = false, "incomplete"
+		}
+	}
+	if r.Ready {
+		valid, err := sqliteRotationShape(ctx, q)
 		if err != nil {
 			return r, err
 		}
@@ -151,6 +160,19 @@ func sqliteAccessKeys(ctx context.Context, q accessCatalog, version int) (bool, 
 		}
 		if uniqueUsers == 0 {
 			return false, nil
+		}
+	}
+	if version >= 4 {
+		for _, column := range []string{"token_digest", "previous_digest"} {
+			var uniqueTokens int
+			if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM (
+ SELECT i.name FROM pragma_index_list('tw_session') i JOIN pragma_index_xinfo(i.name) x ON x."key"=1
+ WHERE i."unique"=1 AND i.partial=0 GROUP BY i.name HAVING COUNT(*)=1 AND MIN(x.name)=? AND MIN(x.coll)='BINARY')`, column).Scan(&uniqueTokens); err != nil {
+				return false, unavailable()
+			}
+			if uniqueTokens == 0 {
+				return false, nil
+			}
 		}
 	}
 	return true, nil
@@ -227,9 +249,11 @@ var sqliteAccessDDL = []string{
 	`CREATE TABLE tw_access_schema(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL,state TEXT NOT NULL)`,
 	`CREATE TABLE tw_user_auth(user_id TEXT COLLATE BINARY NOT NULL PRIMARY KEY REFERENCES users(user_id),status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled')),version INTEGER NOT NULL DEFAULT 1,must_change_password INTEGER NOT NULL DEFAULT 0 CHECK(must_change_password IN (0,1)),password_changed_at INTEGER NULL,last_login_at INTEGER NULL)`,
 	`CREATE TABLE tw_group_member(user_id TEXT COLLATE BINARY NOT NULL REFERENCES users(user_id),group_id INTEGER NOT NULL REFERENCES groups(group_id),role TEXT NOT NULL CHECK(role IN ('viewer','operator','editor')),PRIMARY KEY(user_id,group_id))`,
-	`CREATE TABLE tw_session(digest TEXT COLLATE BINARY NOT NULL PRIMARY KEY,user_id TEXT COLLATE BINARY NOT NULL REFERENCES users(user_id),user_version INTEGER NOT NULL,csrf TEXT COLLATE BINARY NOT NULL,password_fingerprint TEXT COLLATE BINARY NOT NULL,created_at INTEGER NOT NULL,last_seen INTEGER NOT NULL,expires_at INTEGER NOT NULL,auth_method TEXT NOT NULL)`,
+	`CREATE TABLE tw_session(digest TEXT COLLATE BINARY NOT NULL PRIMARY KEY,user_id TEXT COLLATE BINARY NOT NULL REFERENCES users(user_id),user_version INTEGER NOT NULL,csrf TEXT COLLATE BINARY NOT NULL,password_fingerprint TEXT COLLATE BINARY NOT NULL,created_at INTEGER NOT NULL,last_seen INTEGER NOT NULL,expires_at INTEGER NOT NULL,auth_method TEXT NOT NULL,token_digest TEXT COLLATE BINARY NULL,previous_digest TEXT COLLATE BINARY NULL,previous_until INTEGER NOT NULL DEFAULT 0,rotation_seed TEXT COLLATE BINARY NULL,rotated_at INTEGER NOT NULL DEFAULT 0,remembered INTEGER NOT NULL DEFAULT 0 CHECK(remembered IN (0,1)))`,
 	`CREATE INDEX tw_session_user ON tw_session(user_id)`,
 	`CREATE INDEX tw_session_expiry ON tw_session(expires_at)`,
+	`CREATE UNIQUE INDEX tw_session_token ON tw_session(token_digest)`,
+	`CREATE UNIQUE INDEX tw_session_previous ON tw_session(previous_digest)`,
 	`CREATE TABLE tw_audit(id INTEGER PRIMARY KEY AUTOINCREMENT,at INTEGER NOT NULL,actor TEXT NOT NULL,action TEXT NOT NULL,result TEXT NOT NULL,target TEXT NOT NULL DEFAULT '',detail TEXT NULL)`,
 	`CREATE TABLE tw_login_attempt(key_hash TEXT COLLATE BINARY NOT NULL PRIMARY KEY,count INTEGER NOT NULL,started INTEGER NOT NULL)`,
 	`CREATE INDEX tw_attempt_expiry ON tw_login_attempt(started)`,
@@ -279,7 +303,7 @@ func initializeSQLiteAccess(ctx context.Context, db *store.Store) (SchemaStatus,
 		if _, err = tx.ExecContext(ctx, "INSERT INTO tw_group_member(user_id,group_id,role) SELECT user_id,group_id,'editor' FROM users WHERE role='user'"); err != nil {
 			return status, unavailable()
 		}
-	} else if status.State == "ready" && (status.Version == 1 || status.Version == 2) {
+	} else if status.State == "ready" && status.Version >= 1 && status.Version <= 3 {
 		if err = checkSQLiteAccessUpgrade(ctx, tx, status.Version); err != nil {
 			return status, err
 		}
@@ -293,8 +317,18 @@ func initializeSQLiteAccess(ctx context.Context, db *store.Store) (SchemaStatus,
 				}
 			}
 		}
-		if _, err = tx.ExecContext(ctx, sqliteIdentityDDL); err != nil {
-			return status, errors.New("SQLite identity upgrade failed; transaction rolled back")
+		if status.Version <= 2 {
+			if _, err = tx.ExecContext(ctx, sqliteIdentityDDL); err != nil {
+				return status, errors.New("SQLite identity upgrade failed; transaction rolled back")
+			}
+		}
+		for _, ddl := range sqliteSessionUpgrade {
+			if _, err = tx.ExecContext(ctx, ddl); err != nil {
+				return status, errors.New("SQLite session upgrade failed; transaction rolled back")
+			}
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE tw_session SET token_digest=digest,rotated_at=created_at"); err != nil {
+			return status, unavailable()
 		}
 	} else {
 		return status, errors.New("access migration is unfinished or incompatible; restore/review it before retrying")
@@ -322,7 +356,7 @@ func checkSQLiteAccessUpgrade(ctx context.Context, tx *sql.Tx, version int) erro
 			if err != nil {
 				return err
 			}
-			want := version != 1 || table != "tw_audit" || column != "target" && column != "detail"
+			want := (version != 1 || table != "tw_audit" || column != "target" && column != "detail") && (table != "tw_session" || !rotationColumn(column))
 			if exists != want {
 				return errors.New("unexpected SQLite access schema; inspect before upgrading")
 			}
@@ -332,8 +366,19 @@ func checkSQLiteAccessUpgrade(ctx context.Context, tx *sql.Tx, version int) erro
 	if err != nil {
 		return err
 	}
-	if exists {
-		return errors.New("untracked OS identity table; inspect before upgrading")
+	if exists != (version >= 3) {
+		return errors.New("unexpected OS identity table; inspect before upgrading")
+	}
+	if version >= 3 {
+		for _, column := range sqliteAccessColumns["tw_user_identity"] {
+			exists, err = sqliteAccessColumn(ctx, tx, "tw_user_identity", column)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return errors.New("incomplete OS identity table; inspect before upgrading")
+			}
+		}
 	}
 	valid, err := sqliteAccessKeys(ctx, tx, version)
 	if err != nil {
@@ -343,4 +388,15 @@ func checkSQLiteAccessUpgrade(ctx context.Context, tx *sql.Tx, version int) erro
 		return errors.New("unexpected SQLite access keys; inspect before upgrading")
 	}
 	return nil
+}
+
+var sqliteSessionUpgrade = []string{
+	"ALTER TABLE tw_session ADD COLUMN token_digest TEXT COLLATE BINARY NULL",
+	"ALTER TABLE tw_session ADD COLUMN previous_digest TEXT COLLATE BINARY NULL",
+	"ALTER TABLE tw_session ADD COLUMN previous_until INTEGER NOT NULL DEFAULT 0",
+	"ALTER TABLE tw_session ADD COLUMN rotation_seed TEXT COLLATE BINARY NULL",
+	"ALTER TABLE tw_session ADD COLUMN rotated_at INTEGER NOT NULL DEFAULT 0",
+	"ALTER TABLE tw_session ADD COLUMN remembered INTEGER NOT NULL DEFAULT 0 CHECK(remembered IN (0,1))",
+	"CREATE UNIQUE INDEX tw_session_token ON tw_session(token_digest)",
+	"CREATE UNIQUE INDEX tw_session_previous ON tw_session(previous_digest)",
 }

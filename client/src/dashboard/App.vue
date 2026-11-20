@@ -28,6 +28,10 @@
       </header>
 
       <div class="content">
+        <div v-if="sessionMode && sessionUnavailable" class="session-status panel" role="alert">
+          <span>{{ sessionText.unavailable }}</span>
+          <button type="button" class="btn" @click="retrySession">{{ sessionText.retry }}</button>
+        </div>
         <router-view></router-view> <!-- ✅ Render the current route component here -->
       </div>
     </main>
@@ -35,8 +39,11 @@
 </template>
 
 <script setup>
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
+import { useI18n } from "vue-i18n";
+import { retrySession, sessionMode, sessionUnavailable } from "@api";
+import { sessionMessages } from "../../session.mjs";
 
 import DashboardLogo from "@/dashboard/components/header/DashboardLogo.vue";
 import DashboardNavigator from "@/dashboard/components/header/DashboardNavigator.vue";
@@ -45,6 +52,8 @@ import NavMenu from "@/dashboard/components/navigator/NavMenu.vue";
 import NavFooter from "@/dashboard/components/navigator/NavFooter.vue";
 
 const route = useRoute();
+const { locale } = useI18n();
+const sessionText = computed(() => sessionMessages[locale.value] || sessionMessages.en);
 
 // ✅ Off-canvas sidebar state. Only reachable below the 760px breakpoint,
 //    where the sidebar becomes a drawer (see style.css section 8).
@@ -61,6 +70,17 @@ const closeNav = () => {
 // ✅ Close the drawer whenever navigation happens
 watch(route, closeNav);
 </script>
+
+<style scoped>
+.session-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+}
+</style>
 
 <script>
 /*

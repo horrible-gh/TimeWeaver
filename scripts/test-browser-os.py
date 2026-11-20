@@ -28,6 +28,7 @@ def main():
             page.locator('#auth-method').select_option(method)
             page.locator('#auth-id').fill(name)
             page.locator('#auth-password').fill(password)
+            page.locator('#auth-remember').check()
             with page.expect_response(lambda response: response.url == base + '/login' and response.request.method == 'POST') as response:
                 page.locator('button[type=submit]').click()
             assert response.value.status == expected, response.value.text()
@@ -65,6 +66,7 @@ def main():
         assert principal['user']['user_id'] == uid
         assert principal['user']['auth_method'] == 'os' and principal['user']['role'] == 'user'
         assert not principal['user']['must_change_password']
+        assert principal['session']['remembered'] is True
         assert limited.request.get(base + '/dashboard/users').status == 403
         devices = limited.request.get(base + '/dashboard/devices/get_devices?group_id=8').json()
         assert [device['device_name'] for device in devices] == ['seven'], devices
@@ -74,6 +76,7 @@ def main():
         assert cfg['os_password'] not in lp.evaluate('JSON.stringify(localStorage)')
         assert lp.evaluate('localStorage.getItem("access_token")') is None
         assert any(cookie['name'] == 'tw_session' and cookie['httpOnly'] for cookie in limited.cookies())
+        assert next(cookie for cookie in limited.cookies() if cookie['name'] == 'tw_session')['expires'] > 0
         protected = limited.request.post(base + '/auth/password', headers={'Origin': origin, 'X-CSRF-Token': principal['csrf_token']}, data={'current_password': cfg['os_password'], 'new_password': 'must-not-become-local-password'})
         assert protected.status == 409 and protected.json()['detail']['code'] == 'os_password_managed'
 
@@ -87,9 +90,12 @@ def main():
         expect(page.locator('.modal-overlay')).to_have_count(0)
         expect(row).to_contain_text('browser-os-two')
         assert limited.request.get(base + '/auth/me').status == 401
+        assert limited.request.post(base + '/auth/refresh', headers={'Origin': origin, 'X-CSRF-Token': principal['csrf_token']}).status == 401
         sign_in(lp, 'os', 'browser-os-one', cfg['os_password'], 401)
         sign_in(lp, 'os', 'browser-os-two', cfg['os_password'])
-        assert limited.request.get(base + '/auth/me').json()['user']['user_id'] == uid
+        principal = limited.request.get(base + '/auth/me').json()
+        assert principal['user']['user_id'] == uid
+        assert principal['session']['remembered'] is True
 
         row.get_by_role('button', name='Edit', exact=True).click()
         page.locator('#user-status').select_option('disabled')
@@ -97,6 +103,7 @@ def main():
         expect(page.locator('.modal-overlay')).to_have_count(0)
         expect(row.locator('.badge')).to_have_text('Disabled')
         assert limited.request.get(base + '/auth/me').status == 401
+        assert limited.request.post(base + '/auth/refresh', headers={'Origin': origin, 'X-CSRF-Token': principal['csrf_token']}).status == 401
         sign_in(lp, 'os', 'browser-os-two', cfg['os_password'], 401)
         row.get_by_role('button', name='Edit', exact=True).click()
         page.locator('#user-status').select_option('active')
@@ -105,7 +112,7 @@ def main():
         sign_in(lp, 'os', 'browser-os-two', cfg['os_password'])
         expect(row.get_by_role('button', name='Reset password', exact=True)).to_have_count(0)
         browser.close()
-    print('PASS: explicit OS link with generated app identity, alias login, no local password/bearer storage, group scope, rebind revocation and account disable/reactivation')
+    print('PASS: explicit OS link with generated app identity, remembered alias login, no local password/bearer storage, group scope, remembered-session rebind/disable revocation and reactivation')
 
 
 if __name__ == '__main__':

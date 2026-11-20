@@ -45,7 +45,9 @@ agent identity/runtime/execution APIs, embedded Vue surface, human sessions and
 group permissions, user/group administration, device enrollment, schedules and
 tasks, manual execution and history, scoped dashboard charts/recent schedules,
 pre-linked Linux/Windows OS-account login, and the complete native SQLite schema,
-query catalog and application-service path.
+query catalog and application-service path. Remembered browser sessions now
+preserve continuity across browser/server restarts and rotate credentials while
+retaining a fixed absolute deadline.
 Each slice retains its own compatibility limits and test evidence:
 
 - [Human access](go-human-access-migration.md) and [administration](go-administration-migration.md)
@@ -55,6 +57,7 @@ Each slice retains its own compatibility limits and test evidence:
 - [Dashboard charts and recent schedules](go-chart-migration.md)
 - [OS accounts and native login](go-os-access-migration.md)
 - [SQLite schema, migrations and services](go-sqlite-migration.md)
+- [Remembered browser sessions and renewal](go-remembered-session-migration.md)
 - [Agent identity](go-identity-migration.md), [runtime](go-runtime-migration.md)
   and [execution](go-execution-migration.md)
 
@@ -66,8 +69,8 @@ not runtime compatibility. The read-only baseline guard continues to compare
 tracked legacy server/agent files and embedded SQL against the pinned baseline.
 It never imports the Python app or opens a database.
 
-Still required before production: remembered-session continuity,
-installable server startup, production DB inventory (including the exact
+Still required before production: installable server startup,
+production DB inventory (including the exact
 historical SQLite schema shapes), and deployment/rollback validation. OS login
 has specific host/PAM/domain limitations recorded in its slice document.
 `serve` remains disabled. The sections below record the foundation as it was

@@ -10,6 +10,7 @@ def sign_in(page, origin, user, password):
     page.goto(origin + '/login')
     page.locator('#auth-id').fill(user)
     page.locator('#auth-password').fill(password)
+    page.locator('#auth-remember').check()
     page.locator('button[type=submit]').click()
 
 
@@ -57,6 +58,7 @@ def main():
         sign_in(lp, origin, 'browser-limited', 'limited-changed-password')
         lp.wait_for_url('**/dashboard*')
         me = limited.request.get(base + '/auth/me').json()
+        assert me['session']['remembered'] is True
         assert limited.request.get(base + '/dashboard/users').status == 403
         assert limited.request.get(base + '/dashboard/devices/get_devices?group_id=0').json()[0]['device_name'] == 'device-seven'
         assert len(limited.request.get(base + '/dashboard/devices/get_devices?group_id=8').json()) == 1
@@ -78,8 +80,11 @@ def main():
         page.locator('.modal-foot').get_by_role('button', name='Save', exact=True).click()
         expect(row).to_contain_text('Updated User')
         assert limited.request.get(base + '/auth/me').status == 401
+        assert limited.request.post(base + '/auth/refresh', headers={'Origin': origin, 'X-CSRF-Token': me['csrf_token']}).status == 401
         sign_in(lp, origin, 'browser-limited', 'limited-changed-password')
         lp.wait_for_url('**/dashboard*')
+        me = limited.request.get(base + '/auth/me').json()
+        assert me['session']['remembered'] is True
         devices = limited.request.get(base + '/dashboard/devices/get_devices?group_id=7').json()
         assert [d['device_name'] for d in devices] == ['device-eight']
         row.get_by_role('button', name='Reset password', exact=True).click()
@@ -87,6 +92,7 @@ def main():
         page.locator('.modal-foot').get_by_role('button', name='Save', exact=True).click()
         expect(page.locator('.modal-overlay')).to_have_count(0)
         assert limited.request.get(base + '/auth/me').status == 401
+        assert limited.request.post(base + '/auth/refresh', headers={'Origin': origin, 'X-CSRF-Token': me['csrf_token']}).status == 401
         sign_in(lp, origin, 'browser-limited', 'limited-reset-password')
         expect(lp.locator('#auth-new-password')).to_be_visible()
         assert limited.request.get(base + '/dashboard/devices/get_devices').status == 403
@@ -109,7 +115,7 @@ def main():
         expect(page.get_by_role('cell', name='Renamed Group', exact=True)).to_have_count(0)
         assert group['group_id'] not in [g['group_id'] for g in admin.request.get(base + '/dashboard/groups/get_groups').json()]
         browser.close()
-    print('PASS: real user/group administration, password reset, last-admin protection, group-scoped device browsing and immediate session revocation')
+    print('PASS: real user/group administration, password reset, last-admin protection, group-scoped device browsing and remembered-session revocation after membership/password changes')
 
 
 if __name__ == '__main__':

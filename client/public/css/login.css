@@ -63,6 +63,21 @@
 /* -----------------------------------------------------------------------------
  * 3. Form actions and foot
  * -------------------------------------------------------------------------- */
+.field .auth-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0;
+  cursor: pointer;
+}
+
+.auth-remember input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  accent-color: var(--cyan);
+}
+
 .auth-actions {
   display: flex;
   align-items: center;

@@ -33,9 +33,22 @@ type User struct {
 	osSubject          string
 }
 type Principal struct {
-	User    User   `json:"user"`
-	CSRF    string `json:"csrf_token"`
-	session string
+	User                      User        `json:"user"`
+	CSRF                      string      `json:"csrf_token"`
+	Session                   SessionInfo `json:"session"`
+	session                   string
+	previous                  bool
+	rotatedAt                 int64
+	tokenDigest, rotationSeed string
+}
+
+// SessionInfo contains scheduling hints, never a credential. The relative
+// interval lets clients schedule renewal without trusting their wall clock.
+type SessionInfo struct {
+	Remembered          bool  `json:"remembered"`
+	ExpiresAt           int64 `json:"expires_at"`
+	RefreshAfter        int64 `json:"refresh_after"`
+	RefreshAfterSeconds int64 `json:"refresh_after_seconds"`
 }
 
 func rank(role string) int {

@@ -2,10 +2,10 @@ export function availableLoginMethods(response) {
   return Array.isArray(response?.methods) && response.methods.includes('os') ? ['local', 'os'] : ['local'];
 }
 
-export function loginPayload(username, password, method = 'local', sessionMode = true) {
+export function loginPayload(username, password, method = 'local', sessionMode = true, remember = false) {
   if (!sessionMode) return { username, password };
   if (method !== 'local' && method !== 'os') throw new Error('invalid_auth_method');
-  return { username, password, method };
+  return { username, password, method, remember: remember === true };
 }
 
 // OS identity is resolved by the server. The browser never submits a subject,

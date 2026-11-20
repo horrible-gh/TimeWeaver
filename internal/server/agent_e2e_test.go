@@ -34,9 +34,16 @@ import (
 // This test executes only the pinned agent binary built by CI, on loopback,
 // with random disposable DBs and commands that write inside t.TempDir().
 func serverDatabase(t *testing.T) (*store.Store, *store.Store) {
+	db, probe, _ := serverDatabaseWithConfig(t)
+	return db, probe
+}
+
+// The browser restart test reopens independent pools over this same disposable
+// database, so persistence cannot accidentally depend on a service or connection.
+func serverDatabaseWithConfig(t *testing.T) (*store.Store, *store.Store, config.Database) {
 	t.Helper()
 	if sqliteFixtureEnabled() {
-		return sqliteServerDatabase(t)
+		return sqliteServerDatabaseWithConfig(t)
 	}
 	if os.Getenv("TIMEWEAVER_TEST_MYSQL_ALLOW_CREATE") != "1" {
 		t.Skip("requires explicit disposable DB permission")
@@ -77,7 +84,7 @@ func serverDatabase(t *testing.T) (*store.Store, *store.Store) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { probe.Close() })
-	return db, probe
+	return db, probe, c
 }
 
 func TestGoAgentEndToEnd(t *testing.T) {
@@ -97,7 +104,7 @@ func TestGoAgentEndToEnd(t *testing.T) {
 		t.Fatal("agent binary unavailable")
 	}
 	db, probe := serverDatabase(t)
-	settings := config.Settings{Context: "/timeweaver_svr", SecretKey: "surface-test-only-0123456789abcdef0123456789", HTTP: config.DefaultHTTPSettings()}
+	settings := config.Settings{Context: "/timeweaver_svr", SecretKey: "surface-test-only-0123456789abcdef0123456789", HTTP: config.DefaultHTTPSettings(), IdleTimeout: 30 * time.Minute}
 	settings.HTTP.Capacity = 1000
 	settings.HTTP.Refill = 100
 	ui, err := webui.Bundled(settings.Context)
@@ -105,8 +112,21 @@ func TestGoAgentEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	app, err := NewAgentSurface(db, probe, settings, ui, logger)
+	if _, err = db.RepairCriticalSchema(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = access.Initialize(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Run the unchanged device protocol assertions through the full browser
+	// composition, including the human session routes on this same listener.
+	app, err := NewBrowserSurface(context.Background(), db, probe, settings, ui, logger, access.HTTPOptions{Origin: "http://" + ln.Addr().String()})
+	if err != nil {
+		ln.Close()
 		t.Fatal(err)
 	}
 	if _, err = NewAgentSurface(db, db, settings, ui, logger); err == nil {
@@ -169,10 +189,6 @@ func TestGoAgentEndToEnd(t *testing.T) {
 		}
 		app.ServeHTTP(w, r)
 	})
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
 	root, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {

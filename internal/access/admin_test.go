@@ -268,6 +268,7 @@ func testAccessV1UpgradePreservesSessionsAndRemovedGrants(t *testing.T, fixture 
 	s, _, token := fixture(t)
 	ctx := context.Background()
 	// Reconstruct the old v1 layout from the current initialized fixture.
+	restoreV3Sessions(t, s.db)
 	if _, err := s.db.DB.Exec("DROP TABLE tw_user_identity"); err != nil {
 		t.Fatal(err)
 	}
@@ -290,8 +291,8 @@ func testAccessV1UpgradePreservesSessionsAndRemovedGrants(t *testing.T, fixture 
 	if err != nil || status.Ready || status.Version != 1 {
 		t.Fatal(status, err)
 	}
-	if status, err = Initialize(ctx, s.db); err != nil || !status.Ready || status.Version != 3 {
-		t.Fatal("v1-to-v3 upgrade failed", status, err)
+	if status, err = Initialize(ctx, s.db); err != nil || !status.Ready || status.Version != schemaVersion {
+		t.Fatal("v1-to-current upgrade failed", status, err)
 	}
 	if _, err = s.Session(ctx, token, false); err != nil {
 		t.Fatal("upgrade revoked session", err)

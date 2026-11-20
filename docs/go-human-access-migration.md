@@ -6,8 +6,9 @@ sources/SQL and separate agent repository are unchanged.
 
 This document records the local-session foundation. The subsequent
 [OS account slice](go-os-access-migration.md) adds native Linux/Windows login and
-access schema v3; the local password, cookie and group-permission rules continue
-to apply.
+access schema v3. [Remembered sessions](go-remembered-session-migration.md)
+subsequently add schema v4, explicit browser persistence and credential renewal;
+the local password and group-permission rules continue to apply.
 
 ## Implemented
 
@@ -26,8 +27,9 @@ to apply.
   never recreates grants an administrator removed. Admins keep their role.
 - DB-backed 32-byte random session credentials are stored only as SHA-256
   digests. Cookies are HttpOnly, SameSite=Strict, scoped to the API context and
-  Secure for HTTPS. Idle expiry uses the existing configured idle timeout;
-  absolute expiry is 12 hours. There is no remember-me/rotation extension yet.
+  Secure for HTTPS. Ordinary sessions use the existing configured idle timeout
+  and a 12-hour absolute expiry. The subsequent remembered-session slice adds
+  an explicit fixed 30-day opt-in and 12-hour credential rotation.
   At most ten sessions are retained per user. GET polling does not prolong
   idle sessions; `/auth/me` and authorized mutations count as activity.
 - Logout, password change, session expiry, user version/status and external
@@ -42,7 +44,8 @@ to apply.
   as a future dashboard mutation. Callers must resolve resource groups in that
   transaction and check every source/target, not trust a request's group ID.
 - Human endpoints: form POST `/login`; GET `/auth/me` and `/auth/methods`;
-  POST `/logout` and JSON POST `/auth/password`. Single trailing-slash aliases
+  POST `/logout`, JSON POST `/auth/password`, and the subsequent CSRF-protected
+  POST `/auth/refresh`. Single trailing-slash aliases
   work without redirects. Browser endpoints reject all Authorization headers;
   device JWTs and old human JWTs never fall back to cookies.
 - Human HTTP composition requires an explicit canonical public origin. Remote
@@ -87,10 +90,9 @@ this test. This is the authentication flow, not a complete dashboard test.
 
 ## Remaining gates
 
-OS login and OS identity linking, user/group administration APIs and UI, the
-actual dashboard resource APIs using this authorization boundary, SQLite full
-schema/dialect support, native Windows end-to-end/browser verification, deployment
-inventory and production cutover remain unfinished. `/auth/methods` advertises
-only local login; OS login is not pretended to work. No production server launch
-command is enabled by this slice. Python rollback still ignores new RBAC/status
+The [migration overview](go-server-migration.md) records the current status of
+subsequent administration, dashboard, OS-account, SQLite and remembered-session
+slices. Installable startup, native Windows end-to-end/browser deployment,
+production inventory and cutover validation remain unfinished. No production
+server launch command is enabled by this slice. Python rollback still ignores new RBAC/status
 restrictions and must not be treated as a permission-safe rollback.

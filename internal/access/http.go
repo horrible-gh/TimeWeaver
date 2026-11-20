@@ -118,11 +118,16 @@ func (h *HTTP) sameOrigin(r *http.Request, write bool) bool {
 	u, err := url.Parse(origin)
 	return err == nil && u.User == nil && u.RawQuery == "" && u.Fragment == "" && u.Path == "" && u.Scheme == h.origin.Scheme && strings.EqualFold(u.Host, h.origin.Host)
 }
-func (h *HTTP) setCookie(w http.ResponseWriter, token string, remove bool) {
+func (h *HTTP) setCookie(w http.ResponseWriter, token string, remove bool, session SessionInfo) {
 	c := &http.Cookie{Name: cookieName, Value: token, Path: h.base + "/", HttpOnly: true, Secure: h.origin.Scheme == "https", SameSite: http.SameSiteStrictMode}
 	if remove {
 		c.MaxAge = -1
 		c.Expires = time.Unix(1, 0)
+	} else if session.Remembered {
+		c.Expires = time.Unix(session.ExpiresAt, 0).UTC()
+		// Use the service clock and the fixed login deadline. Refresh never
+		// grants another thirty days by resetting the browser's cookie lifetime.
+		c.MaxAge = int(max(1, session.ExpiresAt-h.service.now().Unix()))
 	}
 	http.SetCookie(w, c)
 }
@@ -164,7 +169,7 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	wanted := "POST"
 	switch p {
-	case h.base + "/login", h.base + "/logout", h.base + "/auth/password":
+	case h.base + "/login", h.base + "/logout", h.base + "/auth/password", h.base + "/auth/refresh":
 	case h.base + "/auth/me", h.base + "/auth/methods":
 		wanted = "GET"
 	default:
@@ -225,20 +230,20 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		form, err := url.ParseQuery(string(b))
-		if err != nil || len(form["username"]) != 1 || len(form["password"]) != 1 || len(form["method"]) > 1 || (form.Get("method") != "" && form.Get("method") != "local" && form.Get("method") != "os") {
+		if err != nil || len(form["username"]) != 1 || len(form["password"]) != 1 || len(form["method"]) > 1 || (form.Get("method") != "" && form.Get("method") != "local" && form.Get("method") != "os") || len(form["remember"]) > 1 || len(form["remember"]) == 1 && form.Get("remember") != "true" && form.Get("remember") != "false" {
 			writeError(w, failure(422, "invalid_request"))
 			return
 		}
-		login := h.service.Login
+		login := h.service.LoginWithRemember
 		if form.Get("method") == "os" {
-			login = h.service.LoginOS
+			login = h.service.LoginOSWithRemember
 		}
-		principal, token, err := login(ctx, form.Get("username"), form.Get("password"), h.peer(r), tokenFrom(r))
+		principal, token, err := login(ctx, form.Get("username"), form.Get("password"), h.peer(r), tokenFrom(r), form.Get("remember") == "true")
 		if err != nil {
 			writeError(w, err)
 			return
 		}
-		h.setCookie(w, token, false)
+		h.setCookie(w, token, false, principal.Session)
 		jsonReply(w, 200, principal)
 	case h.base + "/auth/me":
 		principal, err := h.service.Session(ctx, tokenFrom(r), true)
@@ -247,12 +252,22 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		jsonReply(w, 200, principal)
+	case h.base + "/auth/refresh":
+		principal, token, err := h.service.Refresh(ctx, tokenFrom(r), r.Header.Get("X-CSRF-Token"))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		if token != "" {
+			h.setCookie(w, token, false, principal.Session)
+		}
+		jsonReply(w, 200, principal)
 	case h.base + "/logout":
 		if err := h.service.Logout(ctx, tokenFrom(r), r.Header.Get("X-CSRF-Token")); err != nil {
 			writeError(w, err)
 			return
 		}
-		h.setCookie(w, "", true)
+		h.setCookie(w, "", true, SessionInfo{})
 		jsonReply(w, 200, map[string]bool{"ok": true})
 	case h.base + "/auth/password":
 		content, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
@@ -279,7 +294,7 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, err)
 			return
 		}
-		h.setCookie(w, "", true)
+		h.setCookie(w, "", true, SessionInfo{})
 		jsonReply(w, 200, map[string]bool{"reauthenticate": true})
 	}
 }

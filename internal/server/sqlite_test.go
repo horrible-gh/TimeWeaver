@@ -16,6 +16,11 @@ import (
 )
 
 func sqliteServerDatabase(t *testing.T) (*store.Store, *store.Store) {
+	db, probe, _ := sqliteServerDatabaseWithConfig(t)
+	return db, probe
+}
+
+func sqliteServerDatabaseWithConfig(t *testing.T) (*store.Store, *store.Store, config.Database) {
 	t.Helper()
 	c := config.Database{Type: "sqlite3", Path: filepath.Join(t.TempDir(), "surface.sqlite3")}
 	db, err := store.Open(context.Background(), c, false)
@@ -31,7 +36,7 @@ func sqliteServerDatabase(t *testing.T) (*store.Store, *store.Store) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { probe.Close() })
-	return db, probe
+	return db, probe, c
 }
 
 // Only fixture SQL is translated. Application queries exercise the native

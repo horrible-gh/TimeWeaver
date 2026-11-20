@@ -11,9 +11,12 @@ test('OS login is offered only when explicitly advertised; local discovery fallb
 });
 
 test('login sends the chosen method explicitly without changing standalone Python credentials', () => {
- assert.deepEqual(loginPayload('alice', 'password'), { username: 'alice', password: 'password', method: 'local' });
- assert.deepEqual(loginPayload('DOMAIN\\alice', 'password', 'os'), { username: 'DOMAIN\\alice', password: 'password', method: 'os' });
+ assert.deepEqual(loginPayload('alice', 'password'), { username: 'alice', password: 'password', method: 'local', remember: false });
+ assert.deepEqual(loginPayload('DOMAIN\\alice', 'password', 'os'), { username: 'DOMAIN\\alice', password: 'password', method: 'os', remember: false });
+ assert.deepEqual(loginPayload('alice', 'password', 'local', true, true), { username: 'alice', password: 'password', method: 'local', remember: true });
+ assert.equal(loginPayload('alice', 'password', 'os', true, true).remember, true);
  assert.deepEqual(loginPayload('alice', 'password', 'os', false), { username: 'alice', password: 'password' });
+ assert.deepEqual(loginPayload('alice', 'password', 'os', false, true), { username: 'alice', password: 'password' });
  assert.throws(() => loginPayload('alice', 'password', 'OS'), /invalid_auth_method/);
  assert.throws(() => loginPayload('alice', 'password', 'fallback'), /invalid_auth_method/);
 });
@@ -39,6 +42,9 @@ test('local creation retains its password contract and ordinary edits cannot acc
 
 test('OS login and administration labels and errors exist in every supported locale', async () => {
  for (const locale of ['ko', 'ja']) assert.deepEqual(Object.keys(sessionMessages[locale]), Object.keys(sessionMessages.en));
+ for (const messages of Object.values(sessionMessages)) {
+   assert.ok(messages.remember); assert.ok(messages.retry);
+ }
  const source = await readFile(new URL('../src/dashboard/i18n/access.js', import.meta.url), 'utf8');
  const { default: messages } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
  for (const locale of ['ko', 'ja']) assert.deepEqual(Object.keys(messages[locale]), Object.keys(messages.en));

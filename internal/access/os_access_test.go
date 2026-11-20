@@ -509,6 +509,7 @@ func testOSAccessV2UpgradePreservesLocalSessionsAndRemovedGrants(t *testing.T, f
 	if err != nil {
 		t.Fatal(err)
 	}
+	restoreV3Sessions(t, local.db)
 	for _, query := range []string{"DELETE FROM tw_group_member WHERE user_id='reader'", "DROP TABLE tw_user_identity", "UPDATE tw_access_schema SET version=2,state='ready' WHERE id=1"} {
 		if _, err = local.db.DB.Exec(query); err != nil {
 			t.Fatal(err)
@@ -519,7 +520,7 @@ func testOSAccessV2UpgradePreservesLocalSessionsAndRemovedGrants(t *testing.T, f
 		t.Fatal(err)
 	}
 	status, err := Initialize(ctx, local.db)
-	if err != nil || !status.Ready || status.Version != 3 {
+	if err != nil || !status.Ready || status.Version != schemaVersion {
 		t.Fatal("v2 access upgrade failed", status, err)
 	}
 	upgraded, err := NewWithOS(ctx, local.db, 30*time.Minute, newLinkedOSProvider())

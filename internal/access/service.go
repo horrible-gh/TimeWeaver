@@ -138,6 +138,10 @@ func (s *Service) attempt(ctx context.Context, key string, limit int) error {
 	return nil
 }
 func (s *Service) Login(ctx context.Context, id, password, peer, oldToken string) (Principal, string, error) {
+	return s.LoginWithRemember(ctx, id, password, peer, oldToken, false)
+}
+
+func (s *Service) LoginWithRemember(ctx context.Context, id, password, peer, oldToken string, remember bool) (Principal, string, error) {
 	if err := s.attempt(ctx, "peer:"+peer, 50); err != nil {
 		return Principal{}, "", err
 	}
@@ -175,7 +179,7 @@ func (s *Service) Login(ctx context.Context, id, password, peer, oldToken string
 	if u.status != "active" || u.version != candidate.version || !equalSecret(u.password, candidate.password) {
 		return Principal{}, "", failure(401, "invalid_credentials")
 	}
-	p, token, err := s.issueSession(ctx, tx, u, oldToken)
+	p, token, err := s.issueSession(ctx, tx, u, oldToken, remember)
 	if err != nil {
 		return Principal{}, "", err
 	}
@@ -193,7 +197,7 @@ func sessionFingerprint(u User) string {
 	return digest(u.password)
 }
 
-func (s *Service) issueSession(ctx context.Context, tx *sql.Tx, u User, oldToken string) (Principal, string, error) {
+func (s *Service) issueSession(ctx context.Context, tx *sql.Tx, u User, oldToken string, remember bool) (Principal, string, error) {
 	token, err := randomToken()
 	if err != nil {
 		return Principal{}, "", err
@@ -203,11 +207,16 @@ func (s *Service) issueSession(ctx context.Context, tx *sql.Tx, u User, oldToken
 		return Principal{}, "", err
 	}
 	now := s.now().Unix()
-	p := Principal{u, csrf, digest(token)}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM tw_session WHERE expires_at<=? OR last_seen<=? OR digest=?`, now, now-int64(s.idle.Seconds()), digest(oldToken)); err != nil {
+	remember = remember && !u.MustChangePassword
+	expires := now + int64(normalSessionLifetime.Seconds())
+	if remember {
+		expires = now + int64(rememberedSessionLifetime.Seconds())
+	}
+	p := Principal{User: u, CSRF: csrf, Session: sessionInfo(remember, expires, now, now, false), session: digest(token), tokenDigest: digest(token), rotatedAt: now}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM tw_session WHERE expires_at<=? OR (remembered=FALSE AND last_seen<=?) OR token_digest=? OR (previous_digest=? AND previous_until>?)`, now, now-int64(s.idle.Seconds()), digest(oldToken), digest(oldToken), now); err != nil {
 		return Principal{}, "", unavailable()
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO tw_session(digest,user_id,user_version,csrf,password_fingerprint,created_at,last_seen,expires_at,auth_method) VALUES(?,?,?,?,?,?,?,?,?)`, p.session, u.ID, u.version, csrf, sessionFingerprint(u), now, now, now+12*3600, u.AuthMethod); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO tw_session(digest,user_id,user_version,csrf,password_fingerprint,created_at,last_seen,expires_at,auth_method,token_digest,rotated_at,remembered) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, p.session, u.ID, u.version, csrf, sessionFingerprint(u), now, now, expires, u.AuthMethod, p.tokenDigest, now, remember); err != nil {
 		return Principal{}, "", unavailable()
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT digest FROM tw_session WHERE user_id=? ORDER BY (digest=?) DESC,created_at DESC,digest DESC`, u.ID, p.session)
@@ -302,8 +311,8 @@ func (s *Service) principalTx(ctx context.Context, tx *sql.Tx, token string) (Pr
 		return empty, failure(401, "unauthenticated")
 	}
 	hash := digest(token)
-	var id string
-	err := tx.QueryRowContext(ctx, `SELECT user_id FROM tw_session WHERE digest=?`, hash).Scan(&id)
+	var id, family string
+	err := tx.QueryRowContext(ctx, `SELECT user_id,digest FROM tw_session WHERE token_digest=? OR (previous_digest=? AND previous_until>?)`, hash, hash, s.now().Unix()).Scan(&id, &family)
 	if errors.Is(err, sql.ErrNoRows) {
 		return empty, failure(401, "unauthenticated")
 	}
@@ -314,9 +323,10 @@ func (s *Service) principalTx(ctx context.Context, tx *sql.Tx, token string) (Pr
 	if err != nil {
 		return empty, err
 	}
-	var version, last, expires int64
-	var csrf, fingerprint, method string
-	err = tx.QueryRowContext(ctx, `SELECT user_version,csrf,password_fingerprint,last_seen,expires_at,auth_method FROM tw_session WHERE digest=? AND user_id=?`+store.LockClause(s.db.Dialect, false), hash, u.ID).Scan(&version, &csrf, &fingerprint, &last, &expires, &method)
+	var version, last, expires, rotated, previousUntil int64
+	var csrf, fingerprint, method, current, previous, seed string
+	var remembered bool
+	err = tx.QueryRowContext(ctx, `SELECT user_version,csrf,password_fingerprint,last_seen,expires_at,auth_method,COALESCE(token_digest,''),COALESCE(previous_digest,''),previous_until,COALESCE(rotation_seed,''),rotated_at,remembered FROM tw_session WHERE digest=? AND user_id=?`+store.LockClause(s.db.Dialect, false), family, u.ID).Scan(&version, &csrf, &fingerprint, &last, &expires, &method, &current, &previous, &previousUntil, &seed, &rotated, &remembered)
 	if errors.Is(err, sql.ErrNoRows) {
 		return empty, failure(401, "unauthenticated")
 	}
@@ -324,10 +334,14 @@ func (s *Service) principalTx(ctx context.Context, tx *sql.Tx, token string) (Pr
 		return empty, unavailable()
 	}
 	now := s.now().Unix()
-	if method != u.AuthMethod || (method != "local" && method != "os") || method == "os" && (!s.OSAvailable() || u.osSubject == "") || u.status != "active" || version != u.version || !equalSecret(fingerprint, sessionFingerprint(u)) || now >= expires || now-last >= int64(s.idle.Seconds()) || now < last {
+	isPrevious := !equalSecret(hash, current)
+	if isPrevious && (!equalSecret(hash, previous) || now >= previousUntil) {
 		return empty, failure(401, "unauthenticated")
 	}
-	return Principal{u, csrf, hash}, nil
+	if method != u.AuthMethod || (method != "local" && method != "os") || method == "os" && (!s.OSAvailable() || u.osSubject == "") || u.status != "active" || version != u.version || !equalSecret(fingerprint, sessionFingerprint(u)) || now >= expires || !remembered && now-last >= int64(s.idle.Seconds()) || now < last || now < rotated {
+		return empty, failure(401, "unauthenticated")
+	}
+	return Principal{User: u, CSRF: csrf, Session: sessionInfo(remembered, expires, rotated, now, isPrevious), session: family, previous: isPrevious, tokenDigest: current, rotationSeed: seed, rotatedAt: rotated}, nil
 }
 func (s *Service) Session(ctx context.Context, token string, touch bool) (Principal, error) {
 	tx, p, err := s.sessionTx(ctx, token)
