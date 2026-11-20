@@ -28,7 +28,13 @@ def main():
         ctx, page = login(cfg['user'])
 
         def save():
-            page.locator('.modal-foot').get_by_role('button', name='Save', exact=True).click()
+            writes = {
+                base + '/dashboard/schedule/insert_schedule', base + '/dashboard/schedule/update_schedule',
+                base + '/dashboard/tasks/insert_task', base + '/dashboard/tasks/update_task',
+            }
+            with page.expect_response(lambda response: response.url in writes and response.request.method in ('POST', 'PUT')) as response:
+                page.locator('.modal-foot').get_by_role('button', name='Save', exact=True).click()
+            assert response.value.ok, f'{response.value.request.method} {urlparse(response.value.url).path}: {response.value.status} {response.value.text()}'
             expect(page.locator('.modal-overlay')).to_have_count(0)
 
         def schedule_row(name):
@@ -39,6 +45,7 @@ def main():
         page.locator('#schedule-group').select_option('7')
         page.locator('#schedule-name').fill('browser-schedule')
         page.locator('#schedule-device').select_option(label='seven')
+        target_device = page.locator('#schedule-device').input_value()
         # This UI formerly labelled Sunday as 0; the actual agent uses Monday=0.
         page.locator('#schedule-weekday').select_option(label='Sun')
         expect(page.locator('#schedule-weekday')).to_have_value('6')
@@ -106,8 +113,23 @@ def main():
         page.goto(origin + '/dashboard/tasks')
         page.locator(f'tr[data-task="{tid}"]').get_by_role('button', name='Remove', exact=True).click()
         expect(page.locator(f'tr[data-task="{tid}"]')).to_have_count(0)
-        page.goto(origin + '/dashboard/schedules')
+        # Rows must not offer Edit before its reference options are ready.
+        # Previously the group watcher cleared the saved target in this window,
+        # so a status-only save incorrectly sent target_device:null.
+        pending_devices = []
+        devices_url = base + '/dashboard/schedule/get_devices'
+        def hold_devices(route):
+            pending_devices.append(route)
+        page.route(devices_url, hold_devices)
+        with page.expect_request(lambda request: request.url == devices_url):
+            page.goto(origin + '/dashboard/schedules')
+        expect(schedule_row('browser-renamed')).to_have_count(0)
+        assert len(pending_devices) == 1
+        pending_devices.pop().continue_()
+        page.unroute(devices_url, hold_devices)
+        expect(schedule_row('browser-renamed')).to_be_visible()
         schedule_row('browser-renamed').get_by_role('button', name='Edit', exact=True).click()
+        expect(page.locator('#schedule-device')).to_have_value(target_device)
         page.locator('#schedule-status').select_option('inactive')
         save()
         expect(schedule_row('browser-renamed')).to_contain_text('inactive')
@@ -122,7 +144,7 @@ def main():
         schedule_row('empty-to-remove').get_by_role('button', name='Remove', exact=True).click()
         expect(schedule_row('empty-to-remove')).to_have_count(0)
         browser.close()
-    print('PASS: embedded schedule/task CRUD, typed payloads, weekday contract, role scopes, history-safe deletion and fresh forms')
+    print('PASS: embedded schedule/task CRUD, typed payloads, weekday contract, role scopes, history-safe deletion, deferred device options and fresh forms')
 
 
 if __name__ == '__main__':

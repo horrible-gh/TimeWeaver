@@ -87,6 +87,60 @@ func serverDatabaseWithConfig(t *testing.T) (*store.Store, *store.Store, config.
 	return db, probe, c
 }
 
+// The browser composition initializes access before this fixture replaces the
+// disposable seed password. Its persisted initial-password restriction must be
+// completed through the real service, exactly as an administrator would do.
+func agentAdministrator(t *testing.T, db *store.Store) (*access.Service, access.Principal, string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := fixtureExec(t, db, "UPDATE users SET password=? WHERE user_id='timeweaver'", deviceTestHash); err != nil {
+		t.Fatal(err)
+	}
+	human, err := access.New(ctx, db, 30*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal, session, err := human.Login(ctx, "timeweaver", deviceTestPassword, "127.0.0.1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !principal.User.MustChangePassword {
+		t.Fatal("seed administrator bypassed the initial-password restriction")
+	}
+	_, err = dashboard.New(human).IssueEnrollment(ctx, session, principal.CSRF, dashboard.EnrollmentInput{GroupID: gid(0), Name: dname("surface-agent"), TTLHours: 24})
+	expectCode(t, err, "password_change_required")
+	const changedPassword = "surface-agent-administrator-password"
+	if err = human.ChangePassword(ctx, session, principal.CSRF, deviceTestPassword, changedPassword); err != nil {
+		t.Fatal(err)
+	}
+	_, err = human.Session(ctx, session, false)
+	expectCode(t, err, "unauthenticated")
+	principal, session, err = human.Login(ctx, "timeweaver", changedPassword, "127.0.0.1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if principal.User.MustChangePassword {
+		t.Fatal("completed password change did not unlock administrator enrollment")
+	}
+	return human, principal, session
+}
+
+func TestSQLiteAgentEnrollmentPasswordGate(t *testing.T) {
+	t.Setenv("TIMEWEAVER_TEST_SQLITE", "1")
+	db, _ := serverDatabase(t)
+	if _, err := db.RepairCriticalSchema(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := access.Initialize(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	human, principal, session := agentAdministrator(t, db)
+	issue, err := dashboard.New(human).IssueEnrollment(context.Background(), session, principal.CSRF, dashboard.EnrollmentInput{GroupID: gid(0), Name: dname("surface-agent"), TTLHours: 24})
+	if err != nil || issue.Token == "" {
+		t.Fatalf("administrator could not issue enrollment after password change: %v", err)
+	}
+}
+
 func TestGoAgentEndToEnd(t *testing.T) {
 	binary := os.Getenv("TW_AGENT_BINARY")
 	if binary == "" {
@@ -247,23 +301,7 @@ func TestGoAgentEndToEnd(t *testing.T) {
 	}
 	// The real agent now consumes material created by the human management
 	// service, instead of an independently seeded enrollment table row.
-	if _, err = db.RepairCriticalSchema(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = fixtureExec(t, db, "UPDATE users SET password=? WHERE user_id='timeweaver'", deviceTestHash); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = access.Initialize(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
-	human, err := access.New(context.Background(), db, 30*time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	principal, session, err := human.Login(context.Background(), "timeweaver", deviceTestPassword, "127.0.0.1", "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	human, principal, session := agentAdministrator(t, db)
 	issue, err := dashboard.New(human).IssueEnrollment(context.Background(), session, principal.CSRF, dashboard.EnrollmentInput{GroupID: gid(0), Name: dname("surface-agent"), TTLHours: 24})
 	if err != nil {
 		t.Fatal(err)
