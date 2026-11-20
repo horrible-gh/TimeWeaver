@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Only invoked by the Go test on an ephemeral loopback listener/database."""
 import json
+import re
 import sys
 import tempfile
 import time
@@ -14,6 +15,10 @@ def main():
     origin = settings["origin"]
     assert urlparse(origin).hostname == "127.0.0.1"
     base = origin + settings["context"]
+
+    def dashboard_url(url):
+        target, expected = urlparse(url), urlparse(origin)
+        return (target.scheme, target.netloc) == (expected.scheme, expected.netloc) and target.path in ("/dashboard", "/dashboard/")
 
     def control(action, cookie=""):
         assert urlparse(settings["control_origin"]).hostname == "127.0.0.1"
@@ -35,7 +40,7 @@ def main():
         page.locator("#auth-password").fill("new-browser-password-123")
         page.locator("#auth-remember").set_checked(remember)
         page.locator("button[type=submit]").click()
-        page.wait_for_url("**/dashboard*")
+        page.wait_for_url(dashboard_url)
         expect(page.locator(".user-trigger")).to_be_visible()
 
     with sync_playwright() as p:
@@ -71,7 +76,7 @@ def main():
         page.locator("#auth-password").fill("new-browser-password-123")
         page.locator("#auth-remember").uncheck()
         page.locator("button[type=submit]").click()
-        page.wait_for_url("**/dashboard*")
+        page.wait_for_url(dashboard_url)
         expect(page.locator(".user-trigger")).to_be_visible()
         me = context.request.get(base + "/auth/me")
         assert me.status == 200 and me.json()["user"]["user_id"] == settings["user"]
@@ -129,7 +134,7 @@ def main():
             control("restart")
             context, page = persistent()
             page.goto(origin + "/login")
-            page.wait_for_url("**/dashboard*")
+            page.wait_for_url(dashboard_url)
             expect(page.locator(".user-trigger")).to_be_visible()
             renewed = only_cookie(context)
             assert renewed["value"] != before["value"]
@@ -167,8 +172,10 @@ def main():
             retry = context.request.get(base + "/auth/me", headers={"Cookie": "tw_session=" + concurrent["value"]})
             assert retry.status == 200 and retry.json()["session"]["refresh_after_seconds"] == 0
             page.reload()
-            page.wait_for_url("**/dashboard*")
+            page.wait_for_url(dashboard_url)
             expect(page.locator(".user-trigger")).to_be_visible()
+            expect(page.locator("#dashboard-refresh")).to_be_visible()
+            expect(page.locator('[data-metric="devices"] .metric-value strong')).to_have_text(re.compile(r"^\d+$"))
             recovered = only_cookie(context)
             assert recovered["value"] != concurrent["value"]
             assert control("status")["lost_refreshes"] == 1
