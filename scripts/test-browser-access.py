@@ -153,8 +153,14 @@ def main():
             control("due", renewed["value"])
             page.reload(wait_until="commit")
             other.reload(wait_until="commit")
-            expect(page.locator(".user-trigger")).to_be_visible()
-            expect(other.locator(".user-trigger")).to_be_visible()
+            # The sidebar mounts before the asynchronous route guard finishes
+            # /auth/me and a due /auth/refresh. Wait for protected dashboard
+            # data in both new documents before inspecting the shared cookie.
+            # One tab may consume the other's successor without refreshing it.
+            for tab in (page, other):
+                tab.wait_for_load_state("domcontentloaded")
+                expect(tab.locator("#dashboard-refresh")).to_be_visible()
+                expect(tab.locator('[data-metric="devices"] .metric-value strong')).to_have_text(re.compile(r"^\d+$"))
             concurrent = only_cookie(context)
             assert concurrent["value"] != renewed["value"]
             assert context.request.get(base + "/auth/me").json()["session"]["expires_at"] == absolute_expiry
