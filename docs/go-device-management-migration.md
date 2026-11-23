@@ -1,5 +1,9 @@
 # Device management and enrollment administration
 
+> Historical implementation slice. The unified executable now supports `serve`;
+> see [Go server setup and operation](go-server.md) for current startup and
+> upgrade instructions. Status statements below describe this slice when introduced.
+
 Branch: `feature/go-server-unified`, following `0ff6cb7`.
 This is still a migration build; production `serve` remains disabled. No legacy
 Python/SQL files, main branch, deployed database or separate agent repository

@@ -6,6 +6,7 @@ require (
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	golang.org/x/sys v0.46.0
+	golang.org/x/term v0.44.0
 	modernc.org/sqlite v1.54.0
 )
 

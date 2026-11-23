@@ -17,7 +17,7 @@ import (
 
 // BrowserSurface adds human session routes without altering device authentication.
 // It requires an explicitly initialized access schema and a configured public
-// origin. Dashboard data APIs and the production serve CLI are still gated.
+// origin. Its listener serves human, dashboard and agent APIs alongside the UI.
 type BrowserSurface struct {
 	*AgentSurface
 	human     http.Handler
@@ -33,7 +33,7 @@ func NewBrowserSurface(ctx context.Context, db, probe *store.Store, settings con
 	if settings.OSLoginEnabled {
 		provider = access.NewOSAuthenticator()
 	}
-	human, err := access.NewWithOS(ctx, db, settings.IdleTimeout, provider)
+	human, err := access.NewWithTimeouts(ctx, db, settings.IdleTimeout, settings.AbsoluteTimeout, provider)
 	if err != nil {
 		return nil, err
 	}

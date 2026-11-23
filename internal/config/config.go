@@ -31,6 +31,7 @@ type Settings struct {
 	Context         string        `json:"context"`
 	ListenHost      string        `json:"listen_host"`
 	ListenPort      int           `json:"listen_port"`
+	PublicOrigin    string        `json:"public_origin"`
 	SecretKey       string        `json:"-"`
 	AgentSecretKey  string        `json:"-"`
 	Database        Database      `json:"database"`
@@ -152,6 +153,9 @@ func Load(filename string, lookup func(string) (string, bool)) (Settings, error)
 	}
 	result.Database = db
 	if result.HTTP, err = loadHTTP(get); err != nil {
+		return Settings{}, err
+	}
+	if result.PublicOrigin, err = publicOrigin(get("PUBLIC_ORIGIN", ""), result.ListenHost, result.ListenPort, result.HTTP.TrustedProxies); err != nil {
 		return Settings{}, err
 	}
 	return result, nil

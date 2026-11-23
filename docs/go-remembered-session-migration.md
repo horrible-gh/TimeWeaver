@@ -1,5 +1,9 @@
 # Remembered browser sessions and renewal
 
+> Historical implementation slice. The unified executable now supports `serve`;
+> see [Go server setup and operation](go-server.md) for current startup and
+> upgrade instructions. Status statements below describe this slice when introduced.
+
 Branch: `feature/go-server-unified`, following SQLite baseline `1bcda04`.
 This slice adds browser-session continuity to both local and pre-linked OS
 accounts. `serve` remains gated. It does not change the running Python server,

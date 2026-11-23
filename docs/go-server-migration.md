@@ -3,17 +3,18 @@
 Work branch: `feature/go-server-unified`.
 Baseline: `d6bdb751e08e68ff98781b5b41e5f90b09383ce2`.
 
-This branch implements the architecture reviewed on 2026-11-16. It is not an
-operational replacement for the Python server yet. Do not deploy it over a
-running TimeWeaver installation. `main`, existing launch commands, the database,
-and registered agents are not changed by this work.
+This branch implements the architecture reviewed on 2026-11-16. The unified
+executable now starts the real UI and API server with `serve`. Follow
+[Go server setup and operation](go-server.md) to build, prepare the database,
+configure Caddy and run it under SpawnPoint. Deployment keeps an explicit
+database setup step; startup never silently runs migrations.
 
 ## Target
 
 One Go executable serves the API and compiled Vue UI; no Node or Vue server is
 needed at runtime. Keep the independent Go agent and Agent API v1. Use the seven
 package boundaries from the design: config, store, access, dashboard, agentapi,
-webui, server. Preserve MySQL and complete SQLite before a production release.
+webui, server. Preserve MySQL, MariaDB and SQLite behavior.
 Do not add a scheduler or push channel to the server.
 
 ## Required corrections to the design
@@ -48,6 +49,12 @@ pre-linked Linux/Windows OS-account login, and the complete native SQLite schema
 query catalog and application-service path. Remembered browser sessions now
 preserve continuity across browser/server restarts and rotate credentials while
 retaining a fixed absolute deadline.
+The CLI now connects those services to a foreground listener, handles shutdown,
+reports read-only DB readiness, and provides an explicit setup command. Setup
+claims the initial administrator through a privately entered password; `serve`
+refuses a database that still exposes the public seed credential. Build scripts
+stamp the version/commit, and the root runners rebuild by default so an old
+executable cannot masquerade as the current source.
 Each slice retains its own compatibility limits and test evidence:
 
 - [Human access](go-human-access-migration.md) and [administration](go-administration-migration.md)
@@ -61,7 +68,8 @@ Each slice retains its own compatibility limits and test evidence:
 - [Agent identity](go-identity-migration.md), [runtime](go-runtime-migration.md)
   and [execution](go-execution-migration.md)
 
-CI includes real-file SQLite and disposable MySQL/MariaDB integration, Python
+CI includes real-executable startup/login/restart on Windows and Linux,
+real-file SQLite and disposable MySQL/MariaDB integration, Python
 interoperability, embedded-browser workflows, native Linux/Windows account
 authentication and an actual pinned Go agent. Consult the exact commit's
 workflow run for executed results; a static route inventory alone is
@@ -69,12 +77,11 @@ not runtime compatibility. The read-only baseline guard continues to compare
 tracked legacy server/agent files and embedded SQL against the pinned baseline.
 It never imports the Python app or opens a database.
 
-Still required before production: installable server startup,
-production DB inventory (including the exact
-historical SQLite schema shapes), and deployment/rollback validation. OS login
-has specific host/PAM/domain limitations recorded in its slice document.
-`serve` remains disabled. The sections below record the foundation as it was
-introduced; newer slice documents describe subsequent implementation.
+Deployment still requires checking the actual DB inventory (including exact
+historical SQLite shapes), host configuration and backup restoration. Those
+checks are specific to the installation. OS login has host/PAM/domain limits
+recorded in its slice document. The sections below are historical records of
+the foundation; use [the current operating guide](go-server.md) for commands.
 
 Run from a full Git checkout:
 
@@ -88,12 +95,12 @@ New implementation belongs outside `server/` and `agent/`. Do not weaken the
 baseline guard merely to make a failing migration test pass. No Python code is
 removed before replacement and rollback verification have both been completed.
 
-## Initial Go implementation
+## Initial Go implementation (historical)
 
-The Go module targets Go 1.26. The initial code provides a read-only configuration
-loader, the compiled-Vue HTTP handler, and a guarded migration CLI. `serve` is
-explicitly disabled until the API/database implementation is ready; there is no
-fake health endpoint and no accidental production cutover.
+The Go module targets Go 1.26. The initial code provided a read-only configuration
+loader, the compiled-Vue HTTP handler, and a guarded migration CLI. That first
+slice deliberately disabled `serve` while the API/database implementation was
+incomplete. The current executable enables it after real readiness checks.
 
 - `config.Load` reads an explicit env file and honors environment overrides. It
   does not connect to or create a database. Relative SQLite paths are anchored to
@@ -132,16 +139,17 @@ go run ./cmd/timeweaver check --env server/.env
 go run ./cmd/timeweaver assets-check --context /timeweaver_svr
 ```
 
-`check` reports **configuration-only** validation, `database_connected: false`
-and `server_implemented: false`. It is not the final design's database preflight
-command yet. Build outputs are migration CLIs, not deployable API servers.
+In the initial slice, `check` reported **configuration-only** validation,
+`database_connected: false` and `server_implemented: false`. Current builds
+report the implemented server and provide `check --database` for readiness.
+Plain `check` still performs configuration-only validation.
 
 CI checks the untouched legacy sources, standalone and embedded Vue builds,
 Go 1.26 tests on Windows/Linux, Linux race checks, actual embedded assets and
 CGO-free Windows/Linux amd64/arm64 compilation. Native OS-login, real DB migration,
-full-browser workflows and agent execution are still separate future gates.
+full-browser workflows and agent execution were added in subsequent slices.
 
-## Store foundation and migration preflight
+## Store foundation and migration preflight (historical)
 
 Implemented after the initial UI/config slice:
 
@@ -168,7 +176,8 @@ Implemented after the initial UI/config slice:
   not participate: this is not permission to run old and new migrators together.
 - SQLite read-only inspection and connection protection are tested, but the
   missing legacy bootstrap/query dialect is still incomplete. SQLite `up` fails
-  BEFORE opening/creating a database. Full SQLite support remains a release gate.
+  BEFORE opening/creating a database. That gap was completed by the later
+  [SQLite implementation](go-sqlite-migration.md).
 
 ```sh
 # Reads the actual DB but creates no tables or missing SQLite file.
@@ -177,9 +186,10 @@ go run ./cmd/timeweaver migrate status --env server/.env
 go run ./cmd/timeweaver migrate up --env copied-server.env --allow-write
 ```
 
-`check` remains configuration-only; use `migrate status` for the database history.
-Neither command proves complete API readiness. `serve` remains disabled. No
-operational database or running agent has been changed by this work.
+At this stage, `check` was configuration-only and `migrate status` read the
+database history; neither proved complete API readiness. Current builds add
+`check --database` and an enabled `serve`. Implementing this code does not itself
+modify an operational database or a running agent.
 
 ### MariaDB versus native MySQL
 

@@ -1,5 +1,9 @@
 # Human manual execution and history
 
+> Historical implementation slice. The unified executable now supports `serve`;
+> see [Go server setup and operation](go-server.md) for current startup and
+> upgrade instructions. Status statements below describe this slice when introduced.
+
 Branch: `feature/go-server-unified`, following `a2741f8`.
 This slice adds the dashboard's manual-run queue and execution history to the
 Go server. Production `serve` remains disabled. It does not modify the frozen

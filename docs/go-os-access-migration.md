@@ -1,5 +1,9 @@
 # OS account login and identity bindings
 
+> Historical implementation slice. The unified executable now supports `serve`;
+> see [Go server setup and operation](go-server.md) for current startup and
+> upgrade instructions. Status statements below describe this slice when introduced.
+
 Branch: `feature/go-server-unified`, following chart checkpoint `d0865b3`.
 This slice adds OS authentication to the unified Go browser surface. Production
 `serve` remains gated. It does not change the frozen Python server, original

@@ -1,5 +1,9 @@
 # Unified agent surface, lifecycle and favicon
 
+> Historical implementation slice. The unified executable now supports `serve`;
+> see [Go server setup and operation](go-server.md) for current startup and
+> upgrade instructions. Status statements below describe this slice when introduced.
+
 Branch: `feature/go-server-unified`, following execution baseline `29b07cc`.
 This is still a migration build, NOT a browser-ready production replacement.
 The production CLI's `serve` remains disabled. No deployed server, database,

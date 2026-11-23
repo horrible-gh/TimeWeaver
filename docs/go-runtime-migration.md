@@ -1,5 +1,9 @@
 # Agent heartbeat and snapshot slice
 
+> Historical implementation slice. The unified executable now supports `serve`;
+> see [Go server setup and operation](go-server.md) for current startup and
+> upgrade instructions. Status statements below describe this slice when introduced.
+
 Branch: `feature/go-server-unified`, following identity baseline `6eaadc1`.
 This is not an operational release. `serve` remains disabled, and the legacy
 Python sources, original SQL, main branch and deployed instances are untouched.

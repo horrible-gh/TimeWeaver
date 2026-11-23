@@ -28,6 +28,17 @@ type Store struct {
 // Open never runs migrations. Read-only mode cannot create a missing SQLite file
 // and sets the database's own write protection, not just a Go boolean.
 func Open(ctx context.Context, c config.Database, readOnly bool) (*Store, error) {
+	return open(ctx, c, readOnly, false)
+}
+
+// OpenExisting opens the business pool for a running server. Unlike a migration
+// connection it must never create a SQLite database, even if the file disappears
+// between the read-only startup inspection and opening the writable pool.
+func OpenExisting(ctx context.Context, c config.Database) (*Store, error) {
+	return open(ctx, c, false, true)
+}
+
+func open(ctx context.Context, c config.Database, readOnly, existingOnly bool) (*Store, error) {
 	dialect, err := dialectName(c.Type)
 	if err != nil {
 		return nil, err
@@ -81,7 +92,11 @@ func Open(ctx context.Context, c config.Database, readOnly bool) (*Store, error)
 			query.Set("mode", "ro")
 			query.Add("_pragma", "query_only(1)")
 		} else {
-			query.Set("mode", "rwc")
+			mode := "rwc"
+			if existingOnly {
+				mode = "rw"
+			}
+			query.Set("mode", mode)
 			query.Add("_pragma", "journal_mode(WAL)")
 			query.Set("_txlock", "immediate")
 		}

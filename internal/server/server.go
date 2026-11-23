@@ -1,5 +1,5 @@
-// Package server composes the migration's agent API and embedded Vue surface.
-// It does not enable the production CLI, migrate a DB or install an OS service.
+// Package server composes the agent API and embedded Vue surface.
+// Its caller prepares the database and controls the listener lifecycle.
 package server
 
 import (
@@ -141,7 +141,7 @@ func apiNotFound(w http.ResponseWriter, r *http.Request) {
 }
 
 // Serve takes ownership of an already-bound listener. The API's base path and
-// UI share this one listener. There is intentionally no production serve flag yet.
+// UI share this one listener. BrowserSurface adds human and dashboard routes.
 func (s *AgentSurface) Serve(ctx context.Context, ln net.Listener) error {
 	if ln == nil {
 		return errors.New("listener is required")

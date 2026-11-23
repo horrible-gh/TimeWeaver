@@ -1,5 +1,9 @@
 # User/group administration and scoped device browsing
 
+> Historical implementation slice. The unified executable now supports `serve`;
+> see [Go server setup and operation](go-server.md) for current startup and
+> upgrade instructions. Status statements below describe this slice when introduced.
+
 Branch: `feature/go-server-unified`, following `a86a45e`.
 This remains a migration build. Production `serve` is not enabled. The main
 branch, deployed server/database, legacy Python/SQL and separate agent repository

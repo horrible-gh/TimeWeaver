@@ -9,14 +9,14 @@ import (
 	"testing"
 )
 
-func TestVersionAndUnsupportedServe(t *testing.T) {
+func TestVersionAndCommandValidation(t *testing.T) {
 	var output, diagnostics bytes.Buffer
-	if run([]string{"version"}, &output, &diagnostics) != 0 || !strings.Contains(output.String(), "migration build") {
-		t.Fatal("version not explicit about readiness")
+	if run([]string{"version"}, &output, &diagnostics) != 0 || !strings.Contains(output.String(), "unified server") || strings.Contains(output.String(), "migration build") {
+		t.Fatal("version must identify the runnable unified server")
 	}
 	output.Reset()
-	if run([]string{"serve"}, &output, &diagnostics) != 2 || output.Len() != 0 {
-		t.Fatal("incomplete server must not start")
+	if run([]string{"serve", "--env", filepath.Join(t.TempDir(), "missing.env")}, &output, &diagnostics) != 2 || output.Len() != 0 || strings.Contains(diagnostics.String(), "serve is disabled") {
+		t.Fatal("serve must validate its environment instead of being disabled")
 	}
 	if run(nil, &output, &diagnostics) != 2 {
 		t.Fatal("missing command accepted")
@@ -45,7 +45,7 @@ func TestCheckIsReadOnlyAndRedacted(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report["scope"] != "configuration-only" || report["database_connected"] != false || report["server_implemented"] != false || report["read_only"] != true {
+	if report["scope"] != "configuration-only" || report["database_connected"] != false || report["server_implemented"] != true || report["read_only"] != true {
 		t.Fatal("misleading check report")
 	}
 	if strings.Contains(out.String(), os.Getenv("SECRET_KEY")) {

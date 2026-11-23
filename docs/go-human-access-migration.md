@@ -1,5 +1,9 @@
 # Human sessions and group authorization
 
+> Historical implementation slice. The unified executable now supports `serve`;
+> see [Go server setup and operation](go-server.md) for current startup and
+> upgrade instructions. Status statements below describe this slice when introduced.
+
 Branch: `feature/go-server-unified`, following `c17fec3`. This slice does not
 unlock production `serve`. The deployed server, main branch, original Python
 sources/SQL and separate agent repository are unchanged.

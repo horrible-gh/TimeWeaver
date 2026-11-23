@@ -1,5 +1,9 @@
 # SQLite store, migrations and API support
 
+> Historical implementation slice. The unified executable now supports `serve`;
+> see [Go server setup and operation](go-server.md) for current startup and
+> upgrade instructions. Status statements below describe this slice when introduced.
+
 Branch: `feature/go-server-unified`, following OS-account baseline `3284eb4`.
 This slice adds SQLite to the implemented Go application services. Production
 `serve` remains gated; deployment inventory, installable startup and

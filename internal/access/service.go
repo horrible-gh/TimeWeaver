@@ -13,11 +13,12 @@ import (
 )
 
 type Service struct {
-	db     *store.Store
-	idle   time.Duration
-	now    func() time.Time
-	rateMu sync.Mutex
-	osAuth OSAuthenticator
+	db       *store.Store
+	idle     time.Duration
+	absolute time.Duration
+	now      func() time.Time
+	rateMu   sync.Mutex
+	osAuth   OSAuthenticator
 }
 
 // Dialect lets authorized data services select SQL without exposing the database.
@@ -30,7 +31,17 @@ func New(ctx context.Context, db *store.Store, idle time.Duration) (*Service, er
 // A nil provider keeps the local-only embedding contract. Server startup chooses
 // its native provider explicitly; clients can never supply an authentication implementation.
 func NewWithOS(ctx context.Context, db *store.Store, idle time.Duration, provider OSAuthenticator) (*Service, error) {
-	if db == nil || db.ReadOnly() || idle < time.Minute || idle > 30*24*time.Hour {
+	return NewWithTimeouts(ctx, db, idle, normalSessionLifetime, provider)
+}
+
+// NewWithTimeouts applies the configured idle and absolute lifetimes to new
+// ordinary sessions. Zero preserves the historical 12-hour embedding default.
+// Remembered sessions retain their separate fixed lifetime and rotation policy.
+func NewWithTimeouts(ctx context.Context, db *store.Store, idle, absolute time.Duration, provider OSAuthenticator) (*Service, error) {
+	if absolute == 0 {
+		absolute = normalSessionLifetime
+	}
+	if db == nil || db.ReadOnly() || idle < time.Minute || idle > 30*24*time.Hour || absolute < time.Hour || absolute > 8760*time.Hour {
 		return nil, errors.New("invalid human access settings")
 	}
 	status, err := Status(ctx, db)
@@ -40,7 +51,7 @@ func NewWithOS(ctx context.Context, db *store.Store, idle time.Duration, provide
 	if !status.Ready {
 		return nil, errors.New("human access schema is not ready")
 	}
-	return &Service{db: db, idle: idle, now: time.Now, osAuth: provider}, nil
+	return &Service{db: db, idle: idle, absolute: absolute, now: time.Now, osAuth: provider}, nil
 }
 
 const userSelect = `SELECT u.user_id,u.name,u.role,u.group_id,u.password,a.status,a.version,a.must_change_password,COALESCE(i.subject,''),COALESCE(i.os_name,'') FROM users u JOIN tw_user_auth a ON a.user_id=u.user_id LEFT JOIN tw_user_identity i ON i.user_id=u.user_id WHERE u.user_id=?`
@@ -208,7 +219,7 @@ func (s *Service) issueSession(ctx context.Context, tx *sql.Tx, u User, oldToken
 	}
 	now := s.now().Unix()
 	remember = remember && !u.MustChangePassword
-	expires := now + int64(normalSessionLifetime.Seconds())
+	expires := now + int64(s.absolute.Seconds())
 	if remember {
 		expires = now + int64(rememberedSessionLifetime.Seconds())
 	}

@@ -1,6 +1,43 @@
 # TimeWeaver
 
-TimeWeaver is split into three working projects:
+## Unified Go server
+
+The `feature/go-server-unified` branch runs the API and compiled Vue dashboard
+from one Go executable. `serve` starts the real server after checking database
+migrations, access schema and administrator ownership. Node.js is needed only
+when building the dashboard; the executable needs no Python or Node runtime.
+
+For an existing checkout with `server/.env`, stop the old server and back up the
+database before the first Go setup. Keep the existing `CONTEXT`, database path
+and signing keys. When using Caddy, set `PUBLIC_ORIGIN` to the HTTPS browser
+origin and `TRUSTED_PROXIES` to Caddy's connecting address as shown in the guide.
+From the repository root:
+
+```powershell
+# Windows: update the current branch, build, prepare the DB and start.
+.\run-go.ps1 -Pull -Setup
+```
+
+```bash
+# Linux: the same foreground workflow.
+bash run-go.sh --pull --setup
+```
+
+Setup prompts for a private password if the initial `timeweaver` administrator
+still has its public seed password. It preserves established user passwords.
+Later starts can use `.\run-go.ps1 -NoBuild` or `bash run-go.sh --no-build` to
+reuse the validated executable, or run `dist/timeweaver serve --env server/.env`
+directly under SpawnPoint. The default runner rebuilds, so source or embedded UI
+changes cannot be skipped merely because an old binary exists.
+
+See **[Go server setup and operation](docs/go-server.md)** for a fresh install,
+HTTPS/Caddy configuration, DB upgrade steps, build requirements, and rollback.
+The [migration record](docs/go-server-migration.md) describes compatibility and
+verification for MySQL, MariaDB, SQLite, browsers and the independent Go agent.
+
+## Legacy Python components
+
+The original projects remain available for compatibility review and rollback:
 
 - `client`: Vue 3 dashboard and login UI.
 - `server`: FastAPI backend used by the dashboard and agent.
@@ -8,7 +45,10 @@ TimeWeaver is split into three working projects:
 
 The UI is used to manage devices, schedule groups, schedule details, manual executions, and execution history. The server exposes the authenticated API, owns database access and migrations, and loads SQL resources for MySQL or SQLite. The agent runs on a target device, synchronizes schedule snapshots through the server API, and executes command, copy, archive, and housekeeping tasks without database access.
 
-## Quick Start (One-Step Setup)
+## Legacy Python Quick Start (One-Step Setup)
+
+The `install.ps1` and `install.sh` commands below install the original Python
+components. For the unified Go server use the instructions above.
 
 Install everything from the repository root.
 

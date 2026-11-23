@@ -1,5 +1,9 @@
 # Dashboard charts and recent schedules
 
+> Historical implementation slice. The unified executable now supports `serve`;
+> see [Go server setup and operation](go-server.md) for current startup and
+> upgrade instructions. Status statements below describe this slice when introduced.
+
 Branch: `feature/go-server-unified`, following `39d566b`.
 This slice connects the existing dashboard summary, charts and recent-schedule
 table to the Go server. It does not enable production `serve`, change the frozen

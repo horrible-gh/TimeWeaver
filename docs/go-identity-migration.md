@@ -1,5 +1,9 @@
 # Agent identity and schema-guard slice
 
+> Historical implementation slice. The unified executable now supports `serve`;
+> see [Go server setup and operation](go-server.md) for current startup and
+> upgrade instructions. Status statements below describe this slice when introduced.
+
 Work branch: `feature/go-server-unified`; follows store baseline `204e602`.
 This progress note supersedes the earlier note that the schema guard and agent
 identity API were entirely unimplemented. It is NOT an operational release.

@@ -1,5 +1,9 @@
 # Schedule and task management
 
+> Historical implementation slice. The unified executable now supports `serve`;
+> see [Go server setup and operation](go-server.md) for current startup and
+> upgrade instructions. Status statements below describe this slice when introduced.
+
 Branch: `feature/go-server-unified`, following `aef493d`.
 This slice does not enable production `serve`, merge main, change frozen Python
 sources/SQL, access production data or modify the separate agent repository.
