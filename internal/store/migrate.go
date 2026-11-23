@@ -95,6 +95,13 @@ func inspect(ctx context.Context, q queryer, dialect string, catalog []Migration
 			return r, dbError("read migration attempts", err)
 		}
 	}
+	return classifyHistory(dialect, catalog, r.HistoryExists, applied, attempts)
+}
+
+// classifyHistory keeps executable migrations first and historical predecessors
+// separate. Only the former contribute to Pending or can be executed by apply.
+func classifyHistory(dialect string, catalog []Migration, historyExists bool, applied map[string]bool, attempts map[string]attempt) (MigrationReport, error) {
+	r := MigrationReport{Dialect: dialect, ReadOnly: true, HistoryExists: historyExists, WriteSupported: dialect == "mysql" || dialect == "sqlite", Migrations: []MigrationStatus{}, Unknown: []string{}}
 	known := map[string]bool{}
 	for _, m := range catalog {
 		known[m.Name] = true
@@ -126,23 +133,32 @@ func inspect(ctx context.Context, q queryer, dialect string, catalog []Migration
 		}
 		r.Migrations = append(r.Migrations, item)
 	}
-	if dialect == "sqlite" {
-		legacy, err := legacySQLiteMigrations()
+	if dialect == "sqlite" || dialect == "mysql" {
+		readLegacy := legacySQLiteMigrations
+		if dialect == "mysql" {
+			readLegacy = legacyMySQLMigrations
+		}
+		legacy, err := readLegacy()
 		if err != nil {
 			return r, err
 		}
+		retiredMySQLHistory := false
 		for _, m := range legacy {
+			if known[m.Name] {
+				continue // An active catalog entry always owns its name and checksum.
+			}
 			known[m.Name] = true
 			a, attempted := attempts[m.Name]
 			if !applied[m.Name] && !attempted {
 				continue // Historical predecessors are never invented or replayed.
 			}
+			retiredMySQLHistory = retiredMySQLHistory || dialect == "mysql"
 			item := MigrationStatus{Name: m.Name, SHA256: m.SHA256, State: "applied"}
 			if attempted {
 				item.Statement = a.statement
 				if a.hash != m.SHA256 {
 					item.State = "checksum_mismatch"
-				} else if a.state != "applied" || !applied[m.Name] {
+				} else if a.state != "applied" || !applied[m.Name] || dialect == "mysql" && a.statement != len(m.Statements) {
 					item.State = "blocked"
 				}
 				if item.State != "applied" {
@@ -150,6 +166,19 @@ func inspect(ctx context.Context, q queryer, dialect string, catalog []Migration
 				}
 			}
 			r.Migrations = append(r.Migrations, item)
+		}
+		// Recognizing a retired name must not authorize the destructive _001
+		// table conversion on an agent-only database. Its historical SQL assumes
+		// an is_immediate column and a bounded integer-ID mapping. Existing Python
+		// server databases have already completed this conversion; an older shape
+		// needs a separate data-preserving upgrade, not automatic DDL replay.
+		if retiredMySQLHistory && !applied["timeweaver_server_001.sql"] {
+			r.Blocked = true
+			for i := range catalog {
+				if r.Migrations[i].Name == "timeweaver_server_001.sql" && r.Migrations[i].State == "pending" {
+					r.Migrations[i].State = "legacy_schema_requires_review"
+				}
+			}
 		}
 	}
 	unknown := map[string]bool{}
@@ -224,7 +253,7 @@ func (s *Store) apply(ctx context.Context, catalog []Migration) (MigrationReport
 		return report, err
 	}
 	if report.Blocked {
-		return report, errors.New("migration blocked by unknown, changed or unfinished history; inspect the database before retrying")
+		return report, errors.New("migration blocked by unknown, changed, unfinished or unsupported legacy history; inspect migrate status before retrying")
 	}
 	if report.Pending == 0 {
 		return report, nil

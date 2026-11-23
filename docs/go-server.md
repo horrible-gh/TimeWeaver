@@ -135,6 +135,41 @@ databases stop setup. Review or restore the failed migration before retrying.
 MySQL DDL can leave partial changes after a failure; setup does not claim a
 transactional rollback of those statements. SQLite migrations use transactions.
 
+### Retired MySQL/MariaDB migration history
+
+Existing Python server databases may retain the following 13 agent migration
+filenames removed in commit `750d315`. The Go server recognizes these as known
+historical predecessors:
+
+| Filename family | Recognized files |
+| --- | --- |
+| `devices` | `devices_001.sql` through `devices_003.sql` |
+| `execution_log` | `execution_log_001.sql` through `execution_log_003.sql` |
+| `manual_execution` | `manual_execution_001.sql` through `manual_execution_003.sql` |
+| `schedule_detail` | `schedule_detail_001.sql` and `schedule_detail_002.sql` |
+| `schedule_group` | `schedule_group_001.sql` and `schedule_group_002.sql` |
+
+These rows no longer appear in `unknown_migrations` or block a completed server
+installation. They are reported only when present, never
+queued or replayed, and their stored timestamps are preserved. The executable
+MySQL catalog remains at 31 migrations; missing current migrations still need
+setup. `task_detail_001.sql` remains an active server migration because its SQL
+differs from the retired agent file with the same basename.
+
+Update and rebuild the executable, then rerun `check --database`. Do not delete
+or rewrite existing migration history to bypass the old unknown-name error.
+Python history without a Go attempt journal is supported. If an attempt journal
+exists for a retired file, its historical checksum, applied state and completed
+statement count must match. Unknown names and unfinished or altered attempts
+continue to block setup and startup.
+
+This compatibility applies to server databases that already recorded
+`timeweaver_server_001.sql`. An agent-only database without that server
+conversion remains blocked with `legacy_schema_requires_review`: the frozen
+conversion SQL assumes an older column layout and a limited integer-ID mapping,
+so recognizing historical filenames does not authorize running it over an
+unconverted installation.
+
 ## Caddy and SpawnPoint
 
 For the existing Caddy deployment, keep the API context, for example:

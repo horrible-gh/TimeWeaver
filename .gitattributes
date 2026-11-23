@@ -2,3 +2,4 @@
 /server/res/sql/** -text
 /internal/store/sql/** -text
 /internal/store/sqlite/** -text
+/internal/store/mysql/legacy/** -text

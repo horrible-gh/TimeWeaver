@@ -24,6 +24,14 @@ var assets embed.FS
 //go:embed sqlite
 var sqliteAssets embed.FS
 
+// Retired agent SQL is used only to identify existing MySQL history. These
+// byte-for-byte snapshots come from 55b4c97a27aafa90a50845dd4728d7c59f33180a,
+// immediately before 750d315 removed agent/res/time_weaver/sql/migration.
+// They are deliberately outside the executable migration catalog above.
+//
+//go:embed mysql/legacy/*.sql
+var mysqlLegacyAssets embed.FS
+
 type Migration struct {
 	Name       string   `json:"name"`
 	SHA256     string   `json:"sha256"`
@@ -54,6 +62,12 @@ func Migrations(dialect string) ([]Migration, error) {
 
 func legacySQLiteMigrations() ([]Migration, error) {
 	return readMigrationCatalog(assets, "sql/migration/sqlite/*.sql", "sqlite")
+}
+
+func legacyMySQLMigrations() ([]Migration, error) {
+	// task_detail_001.sql is intentionally absent: that basename still belongs
+	// to a different, active server migration and must retain its current hash.
+	return readMigrationCatalog(mysqlLegacyAssets, "mysql/legacy/*.sql", "mysql")
 }
 
 func readMigrationCatalog(source fs.FS, pattern, dialect string) ([]Migration, error) {
