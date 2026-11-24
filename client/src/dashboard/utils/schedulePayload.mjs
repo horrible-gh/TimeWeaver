@@ -51,3 +51,34 @@ export function scheduleError(error) {
   const code = error?.response?.data?.detail?.code;
   return ['invalid_cron','invalid_task','invalid_archive_type','schedule_in_use','task_in_use','task_incomplete','resource_changed','device_group_mismatch','device_not_found','device_inactive','group_inactive','agent_upgrade_required','forbidden','invalid_request'].includes(code) ? `schedule_error_${code}` : 'access_failed';
 }
+
+// A list filter represents a schedule ID, not a possibly duplicated name.
+// Retain the original ID type for the form's native/legacy select binding.
+export function selectedTaskScheduleId(filter, available) {
+  if (filter == null || String(filter) === '') return '';
+  const match = available.find(s => String(s.schedule_id) === String(filter));
+  return match?.schedule_id ?? '';
+}
+
+// Include schedules without tasks, while retaining rows during legacy/read
+// failures. Distinguish identical names by group and ID.
+export function taskScheduleOptions(schedules, tasks) {
+  const byId = new Map();
+  for (const row of tasks) {
+    if (row.schedule_id == null || String(row.schedule_id) === '') continue;
+    const id = String(row.schedule_id);
+    byId.set(id, {id, name: row.schedule_group_name || id, group: row.group_name || ''});
+  }
+  for (const row of schedules) {
+    if (row.schedule_id == null || String(row.schedule_id) === '') continue;
+    const id = String(row.schedule_id);
+    byId.set(id, {id, name: row.name || byId.get(id)?.name || id, group: row.group_name || ''});
+  }
+  const counts = new Map();
+  for (const row of byId.values()) counts.set(row.name, (counts.get(row.name) || 0) + 1);
+  return [...byId.values()].map(row => {
+    const duplicate = counts.get(row.name) > 1;
+    const label = duplicate ? (row.group ? row.group + ' / ' : '') + row.name + ' (#' + row.id + ')' : row.name;
+    return {...row, duplicate, label};
+  });
+}

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { schedulePayload, taskPayload, taskTypePayload, resetTaskType, formBool, cronDefaults, scheduleError } from '../src/dashboard/utils/schedulePayload.mjs';
+import { schedulePayload, taskPayload, taskTypePayload, resetTaskType, formBool, cronDefaults, scheduleError, selectedTaskScheduleId, taskScheduleOptions } from '../src/dashboard/utils/schedulePayload.mjs';
 
 test('schedule writes strip display fields and actor claims and use typed IDs/booleans',()=>{
  const f={...cronDefaults(),name:'Test',group_id:'7',target_device:'8',schedule_id:12,status:'active',is_error_stop:'0',creator:'forged',modifier:'forged',device_name:'hidden',can_edit:true};
@@ -49,4 +49,20 @@ test('switching task type resets execution-specific fields without a destructive
  assert.equal(p.destination_path,null);assert.equal(p.house_keep_days,null);assert.equal(p.house_keep_recursive,false);
  assert.equal(p.source_path,null);assert.equal(p.date_format,null);
  assert.equal(taskTypePayload(resetTaskType('archive')).archive_type,'zip');
+});
+
+test('new task inherits the exact filtered schedule, never the first editable row',()=>{
+ const schedules=[{schedule_id:251,name:'same',group_name:'A',can_edit:true},{schedule_id:249,name:'same',group_name:'B',can_edit:true},{schedule_id:42,name:'readonly',can_edit:false},{schedule_id:99,name:'empty',can_edit:true}];
+ const available=schedules.filter(s=>s.can_edit);
+ assert.equal(selectedTaskScheduleId('249',available),249);
+ assert.equal(selectedTaskScheduleId('',available),'');
+ assert.equal(selectedTaskScheduleId('42',available),'');
+ assert.equal(selectedTaskScheduleId('999',available),'');
+ assert.equal(selectedTaskScheduleId('99',available),99);
+ assert.equal(selectedTaskScheduleId('249',[{schedule_id:'249'}]),'249');
+ const options=taskScheduleOptions(schedules,[{schedule_id:249,schedule_group_name:'same'},{schedule_id:251,schedule_group_name:'same'},{schedule_id:249,schedule_group_name:'same'}]);
+ assert.equal(options.length,4);
+ assert.equal(options.find(s=>s.id==='249').label,'B / same (#249)');
+ assert.equal(options.find(s=>s.id==='251').label,'A / same (#251)');
+ assert.equal(options.find(s=>s.id==='99').label,'empty');
 });

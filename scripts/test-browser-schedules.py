@@ -63,6 +63,10 @@ def main():
 
         page.goto(origin + '/dashboard/tasks')
         page.get_by_role('button', name='Add', exact=True).click()
+        # With no schedule filter, never default to the first device's schedule.
+        expect(page.locator('#task-schedule')).to_have_value('')
+        page.locator('.modal-foot').get_by_role('button', name='Save', exact=True).click()
+        expect(page.locator('.modal-body [role=alert]')).to_contain_text('Select a schedule.')
         page.locator('#task-schedule').select_option(sid)
         page.locator('#task-task_name').fill('browser-task')
         # Verify all four type forms before saving the original command task.
@@ -122,6 +126,22 @@ def main():
         page.locator('#task-task_name').fill('browser-task-edited')
         save()
         expect(page.locator(f'tr[data-task="{tid}"]')).to_contain_text('browser-task-edited')
+        # A schedule filter must preselect that exact ID, even when it is
+        # not the first editable schedule and a task-name filter is active.
+        page.locator('#task-schedule-filter').select_option(sid)
+        page.locator('#task-name-filter').select_option('browser-task-edited')
+        page.get_by_role('button', name='Add', exact=True).click()
+        expect(page.locator('#task-schedule')).to_have_value(sid)
+        page.locator('.modal-foot').get_by_role('button', name='Close', exact=True).click()
+        # A different empty schedule is also a valid filter and add target.
+        empty = next(s for s in ctx.request.get(base + '/dashboard/tasks/get_schedule_groups').json()
+                     if s['name'] == 'private-eight')
+        page.locator('#task-schedule-filter').select_option(str(empty['schedule_id']))
+        expect(page.locator('#task-name-filter')).to_have_value('')
+        page.get_by_role('button', name='Add', exact=True).click()
+        expect(page.locator('#task-schedule')).to_have_value(str(empty['schedule_id']))
+        page.locator('.modal-foot').get_by_role('button', name='Close', exact=True).click()
+        page.locator('#task-schedule-filter').select_option('')
         # Strict write DTOs do not echo server metadata back into mutations.
         me = ctx.request.get(base + '/auth/me').json()
         listed = ctx.request.get(base + '/dashboard/tasks/get_tasks').json()

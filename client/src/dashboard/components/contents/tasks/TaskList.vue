@@ -8,11 +8,11 @@
         <p>{{ $t('tasks_list_desc') }}</p>
       </div>
       <div class="toolbar">
-        <select class="select" v-model="selectedSchedule" :aria-label="$t('list_label_schedule')">
+        <select id="task-schedule-filter" class="select" v-model="selectedSchedule" :aria-label="$t('list_label_schedule')">
           <option value="">{{ $t('select_box_all') }}</option>
-          <option v-for="schedule in uniqueSchedules" :key="schedule" :value="schedule">{{ schedule }}</option>
+          <option v-for="schedule in scheduleFilters" :key="schedule.id" :value="schedule.id">{{ schedule.label }}</option>
         </select>
-        <select class="select" v-model="selectedTask" :aria-label="$t('list_label_task')">
+        <select id="task-name-filter" class="select" v-model="selectedTask" :aria-label="$t('list_label_task')">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="task in filteredTasks" :key="task" :value="task">{{ task }}</option>
         </select>
@@ -21,7 +21,7 @@
           <option v-for="status in uniqueStatuses" :key="status" :value="status">{{ status }}</option>
         </select>
         <button class="btn" @click="resetFilters">{{ $t('btn_filter_reset') }}</button>
-        <button v-if="!sessionMode || editableSchedules.length" :disabled="saving" class="btn primary" @click="openAddScheduleModal">
+        <button v-if="!sessionMode || editableSchedules.length" :disabled="saving || isLoading" class="btn primary" @click="openAddScheduleModal">
           <i class="ph ph-plus"></i> {{ $t('btn_add') }}
         </button>
       </div>
@@ -48,7 +48,7 @@
             <td>{{ formatDate(post.lastest_start_time) }}</td>
             <td>
               <div class="row-actions">
-                <button v-if="!sessionMode || post.can_edit" :disabled="saving" class="mini" :aria-label="$t('btn_edit')" @click="openEditModal(post)">
+                <button v-if="!sessionMode || post.can_edit" :disabled="saving || isLoading" class="mini" :aria-label="$t('btn_edit')" @click="openEditModal(post)">
                   <i class="ph ph-pencil-simple"></i>
                 </button>
                 <button v-if="!sessionMode || post.can_run" :disabled="saving" class="mini" :aria-label="$t('btn_run')" @click="openManualRunEditModal(post);">
@@ -83,8 +83,11 @@
       <div class="form-grid task-form">
         <div class="field full">
           <label for="task-schedule">{{ $t('schedule_name') }}</label>
-          <select v-if="sessionMode" id="task-schedule" v-model="formControl.schedule_id"><option v-for="item in editableSchedules" :key="item.schedule_id" :value="item.schedule_id">{{ item.group_name }} / {{ item.name }}</option></select>
-          <SearchableSelect v-else v-model="formControl.schedule_id" :items="scheduleList" label-key="name" value-key="schedule_id" :placeholder="$t('schedule_name') + $t('msg_enter')"/>
+          <select v-if="sessionMode" id="task-schedule" v-model="formControl.schedule_id" aria-required="true">
+            <option value="" disabled>{{ $t('task_select_schedule') }}</option>
+            <option v-for="item in editableSchedules" :key="item.schedule_id" :value="item.schedule_id">{{ item.group_name }} / {{ item.name }}{{ duplicateScheduleIds.has(String(item.schedule_id)) ? ' (#' + item.schedule_id + ')' : '' }}</option>
+          </select>
+          <SearchableSelect v-else v-model="formControl.schedule_id" :items="legacyScheduleOptions" label-key="label" value-key="schedule_id" :placeholder="$t('task_select_schedule')"/>
         </div>
 
         <div class="field half">
@@ -238,7 +241,7 @@ import BoardPagination from "../../misc/BoardPagination.vue";
 import { useI18n } from "vue-i18n";
 import { parseServerTime } from "@/dashboard/utils/deviceStatus";
 import { housekeepOptions } from "@/dashboard/utils/housekeeping";
-import { cronDefaults, formBool, taskPayload, taskTypePayload, resetTaskType, isFileTask, scheduleError } from "@/dashboard/utils/schedulePayload.mjs";
+import { cronDefaults, formBool, taskPayload, taskTypePayload, resetTaskType, isFileTask, scheduleError, taskScheduleOptions, selectedTaskScheduleId } from "@/dashboard/utils/schedulePayload.mjs";
 import { manualCreatePayload, manualError, localTimeValue } from "@/dashboard/utils/manualPayload.mjs";
 const saving = ref(false);
 const noticeMessage = ref('');
@@ -270,6 +273,12 @@ const formControl = ref({
 });
 const scheduleList = ref([]);
 const editableSchedules = computed(() => scheduleList.value.filter(s => s.can_edit));
+const availableSchedules = computed(() => sessionMode ? editableSchedules.value : scheduleList.value);
+const scheduleFilters = computed(() => taskScheduleOptions(scheduleList.value, posts.value));
+const duplicateScheduleIds = computed(() => new Set(scheduleFilters.value.filter(s => s.duplicate).map(s => s.id)));
+const legacyScheduleOptions = computed(() => scheduleList.value.map(s => ({
+  ...s, label: scheduleFilters.value.find(option => option.id === String(s.schedule_id))?.label || s.name,
+})));
 const fileTask = computed(() => isFileTask(formControl.value.task_type));
 const changeTaskType = type => {
   if (type !== formControl.value.task_type) {
@@ -284,7 +293,8 @@ const fetchScheduleList = async () => {
     const response = await getRequest("/dashboard/tasks/get_schedule_groups", sessionMode ? {} : { group_id: '%' });
     scheduleList.value = response || [];
   } catch (error) {
-    console.error("스케줄 리스트 가져오기 실패:", error);
+    scheduleList.value = [];
+    throw error;
   }
 };
 
@@ -330,21 +340,22 @@ onMounted(() => {
 
 // ✅ 그룹 추가 모달 열기
 const openAddScheduleModal = () => {
-  if (saving.value) return;
+  if (saving.value || isLoading.value) return;
   errorMessage.value = '';
   isEditMode.value = false;
-  formControl.value = { ...cronDefaults(), schedule_id: sessionMode ? editableSchedules.value[0]?.schedule_id : 0, task_name: '', command: '', status: 'active', task_type: "command",
+  formControl.value = { ...cronDefaults(), schedule_id: selectedTaskScheduleId(selectedSchedule.value, availableSchedules.value), task_name: '', command: '', status: 'active', task_type: "command",
     house_keep_recursive: false, archive_type: null, error_on_missing_source: '1', is_error_stop: '0', sequence: 0, retry_count: 0, creator: userId.value, modifier: userId.value };
   isModalOpen.value = true;
 };
 
 // ✅ 그룹 수정 모달 열기
 const openEditModal = (schedule) => {
-  if (saving.value || (sessionMode && !schedule.can_edit)) return;
+  if (saving.value || isLoading.value || (sessionMode && !schedule.can_edit)) return;
   errorMessage.value = '';
   formControl.value = {};
   isEditMode.value = true;
   Object.assign(formControl.value, schedule, housekeepOptions(schedule), {
+    schedule_id: selectedTaskScheduleId(String(schedule.schedule_id), availableSchedules.value),
     is_immediate: "1",
     is_error_stop: formBool(schedule.is_error_stop) ? "1" : "0",
     error_on_missing_source: formBool(schedule.error_on_missing_source) ? "1" : "0",
@@ -357,12 +368,23 @@ const openEditModal = (schedule) => {
 // ✅ 그룹 저장 (추가 또는 수정)
 const saveTasks = async () => {
   if (saving.value) return;
+  if (selectedTaskScheduleId(String(formControl.value.schedule_id ?? ''), availableSchedules.value) === '') {
+    errorMessage.value = t('task_select_schedule');
+    return;
+  }
   saving.value = true; errorMessage.value = '';
   try {
     Object.assign(formControl.value, housekeepOptions(formControl.value));
     const payload = sessionMode ? taskPayload(formControl.value, isEditMode.value) : { ...formControl.value, ...taskTypePayload(formControl.value) };
     if (isEditMode.value) await putRequest('/dashboard/tasks/update_task', payload, 'json');
-    else await postRequest('/dashboard/tasks/insert_task', payload, 'json');
+    else {
+      await postRequest('/dashboard/tasks/insert_task', payload, 'json');
+      // Clear filters that would exclude the newly created task.
+      if (selectedSchedule.value) selectedSchedule.value = String(payload.schedule_id);
+      if (selectedTask.value && selectedTask.value !== payload.task_name) selectedTask.value = '';
+      if (selectedStatus.value && selectedStatus.value !== payload.status) selectedStatus.value = '';
+      currentPage.value = 1;
+    }
     isModalOpen.value = false;
     await fetchTasks();
   } catch (error) { errorMessage.value = t(scheduleError(error)); }
@@ -431,17 +453,12 @@ const selectedSchedule = ref("");
 const selectedTask = ref("");
 const selectedStatus = ref("");
 
-// 유니크한 스케줄 리스트
-const uniqueSchedules = computed(() => {
-  return [...new Set(posts.value.map(post => post.schedule_group_name))];
-});
-
 // 선택한 스케줄에 따라 필터링된 태스크 리스트
 const filteredTasks = computed(() => {
   if (!selectedSchedule.value) {
     return [...new Set(posts.value.map(post => post.task_name))];
   }
-  return [...new Set(posts.value.filter(post => post.schedule_group_name === selectedSchedule.value).map(post => post.task_name))];
+  return [...new Set(posts.value.filter(post => String(post.schedule_id) === selectedSchedule.value).map(post => post.task_name))];
 });
 
 // 유니크한 상태 리스트
@@ -452,7 +469,7 @@ const uniqueStatuses = computed(() => {
 // 필터링된 데이터
 const filteredPosts = computed(() => {
   return posts.value.filter(post => {
-    const matchesSchedule = selectedSchedule.value ? post.schedule_group_name === selectedSchedule.value : true;
+    const matchesSchedule = selectedSchedule.value ? String(post.schedule_id) === selectedSchedule.value : true;
     const matchesTask = selectedTask.value ? post.task_name === selectedTask.value : true;
     const matchesStatus = selectedStatus.value ? post.status === selectedStatus.value : true;
 
@@ -467,6 +484,7 @@ const resetFilters = () => {
   currentPage.value = 1;
 };
 
+watch(selectedSchedule, () => { selectedTask.value = ''; });
 watch([selectedSchedule, selectedTask, selectedStatus], () => {
   currentPage.value = 1;
 });
