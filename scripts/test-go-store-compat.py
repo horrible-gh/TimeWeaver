@@ -2,7 +2,8 @@
 """Disposable MySQL comparison against sqloader 0.2.18; never uses DB_DATABASE.
 
 Requires explicit TIMEWEAVER_TEST_MYSQL_ALLOW_CREATE=1. Both engines use the
-same server, separate randomly named databases, and the frozen migration files.
+same server and separate randomly named databases. Python uses the frozen
+migration files; Go also applies the reviewed additive native migration.
 No running TimeWeaver installation, credentials or production DB is accessed.
 """
 import argparse
@@ -88,7 +89,9 @@ def main():
                         return result
 
             status = go(names[1], "status")
-            assert not status["history_exists"] and status["pending"] == 31
+            assert not status["history_exists"] and status["pending"] == 32
+            assert any(m["name"] == "timeweaver_server_016.sql" and m["state"] == "pending"
+                       for m in status["migrations"])
             assert snapshot(names[1]) == {}, "read-only preflight changed empty database"
             if mariadb:
                 python_migrate(names[0])
@@ -107,10 +110,16 @@ def main():
             assert go(names[1])["pending"] == 0
             if mariadb:
                 left, right = snapshot(names[0], True), snapshot(names[1], True)
+                # Native Go migrations add one explicit default-off column.
+                # Compare every remaining byte of the frozen table definitions.
+                ddl = right["task_detail"]
+                ddl, count = re.subn(r"(?m)^  `house_keep_delete_empty_dirs` tinyint\(1\) NOT NULL DEFAULT (?:0|'0'),\n", "", ddl)
+                assert count == 1, "Go housekeeping column missing or not default-off"
+                right["task_detail"] = ddl
                 mismatches = sorted(key for key in left.keys() | right.keys()
                                     if left.get(key) != right.get(key))
-                assert not mismatches, "schema differs: " + ", ".join(mismatches)
-                print("PASS: MariaDB legacy table definitions and migration-history schema match")
+                assert not mismatches, "schema differs beyond the approved addition: " + ", ".join(mismatches)
+                print("PASS: MariaDB frozen table definitions match apart from the default-off housekeeping column")
             else:
                 tables = snapshot(names[1], True)
                 required = {"groups", "users", "devices", "schedule_group", "schedule_detail",
@@ -135,9 +144,24 @@ def main():
                     cursor.execute("INSERT INTO agent_enrollment_token(enrollment_id,token_hash,device_name,group_id,expires_at) VALUES(UNHEX(%s),UNHEX(%s),'retained-agent',0,UTC_TIMESTAMP()+INTERVAL 1 DAY)", ("33" * 16, "44" * 32))
                     cursor.execute("INSERT INTO agent_device_credential(device_id,token_hash,issued_at,expires_at) VALUES(7,UNHEX(%s),UTC_TIMESTAMP(),UTC_TIMESTAMP()+INTERVAL 90 DAY)", ("55" * 32,))
             before = snapshot(preserved_database)
+            pending = go(preserved_database, "status")
+            assert pending["pending"] == (1 if mariadb else 0)
+            assert not pending["blocked"]
             assert go(preserved_database)["pending"] == 0
-            assert snapshot(preserved_database) == before, "Go changed existing data"
-            print("PASS: existing data, history, hash and binary token digest unchanged by Go")
+            after = snapshot(preserved_database)
+            if mariadb:
+                # The actual legacy DB lacked 016. Its only allowed changes
+                # are the newly recorded migration and the default-off option.
+                applied = [row for row in after["migrations"]
+                           if row["filename"] == "timeweaver_server_016.sql"]
+                assert len(applied) == 1
+                after["migrations"].remove(applied[0])
+                for row in after["task_detail"]:
+                    assert row.pop("house_keep_delete_empty_dirs") == 0
+                after["task_detail"].sort(key=repr)
+                assert snapshot(names[0], True) == snapshot(names[1], True), "upgraded and fresh Go schemas differ"
+            assert after == before, "Go changed pre-existing data or migration timestamps"
+            print("PASS: additive upgrade preserves data, historical rows, hash and binary token digest")
             before = snapshot(names[1])
             python_migrate(names[1])
             assert snapshot(names[1]) == before, "Python replayed Go migrations"
