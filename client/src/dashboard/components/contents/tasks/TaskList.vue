@@ -133,7 +133,7 @@
           <input id="task-house_keep_days" type="number" v-model="formControl.house_keep_days" :placeholder="$t('task_retention_days') + $t('msg_enter')" min="0" :max="sessionMode ? 2147483647 : 999" aria-required="true" @input="!sessionMode && (formControl.house_keep_days = $event.target.value.slice(0, 3))" />
         </div>
         <div v-if="formControl.task_type === 'housekeep'" class="field half task-recursive-field">
-          <label class="housekeep-recursive">
+          <label for="task-recursive" class="housekeep-recursive">
             <input id="task-recursive" type="checkbox" v-model="formControl.house_keep_recursive" />
             <span>{{ $t('task_house_keep_recursive') }}</span>
           </label>
@@ -508,28 +508,50 @@ const statusBadgeClass = (status) => ({
   align-items: flex-end;
 }
 .task-recursive-field .housekeep-recursive {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--field-h);
+  min-width: 0;
   margin: 0;
-  min-height: var(--field-h);
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 400;
+  cursor: pointer;
+}
+.task-recursive-field .housekeep-recursive:hover {
+  border-color: var(--line-control-hover);
+}
+.task-recursive-field .housekeep-recursive:focus-within {
+  border-color: var(--focus-line);
+  box-shadow: 0 0 0 3px var(--focus-halo);
+}
+.task-recursive-field .housekeep-recursive input[type="checkbox"] {
+  appearance: auto;
+  accent-color: var(--cyan);
+  color-scheme: dark;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  box-shadow: none;
+  cursor: pointer;
+}
+.task-recursive-field .housekeep-recursive span {
+  color: inherit;
+  line-height: 1.4;
 }
 @media (max-width: 480px) {
   .task-runtime, .task-runtime-legacy {
     grid-template-columns: 1fr;
   }
-}
-.housekeep-recursive {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-}
-.housekeep-recursive input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  min-height: 0;
-  margin: 0;
-}
-.housekeep-recursive span {
-  color: inherit;
 }
 </style>

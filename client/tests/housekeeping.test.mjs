@@ -22,6 +22,9 @@ test("compact checkbox is conditional and new/edit/save paths normalize its stat
   const source=await readFile(new URL("../src/dashboard/components/contents/tasks/TaskList.vue",import.meta.url),"utf8");
   assert.match(source,/v-if="formControl.task_type === 'housekeep'"/);
   assert.match(source,/type="checkbox" v-model="formControl.house_keep_recursive"/);
+  assert.match(source,/for="task-recursive" class="housekeep-recursive"/);
+  assert.match(source,/accent-color: var\(--cyan\)/);
+  assert.match(source,/height: var\(--field-h\)/);
   assert.match(source,/task_type: "command",\s+house_keep_recursive: false/);
   assert.match(source,/housekeepOptions\(schedule\)/);
   assert.match(source,/housekeepOptions\(formControl.value\)/);

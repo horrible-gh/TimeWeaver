@@ -84,6 +84,25 @@ def main():
         expect(page.locator('#task-destination_path')).to_have_value('')
         expect(page.locator('#task-house_keep_days')).to_have_value('')
         expect(page.locator('#task-recursive')).not_to_be_checked()
+        # The checkbox is a full-size theme control aligned with retention.
+        recursive = page.locator('#task-recursive')
+        option = page.locator('label.housekeep-recursive')
+        retention = page.locator('#task-house_keep_days')
+        expect(option).to_be_visible()
+        rect = option.bounding_box()
+        days_rect = retention.bounding_box()
+        assert abs(rect['height'] - days_rect['height']) <= 1
+        if page.viewport_size['width'] > 1100:
+            assert abs(rect['y'] - days_rect['y']) <= 1
+            assert abs(rect['width'] - days_rect['width']) <= 1
+        expect(option).to_have_css('border-top-width', '1px')
+        expect(option).to_have_css('background-color', 'rgb(12, 16, 22)')
+        expect(recursive).to_have_css('accent-color', 'rgb(56, 215, 199)')
+        # Clicking the label text and using the keyboard both toggle the input.
+        option.locator('span').click()
+        expect(recursive).to_be_checked()
+        recursive.press('Space')
+        expect(recursive).not_to_be_checked()
         page.locator('#task-type').select_option('archive')
         assert_fields({'source_path','destination_path','archive-type','missing-source'})
         expect(page.locator('#task-archive-type')).to_have_value('zip')
