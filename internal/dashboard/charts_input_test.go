@@ -144,8 +144,8 @@ func TestLatestScheduleScopePrecedesLimitAndFailureIsChronological(t *testing.T)
 	}
 	for _, fragment := range []string{
 		"PARTITION BY schedule_id ORDER BY group_latest_time DESC, group_latest_id DESC",
-		"PARTITION BY el.schedule_id ORDER BY el.start_time, el.execution_id",
-		"WHERE el.result_code != 0",
+		"PARTITION BY el.schedule_id ORDER BY CASE WHEN el.result_code != 0 THEN 0 ELSE 1 END, el.start_time, el.execution_id",
+		"WHERE el.result_code != 0 OR " + housekeepWarningSQL,
 		"WHERE error_rank = 1",
 		"fep.schedule_id IS NOT NULL THEN 'warning'",
 	} {

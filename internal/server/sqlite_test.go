@@ -127,6 +127,7 @@ func TestSQLiteDashboardFlows(t *testing.T) {
 		{"chart-liveness", TestMySQLChartDeviceLivenessAndLegacyScheduleRules},
 		{"chart-recorded-parent", TestMySQLChartTaskWindowsRunningAndRecordedParent},
 		{"chart-latest-order", TestMySQLLatestChartsLimitOrderingFailuresAndTombstones},
+		{"chart-housekeep-warning", TestMySQLHousekeepWarningsAreNotErrors},
 		{"chart-database-failure", TestMySQLChartsDatabaseFailureIsNotZero},
 	} {
 		t.Run(tc.name, tc.run)

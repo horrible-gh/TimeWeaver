@@ -49,7 +49,7 @@
             </td>
             <td>{{ formatDate(post.start_time) }}</td>
             <td>{{ formatDate(post.end_time) }}</td>
-            <td>{{ post.result_code }}</td>
+            <td><span v-if="isHousekeepWarning(post)" class="badge warning">{{ $t('exec_status_warning') }}</span><template v-else>{{ post.result_code }}</template></td>
             <td>
               <button class="text-btn message-short" @click="openModal($t('list_label_message'), post.result_message)">
                 {{ truncateMessage(post.result_message) }}
@@ -122,6 +122,7 @@ const openModal = (title, message) => {
   modalMessage.value = message || '-';
   isModalOpen.value = true;
 };
+const isHousekeepWarning = post => Number(post.result_code) === 0 && typeof post.result_message === 'string' && post.result_message.startsWith('[housekeep-warning] ');
 const truncateMessage = message => message && message.length > 40 ? message.slice(0, 40) + '…' : message || '-';
 const showSchedule = post => {
   const lines = [`${t('task_type')}: ${post.task_type || '-'}`];

@@ -15,7 +15,10 @@ function count(value) {
 // A failed/malformed response must never look like a successful zero count.
 export function dashboardCounts(kind, response) {
   if (!countKeys[kind] || !response || typeof response !== 'object' || Array.isArray(response)) throw new Error('invalid_dashboard_data');
-  return Object.fromEntries(countKeys[kind].map(key => [key, count(response[`${key}_count`])]));
+  const counts = Object.fromEntries(countKeys[kind].map(key => [key, count(response[`${key}_count`])]));
+  // Older Python servers and zero-warning Go responses omit this field.
+  if (kind !== 'devices' && Object.prototype.hasOwnProperty.call(response, 'warning_count')) counts.warning = count(response.warning_count);
+  return counts;
 }
 
 export function latestSchedules(response) {

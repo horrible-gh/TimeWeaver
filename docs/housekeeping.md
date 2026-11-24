@@ -11,17 +11,24 @@ and manual execution use the same task options.
 
 ## Behavior
 
-- Off: existing direct-child behavior is unchanged, including the error for an
-  expired real directory. No recursive cleanup is implied.
+- Off: clean direct regular files only. Expired subdirectories are kept and
+  reported as skipped, not failed. No recursive cleanup is implied.
 - On: apply the existing modification-time cutoff independently to regular files
   at every depth. A file is expired only when its mtime is strictly before
   `now - house_keep_days * 86400` seconds. Files exactly on the cutoff remain.
 - Do not delete directories (including empty folders and the selected root),
   symbolic links, Windows junctions/reparse points, or special files. An old
   directory does not cause its newer files to be removed as a group.
-- Nonpositive retention does not delete files. Permission/I/O errors fail the
-  task; a child already removed by another process is skipped. Cancellation is
-  checked during traversal and before removal.
+- Nonpositive retention does not delete files. Permission-denied child paths
+  are skipped while other files continue. Skipped paths are summarized in the
+  agent log and returned with result code 0 and a [housekeep-warning] message.
+  The Go dashboard distinguishes these warnings from errors. They do not stop
+  schedules or fail manual execution. A child already removed by another
+  process is skipped silently. An inaccessible or invalid root, other I/O
+  errors, and cancellation remain failures.
+- Shell command tasks (including custom rm/find commands) are not built-in
+  housekeeping; their nonzero exit status remains an error. Old error rows
+  are not rewritten. Use a Housekeep task for the safe skip policy.
 
 This is not in-use-file protection or an atomic filesystem snapshot. Use an
 explicit cleanup directory controlled by the agent's account. Do not use this

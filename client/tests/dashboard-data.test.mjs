@@ -73,3 +73,9 @@ test('dashboard state labels and corrected metric descriptions cover all support
  assert.ok(!messages.en.last_schedules_desc.includes('24'));
  assert.equal(messages.en.metric_devices_meta, 'Active {n}');
 });
+
+test('warnings are a distinct count, not failures or successful completions', () => {
+ assert.deepEqual(dashboardCounts('schedules', {active_count: 2, error_count: 0, inactive_count: 1, warning_count: 3}), {active: 2, error: 0, inactive: 1, warning: 3});
+ assert.deepEqual(dashboardCounts('tasks', {in_progress_count: 0, pending_count: 1, completed_count: 3, error_count: 0, warning_count: 2}), {in_progress: 0, pending: 1, completed: 3, error: 0, warning: 2});
+ assert.throws(() => dashboardCounts('tasks', {in_progress_count: 0, pending_count: 1, completed_count: 3, error_count: 0, warning_count: -1}), /invalid_dashboard_data/);
+});

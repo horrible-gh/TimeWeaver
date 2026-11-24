@@ -177,7 +177,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: horrible-gh/TimeWeaver-Agent
-          ref: aa509b196c1caf35cc28b38f8015994da8906819
+          ref: 5514026a8e2708a2d096b155913c32a57450bb6b
           path: .agent-contract
           persist-credentials: false
       - name: Build the actual Go agent
@@ -264,7 +264,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: horrible-gh/TimeWeaver-Agent
-          ref: aa509b196c1caf35cc28b38f8015994da8906819
+          ref: 5514026a8e2708a2d096b155913c32a57450bb6b
           path: .agent-contract
           persist-credentials: false
       - name: Compile the actual agent snapshot validator

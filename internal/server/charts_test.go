@@ -339,3 +339,28 @@ func TestMySQLChartsDatabaseFailureIsNotZero(t *testing.T) {
 		}
 	}
 }
+
+func TestMySQLHousekeepWarningsAreNotErrors(t *testing.T) {
+	f := chartsFixtureFor(t)
+	h := chartsHandler(t, f)
+	now := chartsNow(t, f)
+	warning := createSchedule(t, f, 7, "warning-only")
+	warningTask := createTask(t, f, warning)
+	chartsLog(t, f, warning, warningTask, now.Add(-time.Minute), 0, "[housekeep-warning] Skipped 2 protected paths", nil)
+	completed := createSchedule(t, f, 7, "completed")
+	chartsLog(t, f, completed, createTask(t, f, completed), now.Add(-2*time.Minute), 0, "normal success text", nil)
+	failure := createSchedule(t, f, 7, "real-failure")
+	chartsLog(t, f, failure, createTask(t, f, failure), now.Add(-3*time.Minute), -1, "[housekeep-warning] actual failure", nil)
+	private := createSchedule(t, f, 8, "private-warning")
+	chartsLog(t, f, private, createTask(t, f, private), now, 0, "[housekeep-warning] private", nil)
+	wantChart(t, chartCounts(t, f, h, "viewer", "/dashboard/charts/schedules"), map[string]int64{"active_count": 1, "error_count": 1, "inactive_count": 0, "warning_count": 1})
+	wantChart(t, chartCounts(t, f, h, "viewer", "/dashboard/charts/tasks"), map[string]int64{"pending_count": 0, "in_progress_count": 0, "completed_count": 1, "error_count": 1, "warning_count": 1})
+	rows := latestChartRows(t, f, h, "viewer")
+	if len(rows) != 3 || rows[0]["sg_name"] != "warning-only" || rows[0]["custom_status"] != "warning" || rows[0]["error_summary"] != "Skipped 2 protected paths" {
+		t.Fatal("warning result not surfaced", rows)
+	}
+	// A real failure in the same schedule takes priority in aggregates.
+	chartsLog(t, f, warning, warningTask, now, -1, "real I/O error", nil)
+	wantChart(t, chartCounts(t, f, h, "viewer", "/dashboard/charts/schedules"), map[string]int64{"active_count": 1, "error_count": 2, "inactive_count": 0})
+	wantChart(t, chartCounts(t, f, h, "viewer", "/dashboard/charts/tasks"), map[string]int64{"pending_count": 0, "in_progress_count": 0, "completed_count": 1, "error_count": 2})
+}

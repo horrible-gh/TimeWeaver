@@ -14,6 +14,7 @@ type StatusChart struct {
 	Active   int64 `json:"active_count"`
 	Error    int64 `json:"error_count"`
 	Inactive int64 `json:"inactive_count"`
+	Warning  int64 `json:"warning_count,omitempty"`
 }
 
 type TaskStatusChart struct {
@@ -21,6 +22,7 @@ type TaskStatusChart struct {
 	InProgress int64 `json:"in_progress_count"`
 	Completed  int64 `json:"completed_count"`
 	Error      int64 `json:"error_count"`
+	Warning    int64 `json:"warning_count,omitempty"`
 }
 
 type LatestSchedule struct {
@@ -64,6 +66,11 @@ func chartQueryDialect(dialect, kind string, u access.User) (string, []any, erro
 	return scopeChartQuery(kind, q, u)
 }
 
+// A zero result with this explicit marker is a successfully completed native
+// housekeep with skipped paths. Nonzero results remain failures, even if their
+// text resembles a warning. No historical errors are rewritten.
+const housekeepWarningSQL = "(el.result_code = 0 AND el.result_message LIKE '[housekeep-warning] %')"
+
 func scopeChartQuery(kind, q string, u access.User) (string, []any, error) {
 	// Derive from the frozen catalog, including Windows CRLF checkouts. Every
 	// insertion is guarded so catalog drift cannot silently remove a boundary.
@@ -88,19 +95,26 @@ func scopeChartQuery(kind, q string, u access.User) (string, []any, error) {
 	case "schedules":
 		replacements = [][2]string{
 			{"FROM schedule_group sg", "FROM schedule_group sg\n    JOIN devices d ON d.device_id = sg.target_device\n    WHERE sg.schedule_id > 0 AND d.device_id > 0 AND (" + scope + ")"},
+			{"MIN(CASE WHEN el.result_code = 0 THEN 1 ELSE 0 END) AS all_success", "MIN(CASE WHEN el.result_code = 0 THEN 1 ELSE 0 END) AS all_success,\n           MAX(CASE WHEN " + housekeepWarningSQL + " THEN 1 ELSE 0 END) AS has_warning"},
+			{"WHEN el.has_error = 1 THEN 'error'", "WHEN el.has_error = 1 THEN 'error'\n            WHEN el.has_warning = 1 THEN 'warning'"},
+			{"AS inactive_count\nFROM schedule_final_status", "AS inactive_count,\n    COUNT(CASE WHEN sfs.final_status = 'warning' THEN 1 END) AS warning_count\nFROM schedule_final_status"},
 		}
 	case "tasks":
 		replacements = [][2]string{
 			{"PARTITION BY el.detail_id ORDER BY el.start_time DESC", "PARTITION BY el.schedule_id, el.detail_id ORDER BY el.start_time DESC, el.execution_id DESC"},
 			{"ON el.detail_id = sd.detail_id", "ON el.detail_id = sd.detail_id AND el.schedule_id = sd.schedule_id"},
 			{"WHERE sd.deleted_at IS NULL", "WHERE sd.deleted_at IS NULL AND sg.schedule_id > 0 AND d.device_id > 0 AND (" + scope + ")"},
+			{"WHEN el.result_code = 0 THEN 'completed'", "WHEN " + housekeepWarningSQL + " THEN 'warning'\n            WHEN el.result_code = 0 THEN 'completed'"},
+			{"SELECT 'error'\n),", "SELECT 'error'\n    UNION ALL\n    SELECT 'warning'\n),"},
+			{"AS error_count\nFROM task_counts", "AS error_count,\n    MAX(CASE WHEN task_state = 'warning' THEN task_count ELSE 0 END) AS warning_count\nFROM task_counts"},
 		}
 	case "latest":
 		replacements = [][2]string{
 			{"MAX(start_time) AS group_latest_time", "MAX(start_time) AS group_latest_time,\n    MAX(execution_id) AS group_latest_id"},
 			{"PARTITION BY schedule_id ORDER BY group_latest_time DESC", "PARTITION BY schedule_id ORDER BY group_latest_time DESC, group_latest_id DESC"},
-			{"el.start_time\n  FROM execution_log el", "el.start_time,\n    ROW_NUMBER() OVER (PARTITION BY el.schedule_id ORDER BY el.start_time, el.execution_id) AS error_rank\n  FROM execution_log el"},
-			{"WHERE el.result_code = -1\n  ORDER BY el.start_time ASC", "WHERE el.result_code != 0"},
+			{"el.start_time\n  FROM execution_log el", "el.start_time,\n    ROW_NUMBER() OVER (PARTITION BY el.schedule_id ORDER BY CASE WHEN el.result_code != 0 THEN 0 ELSE 1 END, el.start_time, el.execution_id) AS error_rank\n  FROM execution_log el"},
+			{"WHERE el.result_code = -1\n  ORDER BY el.start_time ASC", "WHERE el.result_code != 0 OR " + housekeepWarningSQL},
+			{"REPLACE(el.result_message,", "REPLACE(CASE WHEN " + housekeepWarningSQL + " THEN SUBSTR(el.result_message, 21) ELSE el.result_message END,"},
 			{"MIN(raw_error) AS raw_error\n  FROM first_error_last\n  GROUP BY schedule_id", "raw_error\n  FROM first_error_last\n  WHERE error_rank = 1"},
 			{"fep.raw_error IS NOT NULL THEN 'warning'", "fep.schedule_id IS NOT NULL THEN 'warning'"},
 			{"ORDER BY li.group_latest_time DESC\nLIMIT 3", "WHERE sg.schedule_id > 0 AND d.device_id > 0 AND (" + scope + ")\nORDER BY li.group_latest_time DESC, li.group_latest_id DESC, sg.schedule_id DESC\nLIMIT 3"},
@@ -124,7 +138,11 @@ func (s *Service) statusChart(ctx context.Context, token, kind string) (StatusCh
 		if err != nil {
 			return err
 		}
-		if err = tx.QueryRowContext(ctx, q, args...).Scan(&out.Active, &out.Error, &out.Inactive); err != nil {
+		columns := []any{&out.Active, &out.Error, &out.Inactive}
+		if kind == "schedules" {
+			columns = append(columns, &out.Warning)
+		}
+		if err = tx.QueryRowContext(ctx, q, args...).Scan(columns...); err != nil {
 			return dbError(err)
 		}
 		return nil
@@ -147,7 +165,7 @@ func (s *Service) TaskChart(ctx context.Context, token string) (TaskStatusChart,
 		if err != nil {
 			return err
 		}
-		if err = tx.QueryRowContext(ctx, q, args...).Scan(&out.Pending, &out.InProgress, &out.Completed, &out.Error); err != nil {
+		if err = tx.QueryRowContext(ctx, q, args...).Scan(&out.Pending, &out.InProgress, &out.Completed, &out.Error, &out.Warning); err != nil {
 			return dbError(err)
 		}
 		return nil
