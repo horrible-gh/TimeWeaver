@@ -91,7 +91,7 @@ def main():
         expect(page.locator('#task-delete-empty')).not_to_be_checked()
         # The checkbox is a full-size theme control aligned with retention.
         recursive = page.locator('#task-recursive')
-        option = page.locator('label.housekeep-recursive')
+        option = page.locator('label[for="task-recursive"]')
         retention = page.locator('#task-house_keep_days')
         expect(option).to_be_visible()
         rect = option.bounding_box()
