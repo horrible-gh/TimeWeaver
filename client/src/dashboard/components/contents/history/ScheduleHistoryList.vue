@@ -1,5 +1,4 @@
 <template>
-  <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
   <div class="panel">
     <div class="panel-head">
       <div class="panel-title">
@@ -7,17 +6,17 @@
         <p>{{ $t('history_list_desc') }}</p>
       </div>
       <div class="toolbar">
-        <select class="select" v-model="selectedGroup" :aria-label="$t('list_label_group')">
+        <select id="history-group" class="select" v-model="selectedGroup" :disabled="isLoading" :aria-label="$t('list_label_group')" @change="changeGroup">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="group in uniqueGroups" :key="group" :value="group">{{ group }}</option>
         </select>
-        <select class="select" v-model="selectedSchedule" :aria-label="$t('list_label_schedule_name')">
+        <select id="history-schedule" class="select" v-model="selectedSchedule" :disabled="isLoading" :aria-label="$t('list_label_schedule_name')" @change="changeFilter">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="schedule in filteredSchedules" :key="schedule" :value="schedule">{{ schedule }}</option>
         </select>
         <input id="history-start" class="select" type="datetime-local" step="1" v-model="selectedStartTime" :disabled="isLoading" :aria-label="$t('list_label_start_time')">
         <input id="history-end" class="select" type="datetime-local" step="1" v-model="selectedEndTime" :disabled="isLoading" :aria-label="$t('list_label_end_time')">
-        <select class="select" v-model="selectedResultCode" :aria-label="$t('list_label_exit_code')">
+        <select id="history-code" class="select" v-model="selectedResultCode" :disabled="isLoading" :aria-label="$t('list_label_exit_code')" @change="changeFilter">
           <option value="">{{ $t('select_box_all') }}</option>
           <option v-for="code in uniqueResultCodes" :key="code" :value="code">{{ code }}</option>
         </select>
@@ -27,7 +26,7 @@
     </div>
 
     <div class="table-scroll">
-      <table v-if="filteredPosts.length > 0">
+      <table v-if="!isLoading && !errorMessage && paginatedPosts.length > 0">
         <thead>
           <tr>
             <SortableHeader field="execution_id" label="ID" :currentSortKey="sortKey" :sortOrder="sortOrder" :sort="sort" />
@@ -59,12 +58,13 @@
           </tr>
         </tbody>
       </table>
+      <div v-else-if="errorMessage" class="empty-state" role="alert">{{ errorMessage }}</div>
       <div v-else class="empty-state">{{ $t(isLoading ? 'msg_loading' : 'schedules_list_no_datas') }}</div>
     </div>
 
-    <div class="panel-foot" v-if="filteredPosts.length > 0">
-      <span>{{ $t('list_footer_range', { total: filteredPosts.length, start: rangeStart, end: rangeEnd }) }}</span>
-      <BoardPagination :total="filteredPosts.length" :perPage="perPage" @page-changed="changePage" />
+    <div class="panel-foot" v-if="!isLoading && !errorMessage && totalRecords > 0">
+      <span>{{ $t('list_footer_range', { total: totalRecords, start: rangeStart, end: rangeEnd }) }}</span>
+      <BoardPagination :total="totalRecords" :perPage="perPage" :page="sessionMode ? currentPage : undefined" @page-changed="changePage" />
     </div>
 
     <!-- ✅ Use modal component -->
@@ -99,11 +99,15 @@ import { historyQuery, localTimeValue, manualError } from '@/dashboard/utils/man
 
 const { t, locale } = useI18n();
 const posts = ref([]);
-const { sortKey, sortOrder, sort } = useSort(posts);
+const { sortKey, sortOrder, sort: localSort } = useSort(posts);
+if (sessionMode) { sortKey.value = 'execution_id'; sortOrder.value = 'desc'; }
 const isLoading = ref(false);
 const errorMessage = ref('');
 const currentPage = ref(1);
 const perPage = ref(7);
+const serverTotal = ref(0);
+const filterOptions = ref([]);
+let appliedRange = {};
 const selectedGroup = ref('');
 const selectedSchedule = ref('');
 const selectedStartTime = ref('');
@@ -143,45 +147,106 @@ const setDefaultDates = () => {
 };
 setDefaultDates();
 
+const reportError = error => {
+  posts.value = [];
+  serverTotal.value = 0;
+  const code = error?.code || error?.response?.data?.detail?.code;
+  errorMessage.value = t(code === 'invalid_datetime' ? 'manual_error_invalid_date_range' : manualError(error));
+};
+
+const loadPage = async (page = 1, includeOptions = false) => {
+  if (isLoading.value) return;
+  isLoading.value = true;
+  errorMessage.value = '';
+  try {
+    const params = { ...appliedRange, page, page_size: perPage.value,
+      sort: sortKey.value || 'execution_id', direction: sortOrder.value || 'desc' };
+    if (includeOptions) params.include_options = 1;
+    if (selectedGroup.value) params.group = selectedGroup.value;
+    if (selectedSchedule.value) params.schedule = selectedSchedule.value;
+    if (selectedResultCode.value !== '') params.result_code = selectedResultCode.value;
+    const result = await getRequest('/dashboard/schedule/execution_history', params);
+    posts.value = result.items || [];
+    serverTotal.value = result.total;
+    currentPage.value = result.page;
+    if (includeOptions) filterOptions.value = result.options || [];
+  } catch (error) {
+    reportError(error);
+  } finally {
+    isLoading.value = false;
+  }
+};
+
 const fetchPosts = async () => {
   if (isLoading.value) return;
-  isLoading.value = true; errorMessage.value = '';
+  if (sessionMode) {
+    try {
+      appliedRange = historyQuery(selectedStartTime.value, selectedEndTime.value);
+      await loadPage(1, true);
+    } catch (error) {
+      reportError(error);
+    }
+    return;
+  }
+  isLoading.value = true;
+  errorMessage.value = '';
   try {
-    const params = sessionMode ? historyQuery(selectedStartTime.value, selectedEndTime.value) : {};
-    posts.value = await getRequest('/dashboard/schedule/execution_history', params) || [];
+    posts.value = await getRequest('/dashboard/schedule/execution_history', {}) || [];
     currentPage.value = 1;
   } catch (error) {
-    posts.value = [];
-    const code = error?.code || error?.response?.data?.detail?.code;
-    errorMessage.value = t(code === 'invalid_datetime' ? 'manual_error_invalid_date_range' : manualError(error));
-  } finally { isLoading.value = false; }
+    reportError(error);
+  } finally {
+    isLoading.value = false;
+  }
 };
 onMounted(fetchPosts);
 
+const changeFilter = () => {
+  if (sessionMode) loadPage(1);
+  else currentPage.value = 1;
+};
+const changeGroup = () => {
+  selectedSchedule.value = '';
+  changeFilter();
+};
 const resetFilters = () => {
   selectedGroup.value = ''; selectedSchedule.value = ''; selectedResultCode.value = '';
   selectedStartTime.value = ''; selectedEndTime.value = '';
   currentPage.value = 1;
   if (sessionMode) { setDefaultDates(); fetchPosts(); }
 };
-const uniqueGroups = computed(() => [...new Set(posts.value.map(post => post.sg_name))]);
-const filteredSchedules = computed(() => [...new Set(posts.value.filter(post => !selectedGroup.value || post.sg_name === selectedGroup.value).map(post => post.schedule_name))]);
-const uniqueResultCodes = computed(() => [...new Set(posts.value.map(post => post.result_code))]);
-const filteredPosts = computed(() => posts.value.filter(post => {
-  const matchesGroup = !selectedGroup.value || post.sg_name === selectedGroup.value;
-  const matchesSchedule = !selectedSchedule.value || post.schedule_name === selectedSchedule.value;
-  const matchesResultCode = selectedResultCode.value === '' || String(post.result_code) === String(selectedResultCode.value);
-  // Embedded date filtering belongs to the server; both bounds apply to start_time.
-  // Standalone keeps its existing client-side filtering of the Python response.
-  const matchesStart = sessionMode || !selectedStartTime.value || parseServerTime(post.start_time) >= new Date(selectedStartTime.value);
-  const matchesEnd = sessionMode || !selectedEndTime.value || parseServerTime(post.end_time) <= new Date(selectedEndTime.value);
-  return matchesGroup && matchesSchedule && matchesResultCode && matchesStart && matchesEnd;
-}));
-const paginatedPosts = computed(() => filteredPosts.value.slice((currentPage.value - 1) * perPage.value, currentPage.value * perPage.value));
-const changePage = page => { currentPage.value = page; };
-const rangeStart = computed(() => filteredPosts.value.length === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1);
-const rangeEnd = computed(() => Math.min(currentPage.value * perPage.value, filteredPosts.value.length));
-watch([selectedGroup, selectedSchedule, selectedResultCode], () => { currentPage.value = 1; });
+const sort = field => {
+  if (!sessionMode) { localSort(field); currentPage.value = 1; return; }
+  if (isLoading.value) return;
+  sortOrder.value = sortKey.value === field && sortOrder.value === 'asc' ? 'desc' : 'asc';
+  sortKey.value = field;
+  loadPage(1);
+};
+const optionRows = computed(() => sessionMode ? filterOptions.value : posts.value);
+const withSelected = (values, selected) => [...new Set([...values, ...(selected === '' ? [] : [selected])])];
+const uniqueGroups = computed(() => withSelected(optionRows.value.map(post => post.sg_name).filter(Boolean), selectedGroup.value));
+const filteredSchedules = computed(() => withSelected(optionRows.value.filter(post => !selectedGroup.value || post.sg_name === selectedGroup.value).map(post => post.schedule_name).filter(Boolean), selectedSchedule.value));
+const uniqueResultCodes = computed(() => withSelected(optionRows.value.map(post => post.result_code).filter(code => code != null), selectedResultCode.value));
+const filteredPosts = computed(() => {
+  if (sessionMode) return posts.value;
+  return posts.value.filter(post => {
+    const matchesGroup = !selectedGroup.value || post.sg_name === selectedGroup.value;
+    const matchesSchedule = !selectedSchedule.value || post.schedule_name === selectedSchedule.value;
+    const matchesResultCode = selectedResultCode.value === '' || String(post.result_code) === String(selectedResultCode.value);
+    const matchesStart = !selectedStartTime.value || parseServerTime(post.start_time) >= new Date(selectedStartTime.value);
+    const matchesEnd = !selectedEndTime.value || parseServerTime(post.end_time) <= new Date(selectedEndTime.value);
+    return matchesGroup && matchesSchedule && matchesResultCode && matchesStart && matchesEnd;
+  });
+});
+const totalRecords = computed(() => sessionMode ? serverTotal.value : filteredPosts.value.length);
+const paginatedPosts = computed(() => sessionMode ? posts.value : filteredPosts.value.slice((currentPage.value - 1) * perPage.value, currentPage.value * perPage.value));
+const changePage = page => {
+  if (sessionMode) loadPage(page);
+  else currentPage.value = page;
+};
+const rangeStart = computed(() => totalRecords.value === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1);
+const rangeEnd = computed(() => Math.min(currentPage.value * perPage.value, totalRecords.value));
+watch([selectedStartTime, selectedEndTime], () => { if (!sessionMode) currentPage.value = 1; });
 </script>
 
 <!--

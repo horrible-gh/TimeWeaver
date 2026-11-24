@@ -53,10 +53,11 @@
 import { ref, computed } from "vue";
 import { defineProps, defineEmits } from "vue";
 
-const props = defineProps({ total: Number, perPage: Number });
+const props = defineProps({ total: Number, perPage: Number, page: Number });
 const emit = defineEmits(["page-changed"]);
 
-const currentPage = ref(1);
+const localPage = ref(1);
+const currentPage = computed(() => props.page ?? localPage.value);
 const totalPages = computed(() => Math.ceil(props.total / props.perPage));
 
 const maxVisiblePages = 5; // Maximum number of visible pages
@@ -86,7 +87,7 @@ const visiblePages = computed(() => {
 
 const changePage = (page) => {
   if (page >= 1 && page <= totalPages.value) {
-    currentPage.value = page;
+    localPage.value = page;
     emit("page-changed", page);
   }
 };

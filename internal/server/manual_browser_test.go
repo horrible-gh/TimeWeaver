@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -65,6 +66,22 @@ func TestBrowserManualFlow(t *testing.T) {
 	}
 	historyID := addHistory(schedule, task, strings.Repeat("ab", 16), "visible-ok")
 	addHistory(private, privateTask, strings.Repeat("cd", 16), "private-no")
+	// Reproduce an ordinary production history exceeding the old 1000-row cap.
+	// Keep it in group eight so the viewer's one-row assertions still apply.
+	tx, err := f.db.DB.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	for i := 1; i <= 1000; i++ {
+		q := "INSERT INTO execution_log(execution_grp_id,schedule_id,detail_id,start_time,end_time,result_code,result_message) VALUES(UNHEX(?),?,UNHEX(REPLACE(?,'-','')),?,?,1,'bulk-history')"
+		if _, err = tx.Exec(fixtureSQL(f.db.Dialect, q), fixtureArgs(f.db, []any{fmt.Sprintf("%032x", i), private, privateTask, historyTime, historyTime.Add(time.Second)})...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	ui, err := webui.Bundled(f.settings.Context)
 	if err != nil {
 		t.Fatal(err)

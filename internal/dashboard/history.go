@@ -117,55 +117,62 @@ func (s *Service) ExecutionHistory(ctx context.Context, token, start, end string
 		if err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, q, append([]any{s.timeValue(from), s.timeValue(to)}, args...)...)
-		if err != nil {
-			return dbError(err)
-		}
-		defer rows.Close()
-		cols, err := rows.Columns()
-		if err != nil {
-			return dbError(err)
-		}
-		for rows.Next() {
-			if len(out) == historyLimit {
-				return fail(422, "history_too_large")
-			}
-			values := make([]any, len(cols))
-			ptrs := make([]any, len(cols))
-			for i := range values {
-				ptrs[i] = &values[i]
-			}
-			if err = rows.Scan(ptrs...); err != nil {
-				return dbError(err)
-			}
-			row := map[string]any{}
-			for i, c := range cols {
-				value, err := jsonDateColumn(c, values[i])
-				if err != nil {
-					return err
-				}
-				switch v := value.(type) {
-				case []byte:
-					if c == "execution_uuid" {
-						row[c] = uuidString(v)
-					} else {
-						row[c] = string(v)
-					}
-				case time.Time:
-					row[c] = v.UTC().Format(time.RFC3339Nano)
-				default:
-					row[c] = v
-				}
-			}
-			out = append(out, row)
-		}
-		if err = rows.Err(); err != nil {
-			return dbError(err)
-		}
-		return nil
+		out, err = readHistoryRows(ctx, tx, q, append([]any{s.timeValue(from), s.timeValue(to)}, args...), historyLimit)
+		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// Both the compatibility array and paginated history use the same decoding.
+func readHistoryRows(ctx context.Context, tx *sql.Tx, q string, args []any, limit int) ([]map[string]any, error) {
+	out := []map[string]any{}
+	rows, err := tx.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, dbError(err)
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, dbError(err)
+	}
+	for rows.Next() {
+		if len(out) == limit {
+			return nil, fail(422, "history_too_large")
+		}
+		values := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range values {
+			ptrs[i] = &values[i]
+		}
+		if err = rows.Scan(ptrs...); err != nil {
+			return nil, dbError(err)
+		}
+		row := map[string]any{}
+		for i, c := range cols {
+			value, err := jsonDateColumn(c, values[i])
+			if err != nil {
+				return nil, err
+			}
+			switch v := value.(type) {
+			case []byte:
+				if c == "execution_uuid" {
+					row[c] = uuidString(v)
+				} else {
+					row[c] = string(v)
+				}
+			case time.Time:
+				row[c] = v.UTC().Format(time.RFC3339Nano)
+			default:
+				row[c] = v
+			}
+		}
+		out = append(out, row)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, dbError(err)
 	}
 	return out, nil
 }

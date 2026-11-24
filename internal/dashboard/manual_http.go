@@ -31,7 +31,16 @@ func (s *Service) manualHTTP(w http.ResponseWriter, r *http.Request, path string
 	case "/dashboard/manual_execution/get_manual_execution_list":
 		out, err = s.ManualRuns(r.Context(), token)
 	case "/dashboard/schedule/execution_history":
-		out, err = s.ExecutionHistory(r.Context(), token, r.URL.Query().Get("start_date"), r.URL.Query().Get("end_date"))
+		query := r.URL.Query()
+		if query.Has("page") {
+			var in historyPageInput
+			if in, err = parseHistoryPage(query); err == nil {
+				out, err = s.executionHistoryPage(r.Context(), token, in)
+			}
+		} else {
+			// Preserve the existing array contract for older clients.
+			out, err = s.ExecutionHistory(r.Context(), token, query.Get("start_date"), query.Get("end_date"))
+		}
 	case "/dashboard/manual_execution/abandon_manual_execution":
 		var in struct {
 			ID       int64  `json:"manual_id"`

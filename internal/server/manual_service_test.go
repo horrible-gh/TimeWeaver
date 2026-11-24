@@ -337,6 +337,58 @@ func TestMySQLManualHistoryRejectsTruncatedResults(t *testing.T) {
 	if rows != nil {
 		t.Fatal("partial history returned with overflow", len(rows))
 	}
+	private := createSchedule(t, f, 8, "Private history")
+	insertManualHistory(t, f, private, createTask(t, f, private), "hidden")
+	guard, err := access.NewHTTP(f.auth, f.settings.Context, access.HTTPOptions{Origin: "http://127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := dashboard.NewHTTP(f.auth, guard, f.settings.Context)
+	request := func(query string, status int) map[string]any {
+		t.Helper()
+		r := httptest.NewRequest("GET", "http://127.0.0.1"+f.settings.Context+"/dashboard/schedule/execution_history?start_date="+from+"&end_date="+to+"&"+query, nil)
+		r.RemoteAddr = "127.0.0.1:42"
+		r.AddCookie(&http.Cookie{Name: "tw_session", Value: p.token})
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != status {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		if status != 200 {
+			return nil
+		}
+		var result map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || strings.Contains(w.Body.String(), "Private history") || strings.Contains(w.Body.String(), "hidden") {
+			t.Fatal("invalid or unscoped page", w.Body.String(), err)
+		}
+		return result
+	}
+	first := request("page=1&page_size=100&include_options=1", 200)
+	if first["total"] != float64(1001) || len(first["items"].([]any)) != 100 || len(first["options"].([]any)) != 1 {
+		t.Fatal("large history not paginated", first["total"])
+	}
+	latest := first["items"].([]any)[0].(map[string]any)
+	if latest["result_message"] != "overflow" {
+		t.Fatal("newest execution not first", latest)
+	}
+	last := request("page=11&page_size=100", 200)
+	if last["total"] != float64(1001) || len(last["items"].([]any)) != 1 {
+		t.Fatal("last page lost rows", last)
+	}
+	asc := request("page=1&page_size=1&sort=execution_id&direction=asc", 200)
+	if asc["items"].([]any)[0].(map[string]any)["execution_id"] != last["items"].([]any)[0].(map[string]any)["execution_id"] {
+		t.Fatal("global order not applied", asc)
+	}
+	filtered := request("page=1&group=History+bound&schedule=Task&result_code=0", 200)
+	if filtered["total"] != float64(1001) {
+		t.Fatal("filters applied after page", filtered)
+	}
+	if empty := request("page=1&group=Private+history", 200); empty["total"] != float64(0) {
+		t.Fatal("foreign history visible", empty)
+	}
+	request("page=0", 422)
+	request("page=1&page_size=101", 422)
+	request("page=1&sort=execution_id%3BDROP", 422)
 }
 
 func TestMySQLManualHTTPContractAndBoundaries(t *testing.T) {
