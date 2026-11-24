@@ -25,6 +25,9 @@ bash run-go.sh --pull --setup
 
 Setup prompts for a private password if the initial `timeweaver` administrator
 still has its public seed password. It preserves established user passwords.
+Routine updates use `.\run-go.ps1 -Pull` or `bash run-go.sh --pull`;
+reviewed incremental database migrations run automatically on server startup.
+Keep a restorable backup. Initial setup and exceptional schema repair remain explicit.
 Later starts can use `.\run-go.ps1 -NoBuild` or `bash run-go.sh --no-build` to
 reuse the validated executable, or run `dist/timeweaver serve --env server/.env`
 directly under SpawnPoint. The default runner rebuilds, so source or embedded UI

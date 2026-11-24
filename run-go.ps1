@@ -5,7 +5,8 @@ Builds and runs the unified Go server in the foreground.
 By default the Vue UI and Go executable are rebuilt on every invocation.
 Use -NoBuild only to run an already validated dist/timeweaver.exe.
 Use -Pull to update the current branch with git pull --ff-only first.
-Use -Setup to authorize database setup/upgrade before starting; it prompts if
+Existing configured databases are upgraded automatically by serve.
+Use -Setup only for initial setup or explicit offline repair; it prompts if
 the seed administrator needs a password. The script preserves server/.env.
 #>
 [CmdletBinding()]
@@ -41,9 +42,9 @@ try {
         & $binary setup --env $EnvFile --allow-write
         if ($LASTEXITCODE -ne 0) { throw 'Database setup failed; server was not started.' }
     }
-    & $binary check --database --env $EnvFile
-    if ($LASTEXITCODE -ne 0) { throw 'Server readiness check failed; see the diagnostic above.' }
-    Write-Host '[run] starting the server (database readiness is checked before listening)...'
+    # Serve owns migration and readiness; a read-only precheck would reject
+    # routine pending upgrades before the server could apply them.
+    Write-Host '[run] starting the server (automatic database upgrades and readiness checks)...'
     & $binary serve --env $EnvFile
     $result = $LASTEXITCODE
 } catch {

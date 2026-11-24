@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/horrible-gh/TimeWeaver/internal/access"
+	"github.com/horrible-gh/TimeWeaver/internal/config"
+	"github.com/horrible-gh/TimeWeaver/internal/store"
 	"github.com/horrible-gh/TimeWeaver/internal/webui"
 )
 
@@ -167,9 +169,32 @@ func TestCLIExecutableServerFlow(t *testing.T) {
 		}
 		process.stop(t)
 		f.assertRedacted(t, process.output.String())
-		// The same listener and persisted DB-backed browser/device credentials
-		// must work in an entirely new executable process, without another setup.
+		// Simulate an established installation from just before the newest
+		// additive migration. Read-only checks must not apply it; routine
+		// serve must apply it without setup and preserve both credentials.
+		db, err := store.OpenExisting(context.Background(), config.Database{Type: "sqlite", Path: f.database})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, q := range []string{
+			"ALTER TABLE task_detail DROP COLUMN house_keep_delete_empty_dirs",
+			"DELETE FROM migrations WHERE filename='go_sqlite_002.sql'",
+			"DELETE FROM tw_migration_attempt WHERE filename='go_sqlite_002.sql'",
+		} {
+			if _, err = db.DB.Exec(q); err != nil {
+				db.Close()
+				t.Fatal(err)
+			}
+		}
+		db.Close()
+		f.command(t, "", 1, "check", "--database", "--env", f.file)
+		f.command(t, "", 1, "serve", "--no-auto-migrate", "--env", f.file)
+		f.command(t, "", 1, "check", "--database", "--env", f.file)
 		process = f.start(t)
+		if !strings.Contains(process.output.String(), "database migration complete") {
+			t.Fatal("routine startup did not report its automatic migration")
+		}
+		f.assertReady(t)
 		resp, _ = f.request(t, http.MethodGet, "/cli_api/auth/me", "", "", nil)
 		if resp.StatusCode != 200 {
 			t.Fatalf("browser session after restart: HTTP %d", resp.StatusCode)

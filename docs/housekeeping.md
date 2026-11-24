@@ -72,9 +72,10 @@ is not considered; retention applies to files. Zero days with the option
 selected performs directory-only cleanup. Permission-denied child directories
 are skipped with warnings. Other root/I/O errors remain failures.
 
-The Go server setup adds `house_keep_delete_empty_dirs` with default false
+The Go server adds `house_keep_delete_empty_dirs` with default false
 using `timeweaver_server_016.sql` (MySQL/MariaDB) or `go_sqlite_002.sql`
-(SQLite). Update both the unified server and agent. Saving or executing an
+(SQLite). These reviewed additive migrations are applied automatically on
+routine server startup. Update both the unified server and agent. Saving or executing an
 opted-in task requires the agent capability `housekeep_delete_empty_dirs_v1`.
 The flag is included in the snapshot revision/ETag when enabled. Old agents
 and unchanged tasks retain the original behavior. No re-enrollment is needed.

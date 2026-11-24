@@ -220,6 +220,10 @@ func (s *Store) Migrate(ctx context.Context) (MigrationReport, error) {
 	return s.apply(ctx, catalog)
 }
 func (s *Store) apply(ctx context.Context, catalog []Migration) (MigrationReport, error) {
+	return s.applyMySQLMode(ctx, catalog, false)
+}
+
+func (s *Store) applyMySQLMode(ctx context.Context, catalog []Migration, startup bool) (MigrationReport, error) {
 	var empty MigrationReport
 	if s.readOnly {
 		return empty, errors.New("read-only database")
@@ -254,6 +258,11 @@ func (s *Store) apply(ctx context.Context, catalog []Migration) (MigrationReport
 	}
 	if report.Blocked {
 		return report, errors.New("migration blocked by unknown, changed, unfinished or unsupported legacy history; inspect migrate status before retrying")
+	}
+	if startup {
+		if _, err := StartupMigrations(report); err != nil {
+			return report, err
+		}
 	}
 	if report.Pending == 0 {
 		return report, nil

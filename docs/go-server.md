@@ -83,8 +83,8 @@ bash run-go.sh --setup
 ```
 
 The runner builds the executable, applies database setup because `-Setup` or
-`--setup` was explicitly supplied, performs a read-only readiness check, and
-starts the server in the foreground. Setup asks for a password for the initial
+`--setup` was explicitly supplied, and starts the server in the foreground.
+The executable itself checks readiness before listening. Setup asks for a password for the initial
 `timeweaver` administrator, with terminal input hidden. Use at least 12
 characters. Open `http://127.0.0.1:8000` and sign in with that account and password.
 
@@ -152,8 +152,8 @@ historical predecessors:
 These rows no longer appear in `unknown_migrations` or block a completed server
 installation. They are reported only when present, never
 queued or replayed, and their stored timestamps are preserved. The executable
-MySQL catalog remains at 31 migrations; missing current migrations still need
-setup. `task_detail_001.sql` remains an active server migration because its SQL
+MySQL catalog contains the 31 frozen migrations plus Go-owned incremental
+migrations. A missing legacy migration still needs explicit offline setup. `task_detail_001.sql` remains an active server migration because its SQL
 differs from the retired agent file with the same basename.
 
 Update and rebuild the executable, then rerun `check --database`. Do not delete
@@ -234,7 +234,7 @@ absolute deadlines are preserved across restarts.
 | `check --env FILE` | Validates configuration without connecting to a DB. |
 | `check --env FILE --database` | Opens the existing DB read-only and checks migrations, critical schema, access schema, administrator ownership and embedded UI. |
 | `setup --env FILE --allow-write` | Applies the supported DB setup/upgrade and securely claims a remaining seed administrator. |
-| `serve --env FILE` | Checks readiness and starts the UI/API server. No migration is performed by startup. |
+| `serve --env FILE` | Applies approved pending incremental migrations for a configured DB, checks readiness and starts the UI/API server. Use `--no-auto-migrate` to require manual preparation. |
 | `assets-check --context /timeweaver_svr` | Validates the compiled dashboard and its referenced local assets. |
 | `migrate status --env FILE` | Reads the migration journal and pending migrations. |
 | `schema status --env FILE` | Reads the critical legacy schema report. |
@@ -244,9 +244,36 @@ The root runners accept `-Pull` / `--pull` for `git pull --ff-only` and
 `-EnvFile FILE` / `--env FILE` for an explicit configuration. Without `-NoBuild`
 or `--no-build`, they rebuild the UI and server on every invocation.
 `-ForceBuild` / `--force-build` is accepted for launcher compatibility and has
-the same effect as the default. `-Setup` / `--setup` explicitly enables DB
-writes before starting. Use the executable directly for routine SpawnPoint
+the same effect as the default. `-Setup` / `--setup` is for initial installation
+or explicit offline repair. Routine starts apply reviewed incremental database
+migrations automatically. Use the executable directly for routine SpawnPoint
 restarts so a process restart does not trigger a build.
+
+### Routine upgrades
+
+Stop the previous instance, keep a current restorable database backup, and
+update/build as usual. No separate setup command is needed:
+
+```powershell
+.\run-go.ps1 -Pull
+```
+
+```bash
+bash run-go.sh --pull
+```
+
+The same behavior applies to direct `serve` under SpawnPoint. Automatic
+migration is limited to reviewed additive migrations explicitly registered in
+`internal/store/startup_migrate.go`, currently the empty-directory option.
+The full migration plan is checked again under the database migration lock;
+unknown/unfinished/checksum-mismatched history, unapproved migrations,
+unconfigured accounts and schema issues stop startup. A missing database or
+seed administrator still needs first-time setup. No history is deleted or
+password reset by automatic upgrade. On a migration failure, inspect the
+diagnostic and migration status before retrying. Do not automatically replay
+failed MySQL DDL. `check --database` remains read-only, so it can report pending
+migrations before the first restart; launchers must not use it as a blocking
+precondition for `serve`.
 
 ## Troubleshooting and rollback
 

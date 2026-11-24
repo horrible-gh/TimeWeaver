@@ -23,8 +23,9 @@ func runSetup(args []string, out, diagnostics io.Writer) int {
 	return runSetupInput(args, os.Stdin, out, diagnostics)
 }
 
-// Setup is an explicit offline operation. Serve itself never initializes,
-// migrates, repairs or resets the configured database.
+// Setup is an explicit offline operation for installation and recovery.
+// Routine serve upgrades are limited to reviewed incremental migrations;
+// serve never initializes, repairs or resets the configured database.
 func runSetupInput(args []string, in io.Reader, out, diagnostics io.Writer) int {
 	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
 	flags.SetOutput(diagnostics)

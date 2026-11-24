@@ -46,7 +46,7 @@ func inspectReadiness(ctx context.Context, db *store.Store) (readinessReport, er
 		return r, errors.New("database migration history is blocked; inspect 'timeweaver migrate status --env FILE' before changing the database")
 	}
 	if !migrations.HistoryExists || migrations.Pending != 0 {
-		return r, errors.New("database migrations are incomplete; run 'timeweaver setup --env FILE --allow-write' after backing up and stopping the previous server")
+		return r, errors.New("database migrations are incomplete; serve applies approved routine upgrades automatically, otherwise run setup after backing up and stopping the previous server")
 	}
 	schema, err := db.CriticalSchema(ctx)
 	r.Schema = &schema
@@ -56,23 +56,73 @@ func inspectReadiness(ctx context.Context, db *store.Store) (readinessReport, er
 	if len(schema.Issues) != 0 {
 		return r, errors.New("critical database schema needs repair; inspect 'timeweaver schema status --env FILE' and run setup before serving")
 	}
-	human, err := access.Status(ctx, db)
-	r.Access = &human
-	if err != nil {
+	if err = inspectAccessReadiness(ctx, db, &r); err != nil {
 		return r, err
-	}
-	if !human.Ready {
-		return r, errors.New("human access schema is not ready; run 'timeweaver setup --env FILE --allow-write' before serving")
-	}
-	r.BootstrapPassword, err = access.HasBootstrapPassword(ctx, db)
-	if err != nil {
-		return r, err
-	}
-	if r.BootstrapPassword {
-		return r, errors.New("a known default password remains active; run 'timeweaver setup --env FILE --allow-write' to set the initial administrator password, and review any other default-password users")
 	}
 	r.Ready = true
 	return r, nil
+}
+
+func inspectAccessReadiness(ctx context.Context, db *store.Store, r *readinessReport) error {
+	human, err := access.Status(ctx, db)
+	r.Access = &human
+	if err != nil {
+		return err
+	}
+	if !human.Ready {
+		return errors.New("human access schema is not ready; run 'timeweaver setup --env FILE --allow-write' before serving")
+	}
+	r.BootstrapPassword, err = access.HasBootstrapPassword(ctx, db)
+	if err != nil {
+		return err
+	}
+	if r.BootstrapPassword {
+		return errors.New("a known default password remains active; run 'timeweaver setup --env FILE --allow-write' to set the initial administrator password, and review any other default-password users")
+	}
+	return nil
+}
+
+// Only a previously configured database with a clean, reviewed incremental
+// upgrade plan is eligible. Initial setup, authentication changes and schema
+// repair are deliberately not performed by routine restarts.
+func prepareServeDatabase(ctx context.Context, probe *store.Store, cfg config.Database, autoMigrate bool, diagnostics io.Writer) error {
+	initial, cancel := context.WithTimeout(ctx, startupTimeout)
+	defer cancel()
+	state, err := inspectReadiness(initial, probe)
+	if err == nil || !autoMigrate || state.Migrations == nil || state.Migrations.Blocked || state.Migrations.Pending == 0 {
+		return err
+	}
+	pending, planErr := store.StartupMigrations(*state.Migrations)
+	if planErr != nil {
+		return errors.Join(err, planErr)
+	}
+	if err = inspectAccessReadiness(initial, probe, &state); err != nil {
+		return err
+	}
+	cancel()
+	upgrade, stopUpgrade := context.WithTimeout(ctx, 2*time.Minute)
+	defer stopUpgrade()
+	db, err := store.OpenExisting(upgrade, cfg)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(diagnostics, "[startup] applying %d pending database migration(s): %v\n", len(pending), pending)
+	report, migrateErr := db.MigrateForStartup(upgrade)
+	closeErr := db.Close()
+	if err = errors.Join(migrateErr, closeErr); err != nil {
+		return fmt.Errorf("automatic database migration failed; server was not started: %w", err)
+	}
+	if report.Blocked || report.Pending != 0 {
+		return errors.New("automatic database migration did not complete; server was not started")
+	}
+	stopUpgrade()
+	recheck, stopRecheck := context.WithTimeout(ctx, startupTimeout)
+	defer stopRecheck()
+	if _, err = inspectReadiness(recheck, probe); err != nil {
+		return err
+	}
+	fmt.Fprintln(diagnostics, "[startup] database migration complete; readiness check passed")
+	return nil
 }
 
 func writeCheckReport(settings config.Settings, inspectDatabase bool, out, diagnostics io.Writer) int {
@@ -130,6 +180,7 @@ func runServeContext(ctx context.Context, args []string, out, diagnostics io.Wri
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(diagnostics)
 	filename := flags.String("env", "server/.env", "environment file containing database, listen and public-origin settings")
+	noAutoMigrate := flags.Bool("no-auto-migrate", false, "require manual preparation instead of applying approved incremental migrations")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -151,19 +202,20 @@ func runServeContext(ctx context.Context, args []string, out, diagnostics io.Wri
 		return 1
 	}
 	startup, cancel := context.WithTimeout(ctx, startupTimeout)
-	defer cancel()
-	// The first pool is read-only and refuses a missing SQLite file. Serving
-	// never initializes or migrates a database as a side effect of startup.
+	// The first pool is read-only and refuses a missing SQLite file.
 	probe, err := store.Open(startup, settings.Database, true)
+	cancel()
 	if err != nil {
 		fmt.Fprintln(diagnostics, err)
 		return 1
 	}
 	defer probe.Close()
-	if _, err = inspectReadiness(startup, probe); err != nil {
+	if err = prepareServeDatabase(ctx, probe, settings.Database, !*noAutoMigrate, diagnostics); err != nil {
 		fmt.Fprintln(diagnostics, err)
 		return 1
 	}
+	startup, cancel = context.WithTimeout(ctx, startupTimeout)
+	defer cancel()
 	db, err := store.OpenExisting(startup, settings.Database)
 	if err != nil {
 		fmt.Fprintln(diagnostics, err)

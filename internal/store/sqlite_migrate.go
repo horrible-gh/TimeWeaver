@@ -16,6 +16,10 @@ const sqliteFoundation = "go_sqlite_001.sql"
 const sqliteSeedHash = "$pbkdf2-sha256$29000$UGptrTWGsPbeO2csJaTUWg$L0UlEAeIEwTtylnWYs2Jx/DgDdB174/k7ba7VeDj3xg"
 
 func (s *Store) applySQLite(ctx context.Context, catalog []Migration) (MigrationReport, error) {
+	return s.applySQLiteMode(ctx, catalog, false)
+}
+
+func (s *Store) applySQLiteMode(ctx context.Context, catalog []Migration, startup bool) (MigrationReport, error) {
 	var empty MigrationReport
 	if s.readOnly {
 		return empty, errors.New("read-only database")
@@ -49,6 +53,11 @@ func (s *Store) applySQLite(ctx context.Context, catalog []Migration) (Migration
 	}
 	if report.Blocked {
 		return report, errors.New("migration blocked by unknown, changed or unfinished history; inspect the database before retrying")
+	}
+	if startup {
+		if _, err := StartupMigrations(report); err != nil {
+			return report, err
+		}
 	}
 	if report.Pending == 0 {
 		return report, nil

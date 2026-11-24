@@ -19,7 +19,7 @@ while (($#)); do
     -h|--help)
       printf '%s\n' 'Usage: ./run-go.sh [--env FILE] [--pull] [--setup] [--no-build | --force-build]'
       printf '%s\n' 'The default rebuilds the UI and server. --no-build reuses dist/timeweaver explicitly.'
-      printf '%s\n' '--setup authorizes database setup/upgrade and prompts if the seed administrator needs a password.'
+      printf '%s\n' 'Routine database upgrades are automatic. --setup is for initial setup or explicit repair.'
       exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
   esac
@@ -46,6 +46,6 @@ fi
 if $setup; then
   "$binary" setup --env "$env_file" --allow-write
 fi
-"$binary" check --database --env "$env_file"
-printf '%s\n' '[run] starting the server (database readiness is checked before listening)...'
+# Serve applies approved incremental upgrades before checking readiness.
+printf '%s\n' '[run] starting the server (automatic database upgrades and readiness checks)...'
 exec "$binary" serve --env "$env_file"

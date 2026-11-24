@@ -6,8 +6,8 @@ Baseline: `d6bdb751e08e68ff98781b5b41e5f90b09383ce2`.
 This branch implements the architecture reviewed on 2026-11-16. The unified
 executable now starts the real UI and API server with `serve`. Follow
 [Go server setup and operation](go-server.md) to build, prepare the database,
-configure Caddy and run it under SpawnPoint. Deployment keeps an explicit
-database setup step; startup never silently runs migrations.
+configure Caddy and run it under SpawnPoint. First-time setup remains explicit;
+routine startup applies only reviewed incremental migrations and logs the result.
 
 ## Target
 

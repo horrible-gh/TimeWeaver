@@ -8,7 +8,7 @@ import (
 func verifyHousekeepUpgrade(t *testing.T, s *Store) {
 	t.Helper()
 	ctx := context.Background()
-	report, err := s.Migrate(ctx)
+	report, err := s.MigrateForStartup(ctx)
 	if err != nil || report.Pending != 0 || report.Blocked {
 		t.Fatal(report, err)
 	}
@@ -20,7 +20,7 @@ func verifyHousekeepUpgrade(t *testing.T, s *Store) {
 	if _, err = s.DB.Exec("UPDATE task_detail SET house_keep_delete_empty_dirs=1 WHERE detail_id=?", []byte("0123456789abcdef")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Migrate(ctx); err != nil {
+	if _, err = s.MigrateForStartup(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.DB.QueryRow("SELECT house_keep_delete_empty_dirs FROM task_detail WHERE detail_id=?", []byte("0123456789abcdef")).Scan(&flag); err != nil || flag != 1 {

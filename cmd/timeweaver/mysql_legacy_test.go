@@ -124,6 +124,29 @@ func TestMySQLLegacyAgentHistorySetupCheckAndServe(t *testing.T) {
 	if err = json.Unmarshal(out.Bytes(), &report); err != nil || !report.Ready || !report.Database.Ready || report.Database.Migrations == nil || report.Database.Migrations.Blocked || report.Database.Migrations.Pending != 0 || len(report.Database.Migrations.Unknown) != 0 {
 		t.Fatalf("legacy installation was not ready: %s", &out)
 	}
+	// An existing, configured MariaDB/MySQL installation from before the
+	// latest additive migration must upgrade on serve, not require setup.
+	for _, query := range []string{
+		"ALTER TABLE task_detail DROP COLUMN house_keep_delete_empty_dirs",
+		"DELETE FROM migrations WHERE filename='timeweaver_server_016.sql'",
+	} {
+		if _, err = db.DB.ExecContext(ctx, query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = db.DB.ExecContext(ctx, "INSERT INTO task_detail(detail_id,command) VALUES(?,?)", []byte("0123456789abcdef"), "preserved task"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	diagnostics.Reset()
+	if code := run([]string{"check", "--database", "--env", file}, &out, &diagnostics); code != 1 {
+		t.Fatal("read-only check must report a pending migration", code)
+	}
+	out.Reset()
+	diagnostics.Reset()
+	if code := run([]string{"serve", "--no-auto-migrate", "--env", file}, &out, &diagnostics); code != 1 {
+		t.Fatal("automatic migration opt-out was ignored", code)
+	}
 	runContext, stop := context.WithCancel(ctx)
 	done := make(chan int, 1)
 	logs := &cliExecutableOutput{}
@@ -192,11 +215,22 @@ func TestMySQLLegacyAgentHistorySetupCheckAndServe(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("legacy CLI server did not stop")
 	}
+	if !strings.Contains(logs.String(), "database migration complete") {
+		t.Fatal("serve did not report automatic migration")
+	}
 	var rows, journals int
 	if err = db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM migrations WHERE applied_at='2025-01-02 03:04:05'").Scan(&rows); err != nil || rows != 13 {
 		t.Fatal("setup/check/serve changed historical rows or timestamps", rows, err)
 	}
-	if err = db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='tw_migration_attempt'").Scan(&journals); err != nil || journals != 0 {
-		t.Fatal("setup invented a Go migration journal for completed Python history", journals, err)
+	if err = db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM tw_migration_attempt").Scan(&journals); err != nil || journals != 1 {
+		t.Fatal("startup replayed previously applied migrations", journals, err)
+	}
+	var name, state, command string
+	var flag int
+	if err = db.DB.QueryRowContext(ctx, "SELECT filename,state FROM tw_migration_attempt").Scan(&name, &state); err != nil || name != "timeweaver_server_016.sql" || state != "applied" {
+		t.Fatal("automatic migration journal incomplete", name, state, err)
+	}
+	if err = db.DB.QueryRowContext(ctx, "SELECT command,house_keep_delete_empty_dirs FROM task_detail WHERE detail_id=?", []byte("0123456789abcdef")).Scan(&command, &flag); err != nil || command != "preserved task" || flag != 0 {
+		t.Fatal("automatic migration changed existing task data", command, flag, err)
 	}
 }
