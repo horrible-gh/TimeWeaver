@@ -34,3 +34,14 @@ test("all supported locales provide a short checkbox label",()=>{
   for(const locale of ["ko","en","ja"]) assert.equal(typeof messages[locale].task_house_keep_recursive,"string");
   assert.equal(messages.ko.task_house_keep_recursive,"하위 폴더 포함");
 });
+
+test("empty-directory deletion is opt-in and only applicable to housekeeping", async () => {
+  assert.equal(housekeepOptions({task_type:"housekeep"}).house_keep_delete_empty_dirs,false);
+  for (const value of [false,0,"0","false",null,undefined]) assert.equal(housekeepOptions({task_type:"housekeep",house_keep_delete_empty_dirs:value}).house_keep_delete_empty_dirs,false);
+  assert.equal(housekeepOptions({task_type:"housekeep",house_keep_delete_empty_dirs:"1"}).house_keep_delete_empty_dirs,true);
+  assert.equal(housekeepOptions({task_type:"copy",house_keep_delete_empty_dirs:true}).house_keep_delete_empty_dirs,false);
+  const source=await readFile(new URL("../src/dashboard/components/contents/tasks/TaskList.vue",import.meta.url),"utf8");
+  assert.match(source,/for="task-delete-empty" class="housekeep-recursive"/);
+  assert.match(source,/type="checkbox" v-model="formControl.house_keep_delete_empty_dirs"/);
+  for (const locale of ["ko","en","ja"]) assert.equal(typeof messages[locale].task_house_keep_delete_empty_dirs,"string");
+});

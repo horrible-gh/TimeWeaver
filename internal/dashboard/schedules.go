@@ -137,9 +137,13 @@ func (s *Service) requireActiveGroup(ctx context.Context, tx *sql.Tx, id int64) 
 	}
 	return nil
 }
-func recursiveCap(value string) bool {
+func recursiveCap(value string) bool { return taskCapability(value, "housekeep_recursive_v1") }
+func deleteEmptyCap(value string) bool {
+	return taskCapability(value, "housekeep_delete_empty_dirs_v1")
+}
+func taskCapability(value, capability string) bool {
 	for _, s := range strings.Split(value, ",") {
-		if strings.TrimSpace(s) == "housekeep_recursive_v1" {
+		if strings.TrimSpace(s) == capability {
 			return true
 		}
 	}
@@ -219,6 +223,11 @@ func (s *Service) SaveSchedule(ctx context.Context, token, csrf string, in Sched
 		}
 		if !create && !pausing && !recursiveCap(caps) {
 			if err = countGuard(ctx, tx, "SELECT COUNT(*) FROM schedule_detail sd JOIN task_detail td ON td.detail_id=sd.detail_id WHERE sd.schedule_id=? AND sd.deleted_at IS NULL AND td.task_type='housekeep' AND td.house_keep_recursive=1", "agent_upgrade_required", id); err != nil {
+				return err
+			}
+		}
+		if !create && !pausing && !deleteEmptyCap(caps) {
+			if err = countGuard(ctx, tx, "SELECT COUNT(*) FROM schedule_detail sd JOIN task_detail td ON td.detail_id=sd.detail_id WHERE sd.schedule_id=? AND sd.deleted_at IS NULL AND td.task_type='housekeep' AND td.house_keep_delete_empty_dirs=1", "agent_upgrade_required", id); err != nil {
 				return err
 			}
 		}

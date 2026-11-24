@@ -17,7 +17,7 @@ export function resetTaskType(type) {
   return {
     task_type: type, command: '', archive_type: type === 'archive' ? 'zip' : null,
     source_path: '', destination_path: '', error_on_missing_source: '1',
-    house_keep_days: '', house_keep_recursive: false,
+    house_keep_days: '', house_keep_recursive: false, house_keep_delete_empty_dirs: false,
     date_format: null, target_date_format: null, destination_date_format: null,
   };
 }
@@ -35,6 +35,7 @@ export function taskTypePayload(form) {
     error_on_missing_source: file && formBool(form.error_on_missing_source),
     house_keep_days: housekeep ? integer(form.house_keep_days) : null,
     house_keep_recursive: housekeep && formBool(form.house_keep_recursive),
+    house_keep_delete_empty_dirs: housekeep && formBool(form.house_keep_delete_empty_dirs),
     date_format: optional(form.date_format),
     target_date_format: file ? optional(form.target_date_format) : null,
     destination_date_format: file || housekeep ? optional(form.destination_date_format) : null,

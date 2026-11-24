@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/horrible-gh/TimeWeaver/internal/store"
@@ -25,10 +26,14 @@ func (s *Runtime) Heartbeat(ctx context.Context, principal DeviceIdentity, reque
 	if err != nil {
 		return HeartbeatData{}, runtimeFailure()
 	}
-	cap := ""
+	var supported []string
 	if supportsRecursive(capabilities) {
-		cap = recursiveHousekeep
+		supported = append(supported, recursiveHousekeep)
 	}
+	if supportsDeleteEmpty(capabilities) {
+		supported = append(supported, deleteEmptyHousekeep)
+	}
+	cap := strings.Join(supported, ",")
 	result, err := tx.ExecContext(ctx, `UPDATE devices SET last_heartbeat_at=?,version=?,applied_revision=?,agent_capabilities=? WHERE device_id=? AND status='active'`, store.TimeValue(s.db.Dialect, now), request.AgentVersion, request.AppliedRevision, cap, principal.DeviceID)
 	if err != nil {
 		return HeartbeatData{}, runtimeFailure()
@@ -237,7 +242,8 @@ func (s *Runtime) loadDetails(ctx context.Context, conn *sql.Conn, deviceID int6
  sd.is_error_stop,sd.sequence,sd.retry_count,td.detail_id,
  td.task_type,td.command,td.archive_type,td.source_path,td.error_on_missing_source,
  td.destination_path,td.date_format,td.target_date_format,td.destination_date_format,
- td.house_keep_days,CASE WHEN td.house_keep_recursive=1 THEN 1 ELSE 0 END
+ td.house_keep_days,CASE WHEN td.house_keep_recursive=1 THEN 1 ELSE 0 END,
+ CASE WHEN td.house_keep_delete_empty_dirs=1 THEN 1 ELSE 0 END
  FROM schedule_group sg JOIN schedule_detail sd ON sd.schedule_id=sg.schedule_id AND sd.status='active' AND sd.deleted_at IS NULL
  LEFT JOIN task_detail td ON td.detail_id=sd.detail_id WHERE sg.target_device=? AND sg.status='active'`, deviceID)
 	if err != nil {
@@ -254,10 +260,10 @@ func (s *Runtime) loadDetails(ctx context.Context, conn *sql.Conn, deviceID int6
 		var groupID int64
 		var name sql.NullString
 		var cron [7]sql.NullString
-		var stop, retry, missing, days, recursive sql.NullInt64
+		var stop, retry, missing, days, recursive, deleteEmpty sql.NullInt64
 		var kind, command, archive, source, destination, date, targetDate, destinationDate sql.NullString
 		args := append([]any{&detailID, &groupID, &name}, cronScan(&cron)...)
-		args = append(args, scanFlag(&stop), &d.Sequence, &retry, &taskID, &kind, &command, &archive, &source, scanFlag(&missing), &destination, &date, &targetDate, &destinationDate, &days, scanFlag(&recursive))
+		args = append(args, scanFlag(&stop), &d.Sequence, &retry, &taskID, &kind, &command, &archive, &source, scanFlag(&missing), &destination, &date, &targetDate, &destinationDate, &days, scanFlag(&recursive), scanFlag(&deleteEmpty))
 		if err = rows.Scan(args...); err != nil {
 			return runtimeFailure()
 		}
@@ -276,7 +282,7 @@ func (s *Runtime) loadDetails(ctx context.Context, conn *sql.Conn, deviceID int6
 		d.Cron = cronData(cron)
 		d.ErrorStop = stop.Int64 != 0
 		d.RetryCount = retry.Int64
-		d.Task, err = normalizeTask(SnapshotTask{Type: kind.String, Command: nullText(command), ArchiveType: nullText(archive), SourcePath: nullText(source), ErrorOnMissingSource: missing.Int64 != 0, DestinationPath: nullText(destination), DateFormat: nullText(date), TargetDateFormat: nullText(targetDate), DestinationDateFormat: nullText(destinationDate), HouseKeepDays: nullNumber(days), HouseKeepRecursive: recursive.Int64 == 1})
+		d.Task, err = normalizeTask(SnapshotTask{Type: kind.String, Command: nullText(command), ArchiveType: nullText(archive), SourcePath: nullText(source), ErrorOnMissingSource: missing.Int64 != 0, DestinationPath: nullText(destination), DateFormat: nullText(date), TargetDateFormat: nullText(targetDate), DestinationDateFormat: nullText(destinationDate), HouseKeepDays: nullNumber(days), HouseKeepRecursive: recursive.Int64 == 1, HouseKeepDeleteEmpty: deleteEmpty.Int64 == 1})
 		if err != nil {
 			return err
 		}

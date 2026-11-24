@@ -72,7 +72,7 @@ def main():
         # Verify all four type forms before saving the original command task.
         def assert_fields(visible):
             for field in ('command', 'source_path', 'destination_path', 'archive-type',
-                          'missing-source', 'house_keep_days', 'recursive'):
+                          'missing-source', 'house_keep_days', 'recursive', 'delete-empty'):
                 expect(page.locator('#task-' + field)).to_have_count(int(field in visible))
             for field in ('schedule', 'task_name', 'type', 'sequence', 'status', 'retry'):
                 expect(page.locator('#task-' + field)).to_be_visible()
@@ -84,10 +84,11 @@ def main():
         page.locator('#task-source_path').fill('/tmp/source')
         page.locator('#task-destination_path').fill('/tmp/old-target')
         page.locator('#task-type').select_option('housekeep')
-        assert_fields({'destination_path','house_keep_days','recursive'})
+        assert_fields({'destination_path','house_keep_days','recursive','delete-empty'})
         expect(page.locator('#task-destination_path')).to_have_value('')
         expect(page.locator('#task-house_keep_days')).to_have_value('')
         expect(page.locator('#task-recursive')).not_to_be_checked()
+        expect(page.locator('#task-delete-empty')).not_to_be_checked()
         # The checkbox is a full-size theme control aligned with retention.
         recursive = page.locator('#task-recursive')
         option = page.locator('label.housekeep-recursive')
@@ -102,6 +103,9 @@ def main():
         expect(option).to_have_css('border-top-width', '1px')
         expect(option).to_have_css('background-color', 'rgb(12, 16, 22)')
         expect(recursive).to_have_css('accent-color', 'rgb(56, 215, 199)')
+        empty_option = page.locator('label[for="task-delete-empty"]')
+        assert abs(empty_option.bounding_box()['height'] - rect['height']) <= 1
+        expect(page.locator('#task-delete-empty')).to_have_css('accent-color', 'rgb(56, 215, 199)')
         # Clicking the label text and using the keyboard both toggle the input.
         option.locator('span').click()
         expect(recursive).to_be_checked()
@@ -187,10 +191,12 @@ def main():
         page.locator('#task-schedule').select_option(str(legacy['schedule_id']))
         page.locator('#task-task_name').fill('legacy-housekeep')
         page.locator('#task-type').select_option('housekeep')
-        assert_fields({'destination_path','house_keep_days','recursive'})
+        assert_fields({'destination_path','house_keep_days','recursive','delete-empty'})
         page.locator('#task-destination_path').fill('/tmp/timeweaver-browser-fixture')
         page.locator('#task-house_keep_days').fill('1')
         page.locator('#task-recursive').check()
+        expect(page.locator('#task-delete-empty')).not_to_be_checked()
+        page.locator('#task-delete-empty').check()
         page.locator('#task-sequence').fill('20')
         save()
         hkrow = page.locator('tr[data-task]').filter(has=page.get_by_text('legacy-housekeep', exact=True))
@@ -200,10 +206,12 @@ def main():
         expect(page.locator('#task-schedule')).to_have_value(str(legacy['schedule_id']))
         expect(page.locator('#task-destination_path')).to_have_value('/tmp/timeweaver-browser-fixture')
         expect(page.locator('#task-recursive')).to_be_checked()
+        expect(page.locator('#task-delete-empty')).to_be_checked()
         page.locator('#task-task_name').fill('legacy-housekeep-edited')
         save()
         hk = next(t for t in ctx.request.get(base + '/dashboard/tasks/get_tasks').json() if t['detail_id'] == hkid)
         assert hk['task_name'] == 'legacy-housekeep-edited' and hk['house_keep_recursive']
+        assert hk['house_keep_delete_empty_dirs']
         assert hk['schedule_id'] == legacy['schedule_id'] and hk['sequence'] == 20
         assert not hk['command'] and not hk['source_path'] and not hk['archive_type']
         assert not hk['error_on_missing_source']
@@ -232,6 +240,7 @@ def main():
             save()
             saved = next(t for t in ctx.request.get(base + '/dashboard/tasks/get_tasks').json() if t['detail_id'] == fid)
             assert not saved['command'] and not saved['house_keep_recursive'] and not saved['error_on_missing_source']
+            assert not saved['house_keep_delete_empty_dirs']
             assert saved['house_keep_days'] is None
             assert saved['archive_type'] == ('zip' if kind == 'archive' else None)
         # The schedule edit form must also preserve the original target option.

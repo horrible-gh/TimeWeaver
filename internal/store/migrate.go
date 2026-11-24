@@ -121,13 +121,13 @@ func classifyHistory(dialect string, catalog []Migration, historyExists bool, ap
 			if item.State != "applied" {
 				r.Blocked = true
 			}
-		} else if dialect == "sqlite" && m.Name == sqliteFoundation && applied[m.Name] {
+		} else if dialect == "sqlite" && applied[m.Name] {
 			// Unlike legacy Python history, this marker and its checksum journal
 			// are written in one transaction. A missing journal means corruption.
 			item.State = "blocked"
 			r.Blocked = true
 		}
-		if dialect == "sqlite" && m.Name == sqliteFoundation && item.State == "applied" && item.Statement != len(m.Statements) {
+		if dialect == "sqlite" && item.State == "applied" && item.Statement != len(m.Statements) {
 			item.State = "blocked"
 			r.Blocked = true
 		}

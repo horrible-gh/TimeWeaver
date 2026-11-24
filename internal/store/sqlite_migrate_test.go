@@ -77,7 +77,7 @@ func TestSQLiteTrackedLegacyPreservesDataAndNormalizesInstants(t *testing.T) {
 	s := legacySQLiteFixture(t)
 	ctx := context.Background()
 	report, err := s.Migrate(ctx)
-	if err != nil || report.Pending != 0 || report.Blocked || len(report.Migrations) != 8 {
+	if err != nil || report.Pending != 0 || report.Blocked || len(report.Migrations) != 9 {
 		t.Fatal(report, err)
 	}
 	var group, id, attempt, manual int
@@ -118,7 +118,7 @@ func TestSQLiteTrackedLegacyPreservesDataAndNormalizesInstants(t *testing.T) {
 	if err = s.DB.QueryRow("SELECT COUNT(*) FROM migrations WHERE applied_at='2025-01-02T12:34:56+09:00'").Scan(&n); err != nil || n != 7 {
 		t.Fatal(n, err)
 	}
-	if err = s.DB.QueryRow("SELECT COUNT(*) FROM tw_migration_attempt").Scan(&n); err != nil || n != 1 {
+	if err = s.DB.QueryRow("SELECT COUNT(*) FROM tw_migration_attempt").Scan(&n); err != nil || n != 2 {
 		t.Fatal("predecessor attempts were invented", n, err)
 	}
 	if err = s.DB.QueryRow("SELECT COUNT(*) FROM users WHERE user_id='timeweaver'").Scan(&n); err != nil || n != 0 {
@@ -337,7 +337,7 @@ func TestSQLiteMigrationRollbackAndCrossStoreSerialization(t *testing.T) {
 			}
 		}
 		var n int
-		if err = a.DB.QueryRow("SELECT COUNT(*) FROM migrations").Scan(&n); err != nil || n != 1 {
+		if err = a.DB.QueryRow("SELECT COUNT(*) FROM migrations").Scan(&n); err != nil || n != 2 {
 			t.Fatal(n, err)
 		}
 	})

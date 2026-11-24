@@ -54,6 +54,10 @@ func sqliteColumns(ctx context.Context, q queryer, table string) ([]sqliteColumn
 }
 
 func inspectSQLiteCritical(ctx context.Context, q queryer) (SchemaReport, error) {
+	return inspectSQLiteSchema(ctx, q, true)
+}
+
+func inspectSQLiteSchema(ctx context.Context, q queryer, current bool) (SchemaReport, error) {
 	result := SchemaReport{ReadOnly: true, Issues: []SchemaIssue{}, Repaired: []string{}}
 	names := make([]string, 0, len(sqliteRequiredColumns))
 	for name := range sqliteRequiredColumns {
@@ -61,6 +65,9 @@ func inspectSQLiteCritical(ctx context.Context, q queryer) (SchemaReport, error)
 	}
 	sort.Strings(names)
 	reference, err := sqliteReference()
+	if current {
+		reference, err = sqliteCurrentReference()
+	}
 	if err != nil {
 		return result, dbError("load SQLite schema reference", err)
 	}

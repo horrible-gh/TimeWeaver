@@ -118,6 +118,12 @@ func TestMySQLScheduleTaskScopeAndLifecycle(t *testing.T) {
 	if _, err = fixtureExec(t, f.db, "UPDATE devices SET agent_capabilities='housekeep_recursive_v1' WHERE group_id=7"); err != nil {
 		t.Fatal(err)
 	}
+	hk.DeleteEmpty = true
+	_, err = f.dashboard.SaveTask(ctx, p.token, p.csrf, hk, true)
+	expectCode(t, err, "agent_upgrade_required")
+	if _, err = fixtureExec(t, f.db, "UPDATE devices SET agent_capabilities='housekeep_recursive_v1,housekeep_delete_empty_dirs_v1' WHERE group_id=7"); err != nil {
+		t.Fatal(err)
+	}
 	hkid, err := f.dashboard.SaveTask(ctx, p.token, p.csrf, hk, true)
 	if err != nil {
 		t.Fatal(err)
@@ -130,6 +136,20 @@ func TestMySQLScheduleTaskScopeAndLifecycle(t *testing.T) {
 	raw, _ := json.Marshal(snapshot.Data)
 	if !strings.Contains(string(raw), id) || !strings.Contains(string(raw), "housekeep_recursive_v1") && !strings.Contains(string(raw), `"house_keep_recursive":true`) {
 		t.Fatal("created task absent from snapshot", string(raw))
+	}
+	if !strings.Contains(string(raw), `"house_keep_delete_empty_dirs":true`) {
+		t.Fatal("empty directory option absent from snapshot", string(raw))
+	}
+	var enabled bool
+	if err = fixtureRow(t, f.db, "SELECT house_keep_delete_empty_dirs FROM task_detail WHERE detail_id=UNHEX(REPLACE(?,'-',''))", hkid).Scan(&enabled); err != nil || !enabled {
+		t.Fatal("empty-directory option not persisted", enabled, err)
+	}
+	hk.ID, hk.DeleteEmpty = hkid, false
+	if _, err = f.dashboard.SaveTask(ctx, p.token, p.csrf, hk, false); err != nil {
+		t.Fatal(err)
+	}
+	if err = fixtureRow(t, f.db, "SELECT house_keep_delete_empty_dirs FROM task_detail WHERE detail_id=UNHEX(REPLACE(?,'-',''))", hkid).Scan(&enabled); err != nil || enabled {
+		t.Fatal("empty-directory option could not be disabled", enabled, err)
 	}
 	if err = f.dashboard.DeleteTask(ctx, p.token, p.csrf, hkid); err != nil {
 		t.Fatal(err)

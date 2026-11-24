@@ -28,6 +28,13 @@ type sqliteIndex struct {
 }
 
 var sqliteReference = sync.OnceValues(func() (map[string]sqliteShape, error) {
+	return loadSQLiteReference(false)
+})
+var sqliteCurrentReference = sync.OnceValues(func() (map[string]sqliteShape, error) {
+	return loadSQLiteReference(true)
+})
+
+func loadSQLiteReference(current bool) (map[string]sqliteShape, error) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		return nil, err
@@ -41,6 +48,22 @@ var sqliteReference = sync.OnceValues(func() (map[string]sqliteShape, error) {
 	if _, err = db.Exec(string(ddl)); err != nil {
 		return nil, err
 	}
+	if current {
+		catalog, err := Migrations("sqlite")
+		if err != nil {
+			return nil, err
+		}
+		for _, migration := range catalog {
+			if migration.Name == sqliteFoundation {
+				continue
+			}
+			for _, statement := range migration.Statements {
+				if _, err = db.Exec(statement); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 	out := map[string]sqliteShape{}
 	for name := range sqliteRequiredColumns {
 		shape, err := sqliteTableShape(context.Background(), db, name)
@@ -50,7 +73,7 @@ var sqliteReference = sync.OnceValues(func() (map[string]sqliteShape, error) {
 		out[name] = shape
 	}
 	return out, nil
-})
+}
 
 func sqliteTableShape(ctx context.Context, q queryer, table string) (sqliteShape, error) {
 	var s sqliteShape

@@ -5,5 +5,9 @@ export function recursiveEnabled(value) {
 }
 
 export function housekeepOptions(task) {
-  return { house_keep_recursive: task.task_type === "housekeep" && recursiveEnabled(task.house_keep_recursive) };
+  const enabled = task.task_type === "housekeep";
+  return {
+    house_keep_recursive: enabled && recursiveEnabled(task.house_keep_recursive),
+    house_keep_delete_empty_dirs: enabled && recursiveEnabled(task.house_keep_delete_empty_dirs),
+  };
 }

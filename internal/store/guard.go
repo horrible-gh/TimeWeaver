@@ -68,6 +68,13 @@ func inspectCritical(ctx context.Context, q queryer) (SchemaReport, error) {
 			result.Issues = append(result.Issues, SchemaIssue{Target: rule.table + "." + rule.column, Missing: missing})
 		}
 	}
+	var optionColumns int
+	if err := q.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='task_detail' AND COLUMN_NAME='house_keep_delete_empty_dirs' AND DATA_TYPE='tinyint' AND IS_NULLABLE='NO' AND COLUMN_DEFAULT='0'").Scan(&optionColumns); err != nil {
+		return result, dbError("inspect housekeeping option", err)
+	}
+	if optionColumns != 1 {
+		result.Issues = append(result.Issues, SchemaIssue{Target: "task_detail.house_keep_delete_empty_dirs", Reason: "missing_or_unexpected_column"})
+	}
 	var name string
 	err := q.QueryRowContext(ctx, "SELECT group_name FROM `groups` WHERE group_id=0").Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && name != "Unknown" {
@@ -219,8 +226,14 @@ func (s *Store) RepairCriticalSchema(ctx context.Context) (SchemaReport, error) 
 		ddl += " COMMENT " + mysqlLiteral(column.comment)
 		changes = append(changes, change{rule.table + "." + rule.column, ddl})
 	}
-	if _, err = inspectCritical(ctx, conn); err != nil {
+	checked, err := inspectCritical(ctx, conn)
+	if err != nil {
 		return result, err
+	}
+	for _, issue := range checked.Issues {
+		if issue.Target == "task_detail.house_keep_delete_empty_dirs" {
+			return checked, errors.New("unexpected housekeeping option schema; manual review required")
+		}
 	}
 	for _, c := range changes {
 		if _, err = conn.ExecContext(ctx, c.sql); err != nil {

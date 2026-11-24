@@ -120,8 +120,8 @@ func (s *Store) applySQLite(ctx context.Context, catalog []Migration) (Migration
 		if err = checkSQLiteForeignKeys(ctx, tx); err != nil {
 			return report, err
 		}
-		if m.Name == sqliteFoundation {
-			checked, checkErr := inspectSQLiteCritical(ctx, tx)
+		if m.Name == sqliteFoundation || m.Name == "go_sqlite_002.sql" {
+			checked, checkErr := inspectSQLiteSchema(ctx, tx, m.Name != sqliteFoundation)
 			if checkErr != nil {
 				return report, checkErr
 			}

@@ -46,7 +46,7 @@ func TestReadOnlySQLiteNeverCreatesAndCannotWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.HistoryExists || report.Pending != 1 || !report.WriteSupported || !report.ReadOnly {
+	if report.HistoryExists || report.Pending != 2 || !report.WriteSupported || !report.ReadOnly {
 		t.Fatal(report)
 	}
 	if _, err = ro.DB.Exec("DELETE FROM preserved"); err == nil {
@@ -73,7 +73,7 @@ func TestSQLiteFreshMigration(t *testing.T) {
 		t.Fatal(r, err)
 	}
 	var count int
-	if err = s.DB.QueryRow("SELECT COUNT(*) FROM migrations").Scan(&count); err != nil || count != 1 {
+	if err = s.DB.QueryRow("SELECT COUNT(*) FROM migrations").Scan(&count); err != nil || count != 2 {
 		t.Fatal("fresh migration invented predecessor history", count, err)
 	}
 	var password string
@@ -174,7 +174,7 @@ func TestMySQLFullMigrationAndNoReplay(t *testing.T) {
 	s := mysqlTestStore(t)
 	ctx := context.Background()
 	before, err := s.Status(ctx)
-	if err != nil || before.Pending != 31 || before.HistoryExists {
+	if err != nil || before.Pending != 32 || before.HistoryExists {
 		t.Fatal(before, err)
 	}
 	r, err := s.Migrate(ctx)
@@ -193,7 +193,7 @@ func TestMySQLFullMigrationAndNoReplay(t *testing.T) {
 		t.Fatal(name, err)
 	}
 	var count int
-	if err = s.DB.QueryRow("SELECT COUNT(*) FROM tw_migration_attempt WHERE state='applied'").Scan(&count); err != nil || count != 31 {
+	if err = s.DB.QueryRow("SELECT COUNT(*) FROM tw_migration_attempt WHERE state='applied'").Scan(&count); err != nil || count != 32 {
 		t.Fatal(count, err)
 	}
 }

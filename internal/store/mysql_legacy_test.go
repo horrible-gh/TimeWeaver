@@ -68,7 +68,7 @@ func mysqlLegacyStatus(t *testing.T, r MigrationReport, name string) MigrationSt
 
 func TestMySQLLegacyCatalogHasExactHistoricalBytes(t *testing.T) {
 	current, legacy := mysqlLegacyCatalogs(t)
-	if len(current) != 31 || len(legacy) != 13 {
+	if len(current) != 32 || len(legacy) != 13 {
 		t.Fatalf("executable/historical inventory changed: %d/%d", len(current), len(legacy))
 	}
 	seen := map[string]bool{}
@@ -344,7 +344,7 @@ func TestMySQLLegacyLiveFreshDatabaseDoesNotRecordPredecessors(t *testing.T) {
 	s := mysqlTestStore(t)
 	ctx := context.Background()
 	r, err := s.Migrate(ctx)
-	if err != nil || r.Blocked || r.Pending != 0 || len(r.Migrations) != 31 {
+	if err != nil || r.Blocked || r.Pending != 0 || len(r.Migrations) != 32 {
 		t.Fatal(r, err)
 	}
 	for _, table := range []string{"migrations", "tw_migration_attempt"} {
@@ -366,7 +366,7 @@ func TestMySQLLegacyLiveFreshDatabaseDoesNotRecordPredecessors(t *testing.T) {
 		}
 		err = rows.Err()
 		rows.Close()
-		if err != nil || count != 31 {
+		if err != nil || count != 32 {
 			t.Fatalf("fresh %s inventory: count=%d error=%v", table, count, err)
 		}
 	}
@@ -384,7 +384,7 @@ func TestMySQLLegacyLiveHistoryPreservedAcrossStatusAndMigrate(t *testing.T) {
 	}{{"status", s.Status}, {"migrate", s.Migrate}, {"repeat_migrate", s.Migrate}} {
 		t.Run(operation.name, func(t *testing.T) {
 			r, err := operation.run(ctx)
-			if err != nil || r.Blocked || r.Pending != 0 || len(r.Unknown) != 0 || len(r.Migrations) != 44 {
+			if err != nil || r.Blocked || r.Pending != 0 || len(r.Unknown) != 0 || len(r.Migrations) != 45 {
 				t.Fatal("complete legacy installation was blocked", r, err)
 			}
 			for name := range historicalMySQLInventory {
@@ -418,7 +418,7 @@ func TestMySQLLegacyLiveHistoryPreservedAcrossStatusAndMigrate(t *testing.T) {
 		t.Fatal("historical rows concealed a current pending migration", r, err)
 	}
 	r, err = s.Migrate(ctx)
-	if err != nil || r.Blocked || r.Pending != 0 || len(r.Unknown) != 0 || len(r.Migrations) != 44 {
+	if err != nil || r.Blocked || r.Pending != 0 || len(r.Unknown) != 0 || len(r.Migrations) != 45 {
 		t.Fatal("ordinary current migration did not complete", r, err)
 	}
 	if exists, err := tableExists(ctx, s.DB, "mysql", "execution_running"); err != nil || !exists {

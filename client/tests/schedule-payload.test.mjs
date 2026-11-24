@@ -66,3 +66,11 @@ test('new task inherits the exact filtered schedule, never the first editable ro
  assert.equal(options.find(s=>s.id==='251').label,'A / same (#251)');
  assert.equal(options.find(s=>s.id==='99').label,'empty');
 });
+
+test("empty-directory deletion survives housekeeping edits but never a type change",()=>{
+ const original={task_type:'housekeep',destination_path:'/tmp/fixture',house_keep_days:0,house_keep_delete_empty_dirs:true};
+ assert.equal(taskTypePayload(original).house_keep_delete_empty_dirs,true);
+ assert.equal(taskTypePayload(original).house_keep_days,0);
+ for(const kind of ['copy','archive','command']) assert.equal(taskTypePayload({...original,task_type:kind}).house_keep_delete_empty_dirs,false);
+ assert.equal(taskTypePayload({...original,...resetTaskType('housekeep')}).house_keep_delete_empty_dirs,false);
+});

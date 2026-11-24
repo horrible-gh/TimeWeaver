@@ -158,6 +158,7 @@ type TaskInput struct {
 	DestinationDateFormat *string  `json:"destination_date_format"`
 	KeepDays              *int64   `json:"house_keep_days"`
 	Recursive             bool     `json:"house_keep_recursive"`
+	DeleteEmpty           bool     `json:"house_keep_delete_empty_dirs"`
 	Creator               string   `json:"creator"`
 	Modifier              string   `json:"modifier"`
 }
@@ -229,6 +230,7 @@ func (in *TaskInput) normalize(create bool) error {
 	}
 	if in.Type != "housekeep" {
 		in.Recursive = false
+		in.DeleteEmpty = false
 	}
 	return nil
 }

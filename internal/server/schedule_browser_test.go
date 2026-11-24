@@ -27,7 +27,7 @@ func TestBrowserSchedulesFlow(t *testing.T) {
 	if _, err := fixtureExec(t, f.db, "UPDATE schedule_group SET group_id=0 WHERE schedule_id=?", legacy); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixtureExec(t, f.db, "UPDATE devices SET agent_capabilities='housekeep_recursive_v1' WHERE group_id=7"); err != nil {
+	if _, err := fixtureExec(t, f.db, "UPDATE devices SET agent_capabilities='housekeep_recursive_v1,housekeep_delete_empty_dirs_v1' WHERE group_id=7"); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()

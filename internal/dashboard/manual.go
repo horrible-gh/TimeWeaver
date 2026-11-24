@@ -111,13 +111,14 @@ func (s *Service) requireRunnableTarget(ctx context.Context, tx *sql.Tx, v manua
 }
 
 type manualDetail struct {
-	id         []byte
-	schedule   int64
-	status     string
-	deleted    sql.NullTime
-	definition []byte
-	taskType   sql.NullString
-	recursive  sql.NullBool
+	id          []byte
+	schedule    int64
+	status      string
+	deleted     sql.NullTime
+	definition  []byte
+	taskType    sql.NullString
+	recursive   sql.NullBool
+	deleteEmpty sql.NullBool
 }
 
 func (d manualDetail) runnable(target manualTarget) error {
@@ -127,18 +128,18 @@ func (d manualDetail) runnable(target manualTarget) error {
 	if len(d.definition) != 16 {
 		return fail(409, "task_incomplete")
 	}
-	if d.taskType.String == "housekeep" && d.recursive.Bool && !recursiveCap(target.capabilities) {
+	if d.taskType.String == "housekeep" && ((d.recursive.Bool && !recursiveCap(target.capabilities)) || (d.deleteEmpty.Bool && !deleteEmptyCap(target.capabilities))) {
 		return fail(409, "agent_upgrade_required")
 	}
 	return nil
 }
 
-const manualDetailSelect = `SELECT sd.detail_id,sd.schedule_id,sd.status,sd.deleted_at,td.detail_id,td.task_type,td.house_keep_recursive
+const manualDetailSelect = `SELECT sd.detail_id,sd.schedule_id,sd.status,sd.deleted_at,td.detail_id,td.task_type,td.house_keep_recursive,td.house_keep_delete_empty_dirs
  FROM schedule_detail sd LEFT JOIN task_detail td ON td.detail_id=sd.detail_id`
 
 func scanManualDetail(row interface{ Scan(...any) error }) (manualDetail, error) {
 	var d manualDetail
-	err := row.Scan(&d.id, &d.schedule, &d.status, store.ScanNullTime(&d.deleted), &d.definition, &d.taskType, &d.recursive)
+	err := row.Scan(&d.id, &d.schedule, &d.status, store.ScanNullTime(&d.deleted), &d.definition, &d.taskType, &d.recursive, &d.deleteEmpty)
 	return d, err
 }
 
@@ -374,7 +375,7 @@ func (s *Service) ManualRuns(ctx context.Context, token string) ([]ManualRun, er
 			return err
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT me.manual_id,sd.schedule_id,sd.detail_id,COALESCE(sg.name,''),COALESCE(sd.schedule_name,''),
- COALESCE(me.is_immediate,0),me.schedule_datetime,me.status,sg.group_id,d.group_id,sg.status,d.status,g.status,dg.status,sd.status,sd.deleted_at,td.detail_id,td.task_type,td.house_keep_recursive,d.agent_capabilities
+ COALESCE(me.is_immediate,0),me.schedule_datetime,me.status,sg.group_id,d.group_id,sg.status,d.status,g.status,dg.status,sd.status,sd.deleted_at,td.detail_id,td.task_type,td.house_keep_recursive,td.house_keep_delete_empty_dirs,d.agent_capabilities
  FROM manual_execution me JOIN schedule_detail sd ON sd.detail_id=me.detail_id
  JOIN schedule_group sg ON sg.schedule_id=sd.schedule_id JOIN devices d ON d.device_id=sg.target_device
  JOIN `+"`groups`"+` g ON g.group_id=sg.group_id JOIN `+"`groups`"+` dg ON dg.group_id=d.group_id
@@ -390,7 +391,7 @@ func (s *Service) ManualRuns(ctx context.Context, token string) ([]ManualRun, er
 			var target manualTarget
 			var due sql.NullTime
 			var groupStatus, deviceGroupStatus string
-			if err = rows.Scan(&v.ID, &v.ScheduleID, &d.id, &v.Name, &v.TaskName, &v.Immediate, store.ScanNullTime(&due), &v.Status, &target.group, &target.deviceGroup, &target.status, &target.deviceStatus, &groupStatus, &deviceGroupStatus, &d.status, store.ScanNullTime(&d.deleted), &d.definition, &d.taskType, &d.recursive, &target.capabilities); err != nil {
+			if err = rows.Scan(&v.ID, &v.ScheduleID, &d.id, &v.Name, &v.TaskName, &v.Immediate, store.ScanNullTime(&due), &v.Status, &target.group, &target.deviceGroup, &target.status, &target.deviceStatus, &groupStatus, &deviceGroupStatus, &d.status, store.ScanNullTime(&d.deleted), &d.definition, &d.taskType, &d.recursive, &d.deleteEmpty, &target.capabilities); err != nil {
 				return dbError(err)
 			}
 			v.DetailID, v.Due = uuidString(d.id), nullableDate(due)

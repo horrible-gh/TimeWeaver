@@ -60,3 +60,21 @@ The legacy Python agent does not implement the new feature. Keep the checkbox
 off for that agent, or migrate it to the updated Go agent. Existing non-recursive
 work remains compatible. No schema-version bump or database credentials on the
 agent are required.
+
+## Delete empty directories (unified Go server)
+
+The separate **Delete empty directories** checkbox defaults to off, including
+for existing tasks. With subfolders disabled, remove only empty direct child
+directories. With subfolders enabled, remove empty descendants bottom-up after
+expired files have been cleaned. Never remove the configured root, nonempty
+directories, symbolic links or Windows junctions/reparse points. Directory age
+is not considered; retention applies to files. Zero days with the option
+selected performs directory-only cleanup. Permission-denied child directories
+are skipped with warnings. Other root/I/O errors remain failures.
+
+The Go server setup adds `house_keep_delete_empty_dirs` with default false
+using `timeweaver_server_016.sql` (MySQL/MariaDB) or `go_sqlite_002.sql`
+(SQLite). Update both the unified server and agent. Saving or executing an
+opted-in task requires the agent capability `housekeep_delete_empty_dirs_v1`.
+The flag is included in the snapshot revision/ETag when enabled. Old agents
+and unchanged tasks retain the original behavior. No re-enrollment is needed.

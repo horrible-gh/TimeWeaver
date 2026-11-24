@@ -131,15 +131,23 @@
           </select>
         </div>
 
-        <div v-if="formControl.task_type === 'housekeep'" class="field half">
-          <label for="task-house_keep_days">{{ $t('task_retention_days') }}</label>
-          <input id="task-house_keep_days" type="number" v-model="formControl.house_keep_days" :placeholder="$t('task_retention_days') + $t('msg_enter')" min="0" :max="sessionMode ? 2147483647 : 999" aria-required="true" @input="!sessionMode && (formControl.house_keep_days = $event.target.value.slice(0, 3))" />
-        </div>
-        <div v-if="formControl.task_type === 'housekeep'" class="field half task-recursive-field">
-          <label for="task-recursive" class="housekeep-recursive">
-            <input id="task-recursive" type="checkbox" v-model="formControl.house_keep_recursive" />
-            <span>{{ $t('task_house_keep_recursive') }}</span>
-          </label>
+        <div v-if="formControl.task_type === 'housekeep'" class="task-housekeep-options" :class="{ 'task-housekeep-legacy': !sessionMode }">
+          <div class="field">
+            <label for="task-house_keep_days">{{ $t('task_retention_days') }}</label>
+            <input id="task-house_keep_days" type="number" v-model="formControl.house_keep_days" :placeholder="$t('task_retention_days') + $t('msg_enter')" min="0" :max="sessionMode ? 2147483647 : 999" aria-required="true" @input="!sessionMode && (formControl.house_keep_days = $event.target.value.slice(0, 3))" />
+          </div>
+          <div class="field task-recursive-field">
+            <label for="task-recursive" class="housekeep-recursive">
+              <input id="task-recursive" type="checkbox" v-model="formControl.house_keep_recursive" />
+              <span>{{ $t('task_house_keep_recursive') }}</span>
+            </label>
+          </div>
+          <div v-if="sessionMode" class="field task-recursive-field">
+            <label for="task-delete-empty" class="housekeep-recursive">
+              <input id="task-delete-empty" type="checkbox" v-model="formControl.house_keep_delete_empty_dirs" />
+              <span>{{ $t('task_house_keep_delete_empty_dirs') }}</span>
+            </label>
+          </div>
         </div>
 
         <div class="task-runtime" :class="{ 'task-runtime-legacy': !sessionMode }">
@@ -270,6 +278,7 @@ const formControl = ref({
   creator: schedule_id,
   modifier:schedule_id,
   house_keep_recursive: false,
+  house_keep_delete_empty_dirs: false,
 });
 const scheduleList = ref([]);
 const editableSchedules = computed(() => scheduleList.value.filter(s => s.can_edit));
@@ -344,7 +353,7 @@ const openAddScheduleModal = () => {
   errorMessage.value = '';
   isEditMode.value = false;
   formControl.value = { ...cronDefaults(), schedule_id: selectedTaskScheduleId(selectedSchedule.value, availableSchedules.value), task_name: '', command: '', status: 'active', task_type: "command",
-    house_keep_recursive: false, archive_type: null, error_on_missing_source: '1', is_error_stop: '0', sequence: 0, retry_count: 0, creator: userId.value, modifier: userId.value };
+    house_keep_recursive: false, house_keep_delete_empty_dirs: false, archive_type: null, error_on_missing_source: '1', is_error_stop: '0', sequence: 0, retry_count: 0, creator: userId.value, modifier: userId.value };
   isModalOpen.value = true;
 };
 
@@ -376,6 +385,7 @@ const saveTasks = async () => {
   try {
     Object.assign(formControl.value, housekeepOptions(formControl.value));
     const payload = sessionMode ? taskPayload(formControl.value, isEditMode.value) : { ...formControl.value, ...taskTypePayload(formControl.value) };
+    if (!sessionMode) delete payload.house_keep_delete_empty_dirs;
     if (isEditMode.value) await putRequest('/dashboard/tasks/update_task', payload, 'json');
     else {
       await postRequest('/dashboard/tasks/insert_task', payload, 'json');
@@ -521,6 +531,15 @@ const statusBadgeClass = (status) => ({
 .task-runtime-legacy {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+.task-housekeep-options {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.task-housekeep-legacy {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .task-recursive-field {
   display: flex;
   align-items: flex-end;
@@ -568,7 +587,7 @@ const statusBadgeClass = (status) => ({
   line-height: 1.4;
 }
 @media (max-width: 480px) {
-  .task-runtime, .task-runtime-legacy {
+  .task-runtime, .task-runtime-legacy, .task-housekeep-options, .task-housekeep-legacy {
     grid-template-columns: 1fr;
   }
 }

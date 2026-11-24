@@ -32,6 +32,11 @@ var sqliteAssets embed.FS
 //go:embed mysql/legacy/*.sql
 var mysqlLegacyAssets embed.FS
 
+// New Go-owned MySQL migrations must not mutate the frozen Python catalog.
+//
+//go:embed mysql/migrations/*.sql
+var mysqlNativeAssets embed.FS
+
 type Migration struct {
 	Name       string   `json:"name"`
 	SHA256     string   `json:"sha256"`
@@ -57,7 +62,22 @@ func Migrations(dialect string) ([]Migration, error) {
 	if dialect == "sqlite" {
 		return readMigrationCatalog(sqliteAssets, "sqlite/migrations/*.sql", dialect)
 	}
-	return readMigrationCatalog(assets, "sql/migration/"+dialect+"/*.sql", dialect)
+	legacy, err := readMigrationCatalog(assets, "sql/migration/"+dialect+"/*.sql", dialect)
+	if err != nil {
+		return nil, err
+	}
+	native, err := readMigrationCatalog(mysqlNativeAssets, "mysql/migrations/*.sql", dialect)
+	if err != nil {
+		return nil, err
+	}
+	all := append(legacy, native...)
+	sort.Slice(all, func(i, j int) bool { return all[i].Name < all[j].Name })
+	for i := 1; i < len(all); i++ {
+		if all[i-1].Name == all[i].Name {
+			return nil, errors.New("duplicate migration name")
+		}
+	}
+	return all, nil
 }
 
 func legacySQLiteMigrations() ([]Migration, error) {

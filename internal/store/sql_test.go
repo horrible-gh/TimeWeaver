@@ -43,7 +43,7 @@ func TestFrozenSQLAssets(t *testing.T) {
 	}
 }
 func TestCatalogAndQueries(t *testing.T) {
-	for dialect, count := range map[string]int{"mysql": 31, "sqlite": 1} {
+	for dialect, count := range map[string]int{"mysql": 32, "sqlite": 2} {
 		files, err := Migrations(dialect)
 		if err != nil {
 			t.Fatal(err)

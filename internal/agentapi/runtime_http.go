@@ -107,8 +107,8 @@ func (h *RuntimeHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Must precede the matching ETag path: a downgraded agent cannot reuse a
 	// previously cached plan containing recursive housekeeping.
-	if needsRecursive(result.Data) && !supportsRecursive(cap) {
-		writeFailure(w, &APIError{409, "agent_upgrade_required", "Update TimeWeaver-Agent to use recursive housekeeping", nil})
+	if (needsRecursive(result.Data) && !supportsRecursive(cap)) || (needsDeleteEmpty(result.Data) && !supportsDeleteEmpty(cap)) {
+		writeFailure(w, &APIError{409, "agent_upgrade_required", "Update TimeWeaver-Agent to use the configured housekeeping options", nil})
 		return
 	}
 	w.Header().Set("ETag", result.ETag)

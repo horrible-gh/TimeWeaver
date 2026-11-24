@@ -17,6 +17,7 @@ import (
 )
 
 const recursiveHousekeep = "housekeep_recursive_v1"
+const deleteEmptyHousekeep = "housekeep_delete_empty_dirs_v1"
 
 type CronData struct {
 	Year      string `json:"year"`
@@ -39,6 +40,7 @@ type SnapshotTask struct {
 	DestinationDateFormat *string `json:"destination_date_format"`
 	HouseKeepDays         *int64  `json:"house_keep_days"`
 	HouseKeepRecursive    bool    `json:"house_keep_recursive"`
+	HouseKeepDeleteEmpty  bool    `json:"house_keep_delete_empty_dirs,omitempty"`
 }
 type SnapshotDetail struct {
 	ID           string       `json:"detail_id"`
@@ -122,9 +124,13 @@ func manualRunDue(immediate bool, scheduled, now time.Time) bool {
 	return immediate || !scheduled.IsZero() && !scheduled.After(now)
 }
 
-func supportsRecursive(value string) bool {
+func supportsRecursive(value string) bool { return supportsCapability(value, recursiveHousekeep) }
+func supportsDeleteEmpty(value string) bool {
+	return supportsCapability(value, deleteEmptyHousekeep)
+}
+func supportsCapability(value, capability string) bool {
 	for _, v := range strings.Split(value, ",") {
-		if strings.TrimSpace(v) == recursiveHousekeep {
+		if strings.TrimSpace(v) == capability {
 			return true
 		}
 	}
@@ -161,6 +167,7 @@ func normalizeTask(t SnapshotTask) (SnapshotTask, error) {
 	}
 	if t.Type != "housekeep" {
 		t.HouseKeepRecursive = false
+		t.HouseKeepDeleteEmpty = false
 	}
 	return t, nil
 }
@@ -168,6 +175,16 @@ func needsRecursive(data SnapshotData) bool {
 	for _, group := range data.Schedules {
 		for _, detail := range group.Details {
 			if detail.Task.Type == "housekeep" && detail.Task.HouseKeepRecursive {
+				return true
+			}
+		}
+	}
+	return false
+}
+func needsDeleteEmpty(data SnapshotData) bool {
+	for _, group := range data.Schedules {
+		for _, detail := range group.Details {
+			if detail.Task.Type == "housekeep" && detail.Task.HouseKeepDeleteEmpty {
 				return true
 			}
 		}

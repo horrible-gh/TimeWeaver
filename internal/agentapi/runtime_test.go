@@ -244,6 +244,26 @@ func TestMySQLRuntimeHTTPBoundaries(t *testing.T) {
 	if w.Code != 304 {
 		t.Fatal(w.Code, w.Body)
 	}
+	if _, err = f.runtime.db.DB.Exec(`UPDATE task_detail SET house_keep_delete_empty_dirs=1`); err != nil {
+		t.Fatal(err)
+	}
+	next, err := f.runtime.Snapshot(ctx, f.principal)
+	if err != nil || next.ETag == result.ETag {
+		t.Fatal("empty directory option must change snapshot revision", err)
+	}
+	w = request("GET", "/snapshot", "", map[string]string{"If-None-Match": next.ETag, "X-TW-Agent-Capabilities": recursiveHousekeep})
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "agent_upgrade_required") {
+		t.Fatal("old agent was permitted to ignore empty-directory removal", w.Code, w.Body)
+	}
+	both := recursiveHousekeep + "," + deleteEmptyHousekeep
+	w = request("GET", "/snapshot", "", map[string]string{"X-TW-Agent-Capabilities": both})
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"house_keep_delete_empty_dirs":true`) {
+		t.Fatal("new flag missing from snapshot", w.Code, w.Body)
+	}
+	w = request("GET", "/snapshot", "", map[string]string{"If-None-Match": next.ETag, "X-TW-Agent-Capabilities": both})
+	if w.Code != 304 {
+		t.Fatal("conditional snapshot with new capability", w.Code, w.Body)
+	}
 	if _, err = f.runtime.db.DB.Exec(`DELETE FROM task_detail`); err != nil {
 		t.Fatal(err)
 	}
