@@ -107,6 +107,7 @@ func TestSQLiteDashboardFlows(t *testing.T) {
 		run  func(*testing.T)
 	}{
 		{"schedule-task-lifecycle", TestMySQLScheduleTaskScopeAndLifecycle},
+		{"legacy-cross-group-task-save", TestMySQLLegacyCrossGroupTaskSave},
 		{"schedule-task-atomicity-history", TestMySQLScheduleTaskAtomicityAndHistory},
 		{"pause-offline-device", TestMySQLScheduleCanBePausedWithInactiveDevice},
 		{"schedule-task-http", TestMySQLScheduleTaskHTTP},

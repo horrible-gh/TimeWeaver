@@ -90,10 +90,10 @@
 
         <div class="field half">
           <label>{{ $t('task_name') }}</label>
-          <input id="task-task_name" type="text" v-model="formControl.task_name" :placeholder="$t('task_command') + $t('msg_enter')" />
+          <input id="task-task_name" type="text" v-model="formControl.task_name" :placeholder="$t('task_name') + $t('msg_enter')" />
         </div>
 
-        <div class="field half">
+        <div v-if="!sessionMode || formControl.task_type === 'command'" class="field half">
           <label>{{ $t('task_command') }}</label>
           <input id="task-command" type="text" v-model="formControl.command" :placeholder="$t('task_command') + $t('msg_enter')" />
         </div>
@@ -129,17 +129,17 @@
           <input id="task-sequence" type="number" v-model="formControl.sequence" :placeholder="$t('task_sequence') + $t('msg_enter')" min="0" :max="sessionMode ? 2147483647 : 999" @input="!sessionMode && (formControl.sequence = $event.target.value.slice(0, 3))" />
         </div>
 
-        <div class="field full">
+        <div v-if="!sessionMode || ['copy','archive'].includes(formControl.task_type)" class="field full">
           <label>{{ $t('task_source_path') }}</label>
-          <input type="text" v-model="formControl.source_path" :placeholder="$t('task_source_path') + $t('msg_enter')" />
+          <input id="task-source_path" type="text" v-model="formControl.source_path" :placeholder="$t('task_source_path') + $t('msg_enter')" />
         </div>
 
-        <div class="field full">
+        <div v-if="!sessionMode || formControl.task_type !== 'command'" class="field full">
           <label>{{ $t('task_destination_path') }}</label>
           <input id="task-destination_path" type="text" v-model="formControl.destination_path" :placeholder="$t('task_destination_path') + $t('msg_enter')" />
         </div>
 
-        <div class="field half">
+        <div v-if="!sessionMode || formControl.task_type === 'housekeep'" class="field half">
           <label>{{ $t('task_house_keep_days') }}</label>
           <input id="task-house_keep_days" type="number" v-model="formControl.house_keep_days" :placeholder="$t('task_house_keep_days') + $t('msg_enter')" min="0" max="999" @input="formControl.house_keep_days = $event.target.value.slice(0, 3)" />
         </div>

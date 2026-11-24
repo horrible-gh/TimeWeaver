@@ -170,8 +170,14 @@ func (s *Service) SaveTask(ctx context.Context, token, csrf string, in TaskInput
 		if err = s.requireActiveGroup(ctx, tx, parent.group); err != nil {
 			return err
 		}
+		// A task inherits the existing schedule's target. Historical schedules may
+		// have a different group from that device (especially group zero). Both
+		// editor grants were checked by lockSchedule; do not impose a new target
+		// assignment rule on a task that cannot change that assignment.
 		if parent.deviceGroup != parent.group {
-			return fail(422, "device_group_mismatch")
+			if err = s.requireActiveGroup(ctx, tx, parent.deviceGroup); err != nil {
+				return err
+			}
 		}
 		if in.Recursive && !recursiveCap(parent.capabilities) {
 			return fail(409, "agent_upgrade_required")

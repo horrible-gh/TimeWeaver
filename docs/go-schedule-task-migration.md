@@ -25,11 +25,15 @@ parents in ID order and recheck the detail's parent after locking it. User role
 or membership revocation is ordered against mutations by the existing user lock.
 Viewer and operator roles cannot edit executable definitions.
 
-Schedule targets must belong to the selected group. New or activated definitions
-require an active target device and group. Disabling an existing schedule with
-an unchanged target remains possible after its device/group was disabled. That
-exception does not permit retargeting or activation. Existing mismatched legacy
-rows are not silently reassigned or repaired.
+New or changed schedule assignments must use a target in the selected group.
+Existing legacy assignments, including group zero (Unknown) schedules targeting
+named-group devices, can be edited without changing the group/device pair.
+Both groups still require editor rights and must be active for task writes and
+non-pausing schedule changes. Disabling a schedule with an unchanged target
+remains possible after the device or group was disabled. Existing assignments
+are not silently reassigned or repaired. Tasks inherit the existing schedule's
+target and are not rejected merely because that target belongs to another group.
+Recursive housekeeping still requires the target agent's declared capability.
 
 Seven cron fields follow the pinned agent's APScheduler contract, including
 Monday=0 and AND day semantics. Numeric fields, lists, ranges, aliases and steps

@@ -23,6 +23,13 @@ func TestBrowserSchedulesFlow(t *testing.T) {
 	}
 	f := deviceFixtureFor(t)
 	createSchedule(t, f, 8, "private-eight")
+	legacy := createSchedule(t, f, 7, "legacy-cross-group")
+	if _, err := fixtureExec(t, f.db, "UPDATE schedule_group SET group_id=0 WHERE schedule_id=?", legacy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixtureExec(t, f.db, "UPDATE devices SET agent_capabilities='housekeep_recursive_v1' WHERE group_id=7"); err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	ui, err := webui.Bundled(f.settings.Context)
 	if err != nil {

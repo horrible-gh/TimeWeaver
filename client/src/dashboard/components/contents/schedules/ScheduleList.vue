@@ -299,7 +299,9 @@ const editableGroups = computed(() => groupList.value.filter(g => (g.status === 
 const selectableDevices = computed(() => {
   if (!sessionMode) return deviceList.value;
   const items = devicesForGroup(deviceList.value, formControl.value.group_id).filter(d => d.can_edit);
-  const current = deviceList.value.find(d => d.can_edit && Number(d.device_id) === originalTarget.value && Number(d.group_id) === Number(formControl.value.group_id));
+  const current = Number(formControl.value.group_id) === originalGroup.value
+    ? deviceList.value.find(d => d.can_edit && Number(d.device_id) === originalTarget.value)
+    : null;
   if (isEditMode.value && current && !items.some(d => d.device_id === current.device_id)) items.push(current);
   return items;
 });

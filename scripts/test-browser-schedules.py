@@ -113,6 +113,48 @@ def main():
         page.goto(origin + '/dashboard/tasks')
         page.locator(f'tr[data-task="{tid}"]').get_by_role('button', name='Remove', exact=True).click()
         expect(page.locator(f'tr[data-task="{tid}"]')).to_have_count(0)
+        # Production Python schedules may belong to Unknown (group zero) while
+        # their agent belongs to a named group. Task creation must inherit that
+        # assignment, not ask the user to select a different execution device.
+        legacy = next(s for s in ctx.request.get(base + '/dashboard/tasks/get_schedule_groups').json()
+                      if s['name'] == 'legacy-cross-group')
+        assert legacy['group_id'] == 0 and legacy['can_edit']
+        page.get_by_role('button', name='Add', exact=True).click()
+        page.locator('#task-schedule').select_option(str(legacy['schedule_id']))
+        page.locator('#task-task_name').fill('legacy-housekeep')
+        page.locator('#task-type').select_option('housekeep')
+        expect(page.locator('#task-command')).to_have_count(0)
+        expect(page.locator('#task-source_path')).to_have_count(0)
+        page.locator('#task-destination_path').fill('/tmp/timeweaver-browser-fixture')
+        page.locator('#task-house_keep_days').fill('1')
+        page.locator('#task-recursive').check()
+        page.locator('#task-sequence').fill('20')
+        save()
+        hkrow = page.locator('tr[data-task]').filter(has=page.get_by_text('legacy-housekeep', exact=True))
+        expect(hkrow).to_be_visible()
+        hkid = hkrow.get_attribute('data-task')
+        hkrow.get_by_role('button', name='Edit', exact=True).click()
+        expect(page.locator('#task-schedule')).to_have_value(str(legacy['schedule_id']))
+        expect(page.locator('#task-destination_path')).to_have_value('/tmp/timeweaver-browser-fixture')
+        expect(page.locator('#task-recursive')).to_be_checked()
+        page.locator('#task-task_name').fill('legacy-housekeep-edited')
+        save()
+        hk = next(t for t in ctx.request.get(base + '/dashboard/tasks/get_tasks').json() if t['detail_id'] == hkid)
+        assert hk['task_name'] == 'legacy-housekeep-edited' and hk['house_keep_recursive']
+        assert hk['schedule_id'] == legacy['schedule_id'] and hk['sequence'] == 20
+        # The schedule edit form must also preserve the original target option.
+        page.goto(origin + '/dashboard/schedules')
+        expect(schedule_row('legacy-cross-group')).to_be_visible()
+        schedule_row('legacy-cross-group').get_by_role('button', name='Edit', exact=True).click()
+        expect(page.locator('#schedule-group')).to_have_value('0')
+        expect(page.locator('#schedule-device')).to_have_value(str(legacy['target_device']))
+        page.locator('#schedule-status').select_option('inactive')
+        save()
+        expect(schedule_row('legacy-cross-group')).to_contain_text('inactive')
+        current = next(s for s in ctx.request.get(base + '/dashboard/tasks/get_schedule_groups').json()
+                       if s['schedule_id'] == legacy['schedule_id'])
+        assert current['target_device'] == legacy['target_device'] and current['group_id'] == 0
+
         # Rows must not offer Edit before its reference options are ready.
         # Previously the group watcher cleared the saved target in this window,
         # so a status-only save incorrectly sent target_device:null.

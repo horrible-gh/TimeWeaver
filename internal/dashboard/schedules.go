@@ -184,18 +184,27 @@ func (s *Service) SaveSchedule(ctx context.Context, token, csrf string, in Sched
 		if !u.Can(deviceGroup, "editor") {
 			return fail(403, "forbidden")
 		}
-		if deviceGroup != in.GroupID {
+		// Preserve a legacy assignment when editing an existing schedule. New
+		// assignments still require matching groups, and both editor grants are
+		// required even when the original pair is retained.
+		unchangedTarget := !create && old.group == in.GroupID && old.device == in.DeviceID
+		if deviceGroup != in.GroupID && !unchangedTarget {
 			return fail(422, "device_group_mismatch")
 		}
 		// Pausing an existing schedule must remain possible after its device or
 		// group was disabled. This exception cannot move or activate anything.
-		pausing := !create && old.group == in.GroupID && old.device == in.DeviceID && in.Status == "inactive"
+		pausing := unchangedTarget && in.Status == "inactive"
 		if status != "active" && !pausing {
 			return fail(422, "device_inactive")
 		}
 		if !pausing {
 			if err = s.requireActiveGroup(ctx, tx, in.GroupID); err != nil {
 				return err
+			}
+			if deviceGroup != in.GroupID {
+				if err = s.requireActiveGroup(ctx, tx, deviceGroup); err != nil {
+					return err
+				}
 			}
 		}
 		if !create && (old.group != in.GroupID || old.device != in.DeviceID) {
