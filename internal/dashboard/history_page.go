@@ -13,10 +13,10 @@ import (
 
 type historyPageInput struct {
 	start, end, group, schedule, sort, direction string
-	page                                       int64
-	size                                       int
-	code                                       *int64
-	options                                    bool
+	page                                         int64
+	size                                         int
+	code                                         *int64
+	options                                      bool
 }
 
 func parseHistoryPage(v url.Values) (historyPageInput, error) {
