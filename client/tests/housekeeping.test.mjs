@@ -25,7 +25,7 @@ test("compact checkbox is conditional and new/edit/save paths normalize its stat
   assert.match(source,/task_type: "command",\s+house_keep_recursive: false/);
   assert.match(source,/housekeepOptions\(schedule\)/);
   assert.match(source,/housekeepOptions\(formControl.value\)/);
-  assert.match(source,/if \(type !== "housekeep"\) formControl.value.house_keep_recursive = false/);
+  assert.match(source,/Object\.assign\(formControl.value, resetTaskType\(type\)\)/);
 });
 test("all supported locales provide a short checkbox label",()=>{
   for(const locale of ["ko","en","ja"]) assert.equal(typeof messages[locale].task_house_keep_recursive,"string");

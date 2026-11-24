@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { schedulePayload, taskPayload, formBool, cronDefaults, scheduleError } from '../src/dashboard/utils/schedulePayload.mjs';
+import { schedulePayload, taskPayload, taskTypePayload, resetTaskType, formBool, cronDefaults, scheduleError } from '../src/dashboard/utils/schedulePayload.mjs';
 
 test('schedule writes strip display fields and actor claims and use typed IDs/booleans',()=>{
  const f={...cronDefaults(),name:'Test',group_id:'7',target_device:'8',schedule_id:12,status:'active',is_error_stop:'0',creator:'forged',modifier:'forged',device_name:'hidden',can_edit:true};
@@ -20,4 +20,33 @@ test('all new schedule errors have translations and server errors are not echoed
  assert.deepEqual(Object.keys(m.ko),Object.keys(m.en));assert.deepEqual(Object.keys(m.ja),Object.keys(m.en));
  assert.equal(scheduleError({response:{data:{detail:{code:'sql secret'}}}}),'access_failed');
  assert.equal(scheduleError({response:{data:{detail:{code:'task_in_use'}}}}),'schedule_error_task_in_use');
+});
+
+test('task writes contain only the selected type fields and retain relevant date formats',()=>{
+ const form={command:'echo {date}',archive_type:'zip',source_path:'/src/{date}',destination_path:'/dst/{date}',error_on_missing_source:'1',house_keep_days:'7',house_keep_recursive:true,date_format:'%Y%m%d',target_date_format:'%Y',destination_date_format:'%m'};
+ for (const type of ['command','copy','archive','housekeep']) {
+  const p=taskTypePayload({...form,task_type:type});
+  const file=type==='copy'||type==='archive', hk=type==='housekeep';
+  assert.equal(p.command,type==='command'?form.command:null);
+  assert.equal(p.archive_type,type==='archive'?'zip':null);
+  assert.equal(p.source_path,file?form.source_path:null);
+  assert.equal(p.destination_path,file||hk?form.destination_path:null);
+  assert.equal(p.error_on_missing_source,file);
+  assert.equal(p.house_keep_days,hk?7:null);
+  assert.equal(p.house_keep_recursive,hk);
+  assert.equal(p.date_format,form.date_format);
+  assert.equal(p.target_date_format,file?form.target_date_format:null);
+  assert.equal(p.destination_date_format,file||hk?form.destination_date_format:null);
+ }
+ assert.equal(taskTypePayload({...form,task_type:'copy',error_on_missing_source:'0'}).error_on_missing_source,false);
+});
+test('switching task type resets execution-specific fields without a destructive default',()=>{
+ const common={schedule_id:3,task_name:'task',sequence:20,retry_count:2,status:'inactive',detail_id:'keep'};
+ const old={...common,task_type:'copy',source_path:'/src',destination_path:'/dst',date_format:'%Y',house_keep_days:7,house_keep_recursive:true};
+ const form={...old,...resetTaskType('housekeep')};
+ for(const [k,v] of Object.entries(common))assert.equal(form[k],v);
+ const p=taskPayload(form,true);
+ assert.equal(p.destination_path,null);assert.equal(p.house_keep_days,null);assert.equal(p.house_keep_recursive,false);
+ assert.equal(p.source_path,null);assert.equal(p.date_format,null);
+ assert.equal(taskTypePayload(resetTaskType('archive')).archive_type,'zip');
 });

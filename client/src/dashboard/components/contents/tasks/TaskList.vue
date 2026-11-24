@@ -80,88 +80,84 @@
       @confirm="saveTasks"
     >
       <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
-    <div class="form-grid">
-
+      <div class="form-grid task-form">
         <div class="field full">
-          <label>{{ $t('schedule_name') }}</label>
+          <label for="task-schedule">{{ $t('schedule_name') }}</label>
           <select v-if="sessionMode" id="task-schedule" v-model="formControl.schedule_id"><option v-for="item in editableSchedules" :key="item.schedule_id" :value="item.schedule_id">{{ item.group_name }} / {{ item.name }}</option></select>
           <SearchableSelect v-else v-model="formControl.schedule_id" :items="scheduleList" label-key="name" value-key="schedule_id" :placeholder="$t('schedule_name') + $t('msg_enter')"/>
         </div>
 
         <div class="field half">
-          <label>{{ $t('task_name') }}</label>
-          <input id="task-task_name" type="text" v-model="formControl.task_name" :placeholder="$t('task_name') + $t('msg_enter')" />
+          <label for="task-task_name">{{ $t('task_name') }}</label>
+          <input id="task-task_name" type="text" v-model="formControl.task_name" :placeholder="$t('task_name') + $t('msg_enter')" aria-required="true" />
         </div>
-
-        <div v-if="!sessionMode || formControl.task_type === 'command'" class="field half">
-          <label>{{ $t('task_command') }}</label>
-          <input id="task-command" type="text" v-model="formControl.command" :placeholder="$t('task_command') + $t('msg_enter')" />
-        </div>
-
         <div class="field half">
-          <label>{{ $t('task_type') }}</label>
-          <select id="task-type" v-model="formControl.task_type">
+          <label for="task-type">{{ $t('task_type') }}</label>
+          <select id="task-type" :value="formControl.task_type" @change="changeTaskType($event.target.value)">
             <option value="command">{{ $t('task_type_command') }}</option>
-            <option value="archive">{{ $t('task_type_archive') }}</option>
             <option value="copy">{{ $t('task_type_copy') }}</option>
+            <option value="archive">{{ $t('task_type_archive') }}</option>
             <option value="housekeep">{{ $t('task_type_housekeep') }}</option>
           </select>
         </div>
 
+        <div v-if="formControl.task_type === 'command'" class="field full">
+          <label for="task-command">{{ $t('task_command') }}</label>
+          <input id="task-command" type="text" v-model="formControl.command" :placeholder="$t('task_command') + $t('msg_enter')" aria-required="true" />
+        </div>
+
+        <div v-if="fileTask" class="field full">
+          <label for="task-source_path">{{ $t('task_source_path') }}</label>
+          <input id="task-source_path" type="text" v-model="formControl.source_path" :placeholder="$t('task_source_path') + $t('msg_enter')" aria-required="true" />
+        </div>
+        <div v-if="fileTask || formControl.task_type === 'housekeep'" class="field full">
+          <label for="task-destination_path">{{ $t(formControl.task_type === 'housekeep' ? 'task_cleanup_path' : 'task_destination_path') }}</label>
+          <input id="task-destination_path" type="text" v-model="formControl.destination_path" :placeholder="$t(formControl.task_type === 'housekeep' ? 'task_cleanup_path' : 'task_destination_path') + $t('msg_enter')" aria-required="true" />
+        </div>
         <div v-if="formControl.task_type === 'archive'" class="field half">
-          <label>{{ $t('task_archive_type') }}</label>
-          <select v-model="formControl.archive_type">
-            <option value="">{{ $t('task_archive_type_null') }}</option>
+          <label for="task-archive-type">{{ $t('task_archive_type') }}</label>
+          <select id="task-archive-type" v-model="formControl.archive_type" aria-required="true">
             <option value="zip">{{ $t('task_archive_type_zip') }}</option>
           </select>
         </div>
-
-        <div class="field half">
-          <label>{{ $t('task_error_on_missing_source') }}</label>
-          <select v-model="formControl.error_on_missing_source">
+        <div v-if="fileTask" class="field" :class="formControl.task_type === 'archive' ? 'half' : 'full'">
+          <label for="task-missing-source">{{ $t('task_error_on_missing_source') }}</label>
+          <select id="task-missing-source" v-model="formControl.error_on_missing_source">
             <option value="1">{{ $t('list_yes') }}</option>
             <option value="0">{{ $t('list_no') }}</option>
           </select>
         </div>
 
-        <div class="field half">
-          <label>{{ $t('task_sequence') }}</label>
-          <input id="task-sequence" type="number" v-model="formControl.sequence" :placeholder="$t('task_sequence') + $t('msg_enter')" min="0" :max="sessionMode ? 2147483647 : 999" @input="!sessionMode && (formControl.sequence = $event.target.value.slice(0, 3))" />
-        </div>
-
-        <div v-if="!sessionMode || ['copy','archive'].includes(formControl.task_type)" class="field full">
-          <label>{{ $t('task_source_path') }}</label>
-          <input id="task-source_path" type="text" v-model="formControl.source_path" :placeholder="$t('task_source_path') + $t('msg_enter')" />
-        </div>
-
-        <div v-if="!sessionMode || formControl.task_type !== 'command'" class="field full">
-          <label>{{ $t('task_destination_path') }}</label>
-          <input id="task-destination_path" type="text" v-model="formControl.destination_path" :placeholder="$t('task_destination_path') + $t('msg_enter')" />
-        </div>
-
-        <div v-if="!sessionMode || formControl.task_type === 'housekeep'" class="field half">
-          <label>{{ $t('task_house_keep_days') }}</label>
-          <input id="task-house_keep_days" type="number" v-model="formControl.house_keep_days" :placeholder="$t('task_house_keep_days') + $t('msg_enter')" min="0" max="999" @input="formControl.house_keep_days = $event.target.value.slice(0, 3)" />
-        </div>
-
         <div v-if="formControl.task_type === 'housekeep'" class="field half">
+          <label for="task-house_keep_days">{{ $t('task_retention_days') }}</label>
+          <input id="task-house_keep_days" type="number" v-model="formControl.house_keep_days" :placeholder="$t('task_retention_days') + $t('msg_enter')" min="0" :max="sessionMode ? 2147483647 : 999" aria-required="true" @input="!sessionMode && (formControl.house_keep_days = $event.target.value.slice(0, 3))" />
+        </div>
+        <div v-if="formControl.task_type === 'housekeep'" class="field half task-recursive-field">
           <label class="housekeep-recursive">
             <input id="task-recursive" type="checkbox" v-model="formControl.house_keep_recursive" />
             <span>{{ $t('task_house_keep_recursive') }}</span>
           </label>
         </div>
 
-        <div class="field half">
-          <label>{{ $t('task_status') }}</label>
-          <select id="task-status" v-model="formControl.status">
-          <option v-if="formControl.status === 'error'" value="error">{{ $t('label_error') }}</option>
-            <option value="active">{{ $t('label_active') }}</option>
-            <option value="inactive">{{ $t('label_inactive') }}</option>
-            <option value="manual">{{ $t('label_manual') }}</option>
-          </select>
+        <div class="task-runtime" :class="{ 'task-runtime-legacy': !sessionMode }">
+          <div class="field">
+            <label for="task-sequence">{{ $t('task_sequence') }}</label>
+            <input id="task-sequence" type="number" v-model="formControl.sequence" min="0" :max="sessionMode ? 2147483647 : 999" @input="!sessionMode && (formControl.sequence = $event.target.value.slice(0, 3))" />
+          </div>
+          <div class="field">
+            <label for="task-status">{{ $t('task_status') }}</label>
+            <select id="task-status" v-model="formControl.status">
+              <option v-if="formControl.status === 'error'" value="error">{{ $t('label_error') }}</option>
+              <option value="active">{{ $t('label_active') }}</option>
+              <option value="inactive">{{ $t('label_inactive') }}</option>
+              <option value="manual">{{ $t('label_manual') }}</option>
+            </select>
+          </div>
+          <div v-if="sessionMode" class="field">
+            <label for="task-retry">{{ $t('schedule_retry') }}</label>
+            <input id="task-retry" type="number" min="0" max="100" v-model="formControl.retry_count" />
+          </div>
         </div>
-
-        <div v-if="sessionMode" class="field half"><label for="task-retry">{{ $t('schedule_retry') }}</label><input id="task-retry" type="number" min="0" max="100" v-model="formControl.retry_count" /></div>
         <input type="hidden" v-model="formControl.detail_id" />
         <input type="hidden" v-model="formControl.creator" />
         <input type="hidden" v-model="formControl.modifier" />
@@ -242,7 +238,7 @@ import BoardPagination from "../../misc/BoardPagination.vue";
 import { useI18n } from "vue-i18n";
 import { parseServerTime } from "@/dashboard/utils/deviceStatus";
 import { housekeepOptions } from "@/dashboard/utils/housekeeping";
-import { cronDefaults, formBool, taskPayload, scheduleError } from "@/dashboard/utils/schedulePayload.mjs";
+import { cronDefaults, formBool, taskPayload, taskTypePayload, resetTaskType, isFileTask, scheduleError } from "@/dashboard/utils/schedulePayload.mjs";
 import { manualCreatePayload, manualError, localTimeValue } from "@/dashboard/utils/manualPayload.mjs";
 const saving = ref(false);
 const noticeMessage = ref('');
@@ -274,9 +270,13 @@ const formControl = ref({
 });
 const scheduleList = ref([]);
 const editableSchedules = computed(() => scheduleList.value.filter(s => s.can_edit));
-watch(() => formControl.value.task_type, (type) => {
-  if (type !== "housekeep") formControl.value.house_keep_recursive = false;
-});
+const fileTask = computed(() => isFileTask(formControl.value.task_type));
+const changeTaskType = type => {
+  if (type !== formControl.value.task_type) {
+    Object.assign(formControl.value, resetTaskType(type));
+    errorMessage.value = '';
+  }
+};
 
 // ✅ 스케줄 목록 가져오기
 const fetchScheduleList = async () => {
@@ -360,7 +360,7 @@ const saveTasks = async () => {
   saving.value = true; errorMessage.value = '';
   try {
     Object.assign(formControl.value, housekeepOptions(formControl.value));
-    const payload = sessionMode ? taskPayload(formControl.value, isEditMode.value) : formControl.value;
+    const payload = sessionMode ? taskPayload(formControl.value, isEditMode.value) : { ...formControl.value, ...taskTypePayload(formControl.value) };
     if (isEditMode.value) await putRequest('/dashboard/tasks/update_task', payload, 'json');
     else await postRequest('/dashboard/tasks/insert_task', payload, 'json');
     isModalOpen.value = false;
@@ -492,6 +492,30 @@ const statusBadgeClass = (status) => ({
 -->
 
 <style scoped>
+.task-runtime {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 14px;
+}
+.task-runtime-legacy {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.task-recursive-field {
+  display: flex;
+  align-items: flex-end;
+}
+.task-recursive-field .housekeep-recursive {
+  margin: 0;
+  min-height: var(--field-h);
+}
+@media (max-width: 480px) {
+  .task-runtime, .task-runtime-legacy {
+    grid-template-columns: 1fr;
+  }
+}
 .housekeep-recursive {
   display: flex;
   align-items: center;

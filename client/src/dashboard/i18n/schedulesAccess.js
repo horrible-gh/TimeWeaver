@@ -1,6 +1,7 @@
 export default {
  en: {
   label_error: 'Error',
+  task_cleanup_path: 'Cleanup folder', task_retention_days: 'Retention days',
   schedule_group: 'Group', schedule_sequence: 'Order', schedule_retry: 'Retries',
   schedule_error_invalid_cron: 'Check the schedule fields and their lengths.',
   schedule_error_invalid_task: 'Check the command, paths and retention days.',
@@ -16,6 +17,7 @@ export default {
  },
  ko: {
   label_error: '오류',
+  task_cleanup_path: '정리 대상 폴더', task_retention_days: '보관 일수',
   schedule_group: '그룹', schedule_sequence: '순서', schedule_retry: '재시도',
   schedule_error_invalid_cron: '실행 시각의 값과 길이를 확인하세요.',
   schedule_error_invalid_task: '명령·경로·보관 일수를 확인하세요.',
@@ -31,6 +33,7 @@ export default {
  },
  ja: {
   label_error: 'エラー',
+  task_cleanup_path: '削除対象フォルダー', task_retention_days: '保存日数',
   schedule_group: 'グループ', schedule_sequence: '順序', schedule_retry: '再試行',
   schedule_error_invalid_cron: '実行時刻の値と長さを確認してください。',
   schedule_error_invalid_task: 'コマンド・パス・保存日数を確認してください。',

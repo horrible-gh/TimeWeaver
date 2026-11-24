@@ -65,6 +65,31 @@ def main():
         page.get_by_role('button', name='Add', exact=True).click()
         page.locator('#task-schedule').select_option(sid)
         page.locator('#task-task_name').fill('browser-task')
+        # Verify all four type forms before saving the original command task.
+        def assert_fields(visible):
+            for field in ('command', 'source_path', 'destination_path', 'archive-type',
+                          'missing-source', 'house_keep_days', 'recursive'):
+                expect(page.locator('#task-' + field)).to_have_count(int(field in visible))
+            for field in ('schedule', 'task_name', 'type', 'sequence', 'status', 'retry'):
+                expect(page.locator('#task-' + field)).to_be_visible()
+
+        assert_fields({'command'})
+        page.locator('#task-command').fill('echo stale')
+        page.locator('#task-type').select_option('copy')
+        assert_fields({'source_path','destination_path','missing-source'})
+        page.locator('#task-source_path').fill('/tmp/source')
+        page.locator('#task-destination_path').fill('/tmp/old-target')
+        page.locator('#task-type').select_option('housekeep')
+        assert_fields({'destination_path','house_keep_days','recursive'})
+        expect(page.locator('#task-destination_path')).to_have_value('')
+        expect(page.locator('#task-house_keep_days')).to_have_value('')
+        expect(page.locator('#task-recursive')).not_to_be_checked()
+        page.locator('#task-type').select_option('archive')
+        assert_fields({'source_path','destination_path','archive-type','missing-source'})
+        expect(page.locator('#task-archive-type')).to_have_value('zip')
+        page.locator('#task-type').select_option('command')
+        assert_fields({'command'})
+        expect(page.locator('#task-command')).to_have_value('')
         page.locator('#task-command').fill('echo browser-contract')
         page.locator('#task-sequence').fill('3')
         page.locator('#task-retry').fill('2')
@@ -123,8 +148,7 @@ def main():
         page.locator('#task-schedule').select_option(str(legacy['schedule_id']))
         page.locator('#task-task_name').fill('legacy-housekeep')
         page.locator('#task-type').select_option('housekeep')
-        expect(page.locator('#task-command')).to_have_count(0)
-        expect(page.locator('#task-source_path')).to_have_count(0)
+        assert_fields({'destination_path','house_keep_days','recursive'})
         page.locator('#task-destination_path').fill('/tmp/timeweaver-browser-fixture')
         page.locator('#task-house_keep_days').fill('1')
         page.locator('#task-recursive').check()
@@ -142,6 +166,35 @@ def main():
         hk = next(t for t in ctx.request.get(base + '/dashboard/tasks/get_tasks').json() if t['detail_id'] == hkid)
         assert hk['task_name'] == 'legacy-housekeep-edited' and hk['house_keep_recursive']
         assert hk['schedule_id'] == legacy['schedule_id'] and hk['sequence'] == 20
+        assert not hk['command'] and not hk['source_path'] and not hk['archive_type']
+        assert not hk['error_on_missing_source']
+        # Save and edit actual file tasks as well, against the same API.
+        for kind in ('copy', 'archive'):
+            page.get_by_role('button', name='Add', exact=True).click()
+            page.locator('#task-schedule').select_option(str(legacy['schedule_id']))
+            page.locator('#task-task_name').fill('browser-' + kind)
+            page.locator('#task-type').select_option(kind)
+            assert_fields({'source_path','destination_path','missing-source'} |
+                          ({'archive-type'} if kind == 'archive' else set()))
+            page.locator('#task-source_path').fill('/tmp/source-fixture')
+            page.locator('#task-destination_path').fill('/tmp/destination-fixture')
+            page.locator('#task-missing-source').select_option('0')
+            save()
+            row = page.locator('tr[data-task]').filter(has=page.get_by_text('browser-' + kind, exact=True))
+            expect(row).to_be_visible()
+            fid = row.get_attribute('data-task')
+            row.get_by_role('button', name='Edit', exact=True).click()
+            expect(page.locator('#task-source_path')).to_have_value('/tmp/source-fixture')
+            expect(page.locator('#task-destination_path')).to_have_value('/tmp/destination-fixture')
+            expect(page.locator('#task-missing-source')).to_have_value('0')
+            if kind == 'archive':
+                expect(page.locator('#task-archive-type')).to_have_value('zip')
+            page.locator('#task-task_name').fill('browser-' + kind + '-edited')
+            save()
+            saved = next(t for t in ctx.request.get(base + '/dashboard/tasks/get_tasks').json() if t['detail_id'] == fid)
+            assert not saved['command'] and not saved['house_keep_recursive'] and not saved['error_on_missing_source']
+            assert saved['house_keep_days'] is None
+            assert saved['archive_type'] == ('zip' if kind == 'archive' else None)
         # The schedule edit form must also preserve the original target option.
         page.goto(origin + '/dashboard/schedules')
         expect(schedule_row('legacy-cross-group')).to_be_visible()

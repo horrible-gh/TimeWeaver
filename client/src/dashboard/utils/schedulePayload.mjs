@@ -9,12 +9,41 @@ export function schedulePayload(form, edit) {
   if (edit) result.schedule_id = integer(form.schedule_id);
   return result;
 }
+export const isFileTask = type => type === 'copy' || type === 'archive';
+
+// Switching type is explicit: never reuse a file destination as a cleanup
+// directory, or silently enable deletion with an old retention/recursive value.
+export function resetTaskType(type) {
+  return {
+    task_type: type, command: '', archive_type: type === 'archive' ? 'zip' : null,
+    source_path: '', destination_path: '', error_on_missing_source: '1',
+    house_keep_days: '', house_keep_recursive: false,
+    date_format: null, target_date_format: null, destination_date_format: null,
+  };
+}
+
+// Keep the same field contract as the agent. Use explicit nulls for unused
+// fields (also on edits); preserve existing applicable date formats.
+export function taskTypePayload(form) {
+  const type = form.task_type;
+  const file = isFileTask(type), housekeep = type === 'housekeep';
+  return {
+    command: type === 'command' ? optional(form.command) : null,
+    archive_type: type === 'archive' ? optional(form.archive_type) : null,
+    source_path: file ? optional(form.source_path) : null,
+    destination_path: file || housekeep ? optional(form.destination_path) : null,
+    error_on_missing_source: file && formBool(form.error_on_missing_source),
+    house_keep_days: housekeep ? integer(form.house_keep_days) : null,
+    house_keep_recursive: housekeep && formBool(form.house_keep_recursive),
+    date_format: optional(form.date_format),
+    target_date_format: file ? optional(form.target_date_format) : null,
+    destination_date_format: file || housekeep ? optional(form.destination_date_format) : null,
+  };
+}
 export function taskPayload(form, edit) {
   const result = { ...cron(form), schedule_id: integer(form.schedule_id), task_name: form.task_name || '', status: form.status, task_type: form.task_type,
-    is_error_stop: formBool(form.is_error_stop), error_on_missing_source: formBool(form.error_on_missing_source),
-    sequence: integer(form.sequence) ?? 0, retry_count: integer(form.retry_count) ?? 0,
-    house_keep_days: integer(form.house_keep_days), house_keep_recursive: form.task_type === 'housekeep' && formBool(form.house_keep_recursive) };
-  for (const key of ['command','archive_type','source_path','destination_path','date_format','target_date_format','destination_date_format']) result[key] = optional(form[key]);
+    is_error_stop: formBool(form.is_error_stop), sequence: integer(form.sequence) ?? 0, retry_count: integer(form.retry_count) ?? 0,
+    ...taskTypePayload(form) };
   if (edit) result.detail_id = form.detail_id;
   return result;
 }
