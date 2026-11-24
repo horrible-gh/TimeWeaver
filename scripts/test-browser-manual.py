@@ -15,7 +15,10 @@ def main():
     tokyo = ZoneInfo('Asia/Tokyo')
 
     def local_input(value):
-        return value.astimezone(tokyo).strftime('%Y-%m-%dT%H:%M:%S')
+        local = value.astimezone(tokyo)
+        # Chromium canonicalizes zero seconds away in datetime-local inputs.
+        # Playwright's fill rejects a noncanonical value if the second is 00.
+        return local.strftime('%Y-%m-%dT%H:%M:%S' if local.second else '%Y-%m-%dT%H:%M')
 
     def utc(value):
         return value.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
