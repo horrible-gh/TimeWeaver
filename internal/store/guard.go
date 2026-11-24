@@ -254,7 +254,7 @@ func (s *Store) RepairCriticalSchema(ctx context.Context) (SchemaReport, error) 
 	} else if err != nil {
 		return result, dbError("inspect hidden group", err)
 	}
-	checked, err := inspectCritical(ctx, conn)
+	checked, err = inspectCritical(ctx, conn)
 	result.Issues = checked.Issues
 	return result, err
 }
