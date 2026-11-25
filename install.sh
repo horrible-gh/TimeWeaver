@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# TimeWeaver root installer (Linux).
+# TimeWeaver legacy Python server / standalone client installer (Linux).
+# For the Go agent, see https://github.com/horrible-gh/TimeWeaver-Agent.
 #
 # Thin pass-through wrapper around scripts/setup-linux.sh so the project can be
 # installed directly from the repository root. Every argument is forwarded
@@ -11,7 +12,7 @@
 #
 # Examples:
 #   ./install.sh                                    # interactive
-#   ./install.sh --component agent                  # agent only
+#   ./install.sh --component server                 # legacy Python server only
 #   ./install.sh --component server --non-interactive   # unattended defaults
 #   sudo ./install.sh --install-services --service-user "$USER"
 #

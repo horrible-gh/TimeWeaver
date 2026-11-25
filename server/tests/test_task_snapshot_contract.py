@@ -1,15 +1,38 @@
-"""End-to-end regression for dashboard task writes and agent snapshot validation."""
+"""Dashboard task writes validated by the independent Go agent's real decoder.
+
+Set TW_AGENT_CONTRACT_VALIDATOR to the binary built from
+scripts/testdata/agent-runtime-validator.go in the pinned TimeWeaver-Agent
+checkout. CI also sets TW_REQUIRE_AGENT_CONTRACT_VALIDATOR=1 so a missing binary
+fails instead of skipping these cross-project contract tests.
+"""
 
 import asyncio
 from datetime import datetime
+import json
+import os
+from pathlib import Path
+import subprocess
 
 from fastapi.encoders import jsonable_encoder
+import pytest
 
-from agent.services.time_weaver.sync_coordinator import validate_snapshot
 from repositories.agent_runtime import SnapshotRows
 from schemas.tasks import TaskInsertRequest
 from services.agent.identity_service import DeviceIdentity
 from services.agent.runtime_service import AgentRuntimeService
+
+
+@pytest.fixture(scope="module")
+def agent_validator():
+    binary = os.environ.get("TW_AGENT_CONTRACT_VALIDATOR")
+    if not binary:
+        message = "Set TW_AGENT_CONTRACT_VALIDATOR to the pinned Go-agent decoder binary"
+        if os.environ.get("TW_REQUIRE_AGENT_CONTRACT_VALIDATOR") == "1":
+            pytest.fail(message)
+        pytest.skip(message)
+    path = Path(binary).resolve()
+    assert path.is_file(), "Pinned Go-agent contract validator is missing: " + str(path)
+    return str(path)
 
 
 def _params(calls, fragment):
@@ -107,7 +130,7 @@ class SnapshotRepository:
         return self.rows
 
 
-def _validate_service_snapshot(rows):
+def _validate_service_snapshot(rows, agent_validator):
     result = AgentRuntimeService(SnapshotRepository(rows)).snapshot(
         DeviceIdentity(7, "dev252", 7)
     )
@@ -118,14 +141,23 @@ def _validate_service_snapshot(rows):
             "data": result.data,
         }
     )
-    validated = validate_snapshot(
-        {"envelope": envelope, "etag": result.etag},
-        (7, "dev252"),
+    decoded = subprocess.run(
+        [agent_validator],
+        input=json.dumps({
+            "envelope": envelope,
+            "etag": result.etag,
+            "identity": {"device_id": 7, "device_name": "dev252"},
+        }),
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
     )
-    return result, validated
+    assert decoded.returncode == 0, "Go-agent decoder rejected snapshot: " + decoded.stderr
+    return result
 
 
-def test_command_default_write_snapshot_and_agent_validation(make_tasks_module):
+def test_command_default_write_snapshot_and_agent_validation(make_tasks_module, agent_validator):
     tasks_module, db = make_tasks_module()
 
     asyncio.run(tasks_module.insert_task(TaskInsertRequest(**_payload())))
@@ -135,20 +167,18 @@ def test_command_default_write_snapshot_and_agent_validation(make_tasks_module):
     assert task_params[3] is None
     rows = _snapshot_rows(schedule_params, task_params, archive_type=task_params[3])
 
-    result, validated = _validate_service_snapshot(rows)
+    result = _validate_service_snapshot(rows, agent_validator)
 
     assert result.data["schedules"][0]["details"][0]["task"]["archive_type"] is None
-    assert validated.schedules[0].details[0].archive_type is None
 
 
-def test_snapshot_defensively_normalizes_legacy_command_sentinel(make_tasks_module):
+def test_snapshot_defensively_normalizes_legacy_command_sentinel(make_tasks_module, agent_validator):
     tasks_module, db = make_tasks_module()
     asyncio.run(tasks_module.insert_task(TaskInsertRequest(**_payload())))
     schedule_params = _params(db.committed, "INSERT INTO schedule_detail")
     task_params = _params(db.committed, "INSERT INTO task_detail")
     rows = _snapshot_rows(schedule_params, task_params, archive_type="null")
 
-    result, validated = _validate_service_snapshot(rows)
+    result = _validate_service_snapshot(rows, agent_validator)
 
     assert result.data["schedules"][0]["details"][0]["task"]["archive_type"] is None
-    assert validated.schedules[0].details[0].archive_type is None

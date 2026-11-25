@@ -1,7 +1,7 @@
 name: Go unified server
 on:
   push:
-    branches: [feature/go-server-unified]
+    branches: [main, feature/go-server-unified]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -24,7 +24,7 @@ jobs:
           python-version: '3.12'
       - name: Test the baseline guard
         run: python -m unittest discover -s scripts/tests -p 'test_go_baseline.py' -v
-      - name: Freeze legacy files and inventory routes without starting a server
+      - name: Verify the frozen Python server and inventory routes
         run: |
           mkdir -p artifacts
           python scripts/check-go-baseline.py > artifacts/legacy-contracts.json
@@ -85,12 +85,15 @@ jobs:
       - name: Validate native launch script syntax
         if: runner.os == 'Linux'
         shell: bash
-        run: bash -n scripts/build-go.sh run-go.sh
+        run: |
+          for file in scripts/build-go.sh run-go.sh scripts/setup-linux.sh install.sh; do
+            bash -n "$file"
+          done
       - name: Validate Windows build and launch script syntax
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($file in @('scripts/build-go.ps1', 'run-go.ps1')) {
+          foreach ($file in @('scripts/build-go.ps1', 'run-go.ps1', 'scripts/setup-windows.ps1', 'install.ps1')) {
             $tokens = $null
             $parseErrors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD $file), [ref]$tokens, [ref]$parseErrors) | Out-Null

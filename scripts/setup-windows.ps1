@@ -1,6 +1,6 @@
 param(
     [string]$Python = "python",
-    [ValidateSet("", "all", "server", "agent", "client")]
+    [ValidateSet("", "all", "server", "client")]
     [string]$Component = "",
     # Server config
     [ValidateSet("", "sqlite3", "mysql")]
@@ -22,23 +22,13 @@ param(
     [string]$RedisHost = "",
     [string]$RedisPort = "",
     [string]$RedisDb = "",
-    # Agent config
-    [string]$ServerUrl = "",
-    [string]$DeviceName = "",
-    [string]$RescheduleYear = "",
-    [string]$RescheduleMonth = "",
-    [string]$RescheduleDay = "",
-    [string]$RescheduleHour = "",
-    [string]$RescheduleMinute = "",
-    [string]$RescheduleSecond = "",
-    [string]$LogLevel = "",
     # Client config
     [string]$ApiUrl = "",
     # Behaviour
     [switch]$NonInteractive,
     [switch]$Reconfigure,
     [switch]$SkipUiBuild,
-    # Register server/agent to start on boot (scheduled task running as SYSTEM).
+    # Register the legacy Python server to start on boot (scheduled task running as SYSTEM).
     # Interactive installs also OFFER this as a prompt, so the switch is only
     # needed for unattended/CI runs. Requires an elevated (Administrator) shell.
     [switch]$InstallServices
@@ -138,19 +128,17 @@ function Pick {
 
 # --- Component selection ------------------------------------------------------
 if ($Component -eq "") {
-    $Component = Ask "Install which component? (all/server/agent/client)" "all"
+    $Component = Ask "Install which component? (all/server/client)" "all"
 }
-if ($Component -notin @("all", "server", "agent", "client")) {
-    Write-Error "Invalid component: $Component (expected all|server|agent|client)"
+if ($Component -notin @("all", "server", "client")) {
+    Write-Error "Invalid component: $Component (expected all|server|client). Install the Go agent separately: https://github.com/horrible-gh/TimeWeaver-Agent"
     exit 2
 }
 $DoServer = $Component -in @("all", "server")
-$DoAgent  = $Component -in @("all", "agent")
 $DoClient = $Component -in @("all", "client")
 
 # --- Server database resolution -----------------------------------------------
-# Database selection and credentials belong to the server only. The agent is
-# configured independently with the server API base URL.
+# Database selection and credentials belong to the server only.
 $script:DbType = $DbType
 $script:My = @{ host = ""; port = ""; user = ""; password = ""; database = ""; schema = "" }
 
@@ -243,52 +231,6 @@ REDIS_DB=$rDb
     Write-Host "Wrote server\.env (DB_TYPE=$dbType, all keys populated)."
 }
 
-function Write-AgentConfig {
-    $serverTarget = Join-Path $RootDir "agent\conf\server.json"
-    $twTarget     = Join-Path $RootDir "agent\conf\time_weaver.json"
-
-    # Existing values become the defaults so a re-run is non-destructive if you
-    # just press Enter - but the config step ALWAYS runs (no silent skip).
-    $exTw = $null
-    if (Test-Path -LiteralPath $twTarget) { $exTw = Get-Content -LiteralPath $twTarget -Raw | ConvertFrom-Json }
-    $exSrv = $null
-    if (Test-Path -LiteralPath $serverTarget) { $exSrv = Get-Content -LiteralPath $serverTarget -Raw | ConvertFrom-Json }
-
-    $exDev = if ($exTw) { [string]$exTw.device } else { "" }
-    $dev = Pick $DeviceName "Agent device name" $exDev $env:COMPUTERNAME
-    $exServerUrl = if ($exTw -and $exTw.api) { [string]$exTw.api.base_url } else { "" }
-    $defaultServerUrl = "http://127.0.0.1:$($script:ServerPort)$($script:ServerCtx)"
-    $agentServerUrl = Pick $ServerUrl "TimeWeaver server base URL" $exServerUrl $defaultServerUrl
-
-    $exLevel = if ($exSrv) { [string]$exSrv.log.base.level } else { "" }
-    $level = Pick $LogLevel "Agent log level (debug/info/warning/error)" $exLevel "debug"
-
-    # Full reschedule cron is configurable here - not just the minute field.
-    $exRe = if ($exTw) { $exTw.reschedule } else { $null }
-    $ry = Pick $RescheduleYear   "Reschedule cron - year"   ($(if($exRe){[string]$exRe.year})  ) "*"
-    $rmo= Pick $RescheduleMonth  "Reschedule cron - month"  ($(if($exRe){[string]$exRe.month}) ) "*"
-    $rd = Pick $RescheduleDay    "Reschedule cron - day"    ($(if($exRe){[string]$exRe.day})   ) "*"
-    $rh = Pick $RescheduleHour   "Reschedule cron - hour"   ($(if($exRe){[string]$exRe.hour})  ) "*"
-    $rmi= Pick $RescheduleMinute "Reschedule cron - minute" ($(if($exRe){[string]$exRe.minute})) "*/5"
-    $rs = Pick $RescheduleSecond "Reschedule cron - second" ($(if($exRe){[string]$exRe.second})) "0"
-
-    $cfg = Get-Content -LiteralPath (Join-Path $RootDir "agent\conf\server.sample.json") -Raw | ConvertFrom-Json
-    $cfg.log.base.level = $level; $cfg.log.console.level = $level; $cfg.log.file_timed.level = $level
-    Backup-IfExists $serverTarget
-    ($cfg | ConvertTo-Json -Depth 30) | Set-Content -LiteralPath $serverTarget -Encoding ASCII
-    Write-Host "Wrote agent\conf\server.json (log level=$level)."
-
-    $tw = Get-Content -LiteralPath (Join-Path $RootDir "agent\conf\time_weaver.sample.json") -Raw | ConvertFrom-Json
-    $tw.device = $dev
-    $tw.api.base_url = $agentServerUrl
-    $tw.reschedule.year = $ry; $tw.reschedule.month = $rmo; $tw.reschedule.day = $rd
-    $tw.reschedule.hour = $rh; $tw.reschedule.minute = $rmi; $tw.reschedule.second = $rs
-    Backup-IfExists $twTarget
-    ($tw | ConvertTo-Json -Depth 30) | Set-Content -LiteralPath $twTarget -Encoding ASCII
-    Write-Host "Wrote agent\conf\time_weaver.json (device=$dev, server=$agentServerUrl, reschedule=$ry $rmo $rd $rh $rmi $rs)."
-    Write-Host "  Before first start, set TIMEWEAVER_ENROLLMENT_TOKEN to a one-time token issued by the server."
-}
-
 function Write-ClientConfig {
     $target = Join-Path $RootDir "client\config.js"
     $existingUrl = ""
@@ -325,23 +267,17 @@ $script:ServerCtx  = if ($Context -ne "") { $Context }
 
 # G1: surface the service question in interactive installs instead of hiding it
 # behind a switch. The -InstallServices switch or CI keep unattended runs as-is.
-if (-not $InstallServices -and -not $NonInteractive -and ($DoServer -or $DoAgent)) {
+if (-not $InstallServices -and -not $NonInteractive -and $DoServer) {
     $ans = Ask "Register TimeWeaver to start on boot (Windows scheduled task, runs as SYSTEM)? (y/N)" "N"
     if ($ans -match '^(y|yes)$') { $InstallServices = $true }
 }
 
 # --- Run ----------------------------------------------------------------------
 if ($DoServer) { New-Item -ItemType Directory -Force -Path (Join-Path $RootDir "server\log") | Out-Null }
-if ($DoAgent)  { New-Item -ItemType Directory -Force -Path (Join-Path $RootDir "agent\log")  | Out-Null }
 
 if ($DoServer) {
     Setup-PythonProject (Join-Path $RootDir "server")
     Write-ServerEnv
-}
-
-if ($DoAgent) {
-    Setup-PythonProject (Join-Path $RootDir "agent")
-    Write-AgentConfig
 }
 
 if ($DoClient) {
@@ -363,14 +299,6 @@ cd /d "%~dp0server"
 "@
 }
 
-if ($DoAgent) {
-    Write-CommandFile (Join-Path $RootDir "run-agent.cmd") @"
-@echo off
-cd /d "%~dp0agent"
-".venv\Scripts\python.exe" timeweaver.py
-"@
-}
-
 # --- Service registration (scheduled tasks) ----------------------------------
 $servicesInstalled = $false
 if ($InstallServices) {
@@ -386,10 +314,6 @@ if ($InstallServices) {
             Install-WindowsService "TimeWeaver Server" (Join-Path $RootDir "run-server.cmd") "TimeWeaver FastAPI server (auto-start at boot)."
             $servicesInstalled = $true
         }
-        if ($DoAgent) {
-            Install-WindowsService "TimeWeaver Agent" (Join-Path $RootDir "run-agent.cmd") "TimeWeaver scheduler agent (auto-start at boot)."
-            $servicesInstalled = $true
-        }
     }
 }
 
@@ -402,12 +326,10 @@ if ($servicesInstalled) {
     Write-Host "Services were registered as scheduled tasks (start at boot, run as SYSTEM)."
     Write-Host "Start them now without rebooting:"
     if ($DoServer) { Write-Host "  schtasks /run /tn `"TimeWeaver Server`"" }
-    if ($DoAgent)  { Write-Host "  schtasks /run /tn `"TimeWeaver Agent`"" }
     Write-Host "Inspect them in Task Scheduler, or: schtasks /query /tn `"TimeWeaver Server`""
     if ($DoClient) { Write-Host "Client: serve client\dist, or 'npm run serve' for development" }
 } else {
     Write-Host "Start:"
     if ($DoServer) { Write-Host "  - run-server.cmd  (listens on $($script:ServerHost):$($script:ServerPort))" }
-    if ($DoAgent)  { Write-Host "  - run-agent.cmd  (needs the TimeWeaver server reachable)" }
     if ($DoClient) { Write-Host "  - serve client\dist, or 'npm run serve' for development" }
 }

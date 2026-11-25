@@ -28,15 +28,6 @@ SERVER_PORT="${SERVER_PORT:-}"
 REDIS_HOST="${REDIS_HOST:-}"
 REDIS_PORT="${REDIS_PORT:-}"
 REDIS_DB="${REDIS_DB:-}"
-SERVER_URL="${SERVER_URL:-}"
-DEVICE_NAME="${DEVICE_NAME:-}"
-RESCHEDULE_YEAR="${RESCHEDULE_YEAR:-}"
-RESCHEDULE_MONTH="${RESCHEDULE_MONTH:-}"
-RESCHEDULE_DAY="${RESCHEDULE_DAY:-}"
-RESCHEDULE_HOUR="${RESCHEDULE_HOUR:-}"
-RESCHEDULE_MINUTE="${RESCHEDULE_MINUTE:-}"
-RESCHEDULE_SECOND="${RESCHEDULE_SECOND:-}"
-LOG_LEVEL="${LOG_LEVEL:-}"
 API_URL="${API_URL:-}"
 
 usage() {
@@ -44,7 +35,7 @@ usage() {
 Usage: scripts/setup-linux.sh [options]
 
 Components:
-  --component all|server|agent|client   What to install (prompts if omitted; default all)
+  --component all|server|client         What to install (prompts if omitted; default all)
 
 Config (optional; installer prompts interactively otherwise, sensible defaults applied):
   --db-type sqlite3|mysql               Server database type (default sqlite3)
@@ -58,23 +49,19 @@ Config (optional; installer prompts interactively otherwise, sensible defaults a
   --server-host HOST                    uvicorn bind host (default 0.0.0.0)
   --server-port PORT                    uvicorn bind port (default 8000)
   --redis-host / --redis-port / --redis-db   Optional Redis blacklist store (defaults localhost:6379/0)
-  --server-url URL                      TimeWeaver server base URL for the agent
-  --device-name NAME                    Agent device name (default: hostname)
-  --reschedule-year / --reschedule-month / --reschedule-day
-  --reschedule-hour / --reschedule-minute / --reschedule-second   Agent poll cron fields
-  --log-level LEVEL                     Agent log level (default debug)
   --api-url URL                         Client API server URL
 
 Behaviour:
   --reconfigure                         (kept for compatibility; config always runs now)
   --non-interactive                     Never prompt; use flags/env/defaults
-  --install-services                    Install systemd services (server/agent).
+  --install-services                    Install the legacy Python server systemd service.
                                         Interactive installs also OFFER this as a
                                         prompt, so the flag is only needed for
                                         unattended/CI runs.
   --service-user USER                   systemd service user (default: current user)
 
 Config is generated ready-to-run; no sample files to copy or hand-edit.
+Install the Go agent separately: https://github.com/horrible-gh/TimeWeaver-Agent
 USAGE
 }
 
@@ -99,15 +86,6 @@ while [[ $# -gt 0 ]]; do
     --redis-host) REDIS_HOST="${2:?}"; shift 2 ;;
     --redis-port) REDIS_PORT="${2:?}"; shift 2 ;;
     --redis-db) REDIS_DB="${2:?}"; shift 2 ;;
-    --server-url) SERVER_URL="${2:?}"; shift 2 ;;
-    --device-name) DEVICE_NAME="${2:?}"; shift 2 ;;
-    --reschedule-year) RESCHEDULE_YEAR="${2:?}"; shift 2 ;;
-    --reschedule-month) RESCHEDULE_MONTH="${2:?}"; shift 2 ;;
-    --reschedule-day) RESCHEDULE_DAY="${2:?}"; shift 2 ;;
-    --reschedule-hour) RESCHEDULE_HOUR="${2:?}"; shift 2 ;;
-    --reschedule-minute) RESCHEDULE_MINUTE="${2:?}"; shift 2 ;;
-    --reschedule-second) RESCHEDULE_SECOND="${2:?}"; shift 2 ;;
-    --log-level) LOG_LEVEL="${2:?}"; shift 2 ;;
     --api-url) API_URL="${2:?}"; shift 2 ;;
     --reconfigure) RECONFIGURE=1; shift ;;
     --non-interactive) NONINTERACTIVE=1; shift ;;
@@ -173,16 +151,16 @@ finalize_run_script() {
 }
 
 if [[ -z "$COMPONENT" ]]; then
-  COMPONENT="$(ask "Install which component? (all/server/agent/client)" "all")"
+  COMPONENT="$(ask "Install which component? (all/server/client)" "all")"
 fi
 case "$COMPONENT" in
-  all|server|agent|client) ;;
-  *) echo "Invalid component: $COMPONENT (expected all|server|agent|client)" >&2; exit 2 ;;
+  all|server|client) ;;
+  agent) echo "The Python agent has been retired. Install the Go agent from https://github.com/horrible-gh/TimeWeaver-Agent" >&2; exit 2 ;;
+  *) echo "Invalid component: $COMPONENT (expected all|server|client)" >&2; exit 2 ;;
 esac
 
-DO_SERVER=0; DO_AGENT=0; DO_CLIENT=0
+DO_SERVER=0; DO_CLIENT=0
 [[ "$COMPONENT" == "all" || "$COMPONENT" == "server" ]] && DO_SERVER=1
-[[ "$COMPONENT" == "all" || "$COMPONENT" == "agent" ]] && DO_AGENT=1
 [[ "$COMPONENT" == "all" || "$COMPONENT" == "client" ]] && DO_CLIENT=1
 
 # --- Server database resolution -----------------------------------------------
@@ -271,64 +249,6 @@ EOF
   echo "Wrote server/.env (DB_TYPE=$db_type, all keys populated)."
 }
 
-write_agent_config() {
-  local server_target="$ROOT_DIR/agent/conf/server.json"
-  local tw_target="$ROOT_DIR/agent/conf/time_weaver.json"
-
-  local ex_dev ex_level ex_url dev level server_url default_url
-  ex_dev="$([[ -f "$tw_target" ]] && "$PYTHON_BIN" -c "import json;print(json.load(open('$tw_target')).get('device',''))" 2>/dev/null || true)"
-  dev="$(pick "$DEVICE_NAME" "Agent device name" "$ex_dev" "$(hostname)")"
-  ex_url="$([[ -f "$tw_target" ]] && "$PYTHON_BIN" -c "import json;print(json.load(open('$tw_target')).get('api',{}).get('base_url',''))" 2>/dev/null || true)"
-  default_url="http://127.0.0.1:${RESOLVED_SERVER_PORT}${RESOLVED_SERVER_CTX}"
-  server_url="$(pick "$SERVER_URL" "TimeWeaver server base URL" "$ex_url" "$default_url")"
-  ex_level="$([[ -f "$server_target" ]] && "$PYTHON_BIN" -c "import json;print(json.load(open('$server_target'))['log']['base']['level'])" 2>/dev/null || true)"
-  level="$(pick "$LOG_LEVEL" "Agent log level (debug/info/warning/error)" "$ex_level" "debug")"
-
-  # Full reschedule cron is configurable here - not just the minute field.
-  ex_re() { [[ -f "$tw_target" ]] && "$PYTHON_BIN" -c "import json;print(json.load(open('$tw_target'))['reschedule'].get('$1',''))" 2>/dev/null || true; }
-  local ry rmo rd rh rmi rs
-  ry="$(pick "$RESCHEDULE_YEAR"   "Reschedule cron - year"   "$(ex_re year)"   "*")"
-  rmo="$(pick "$RESCHEDULE_MONTH" "Reschedule cron - month"  "$(ex_re month)"  "*")"
-  rd="$(pick "$RESCHEDULE_DAY"    "Reschedule cron - day"    "$(ex_re day)"    "*")"
-  rh="$(pick "$RESCHEDULE_HOUR"   "Reschedule cron - hour"   "$(ex_re hour)"   "*")"
-  rmi="$(pick "$RESCHEDULE_MINUTE" "Reschedule cron - minute" "$(ex_re minute)" "*/5")"
-  rs="$(pick "$RESCHEDULE_SECOND" "Reschedule cron - second" "$(ex_re second)" "0")"
-
-  backup_if_exists "$server_target"
-  LOG_LEVEL="$level" \
-  "$PYTHON_BIN" - "$ROOT_DIR/agent/conf/server.sample.json" "$server_target" <<'PY'
-import json, os, sys
-src, dst = sys.argv[1], sys.argv[2]
-cfg = json.load(open(src))
-level = os.environ["LOG_LEVEL"]
-for key in ("base", "console", "file_timed"):
-    cfg["log"][key]["level"] = level
-json.dump(cfg, open(dst, "w"), indent=4)
-PY
-  echo "Wrote agent/conf/server.json (log level=$level)."
-
-  backup_if_exists "$tw_target"
-  DEVICE_NAME="$dev" SERVER_URL="$server_url" RE_YEAR="$ry" RE_MONTH="$rmo" RE_DAY="$rd" RE_HOUR="$rh" RE_MINUTE="$rmi" RE_SECOND="$rs" \
-  "$PYTHON_BIN" - "$ROOT_DIR/agent/conf/time_weaver.sample.json" "$tw_target" <<'PY'
-import json, os, sys
-src, dst = sys.argv[1], sys.argv[2]
-cfg = json.load(open(src))
-cfg["device"] = os.environ["DEVICE_NAME"]
-cfg["api"]["base_url"] = os.environ["SERVER_URL"]
-cfg["reschedule"].update({
-    "year": os.environ["RE_YEAR"],
-    "month": os.environ["RE_MONTH"],
-    "day": os.environ["RE_DAY"],
-    "hour": os.environ["RE_HOUR"],
-    "minute": os.environ["RE_MINUTE"],
-    "second": os.environ["RE_SECOND"],
-})
-json.dump(cfg, open(dst, "w"), indent=4)
-PY
-  echo "Wrote agent/conf/time_weaver.json (device=$dev, server=$server_url, reschedule=$ry $rmo $rd $rh $rmi $rs)."
-  echo "  Before first start, set TIMEWEAVER_ENROLLMENT_TOKEN to a one-time token issued by the server."
-}
-
 write_client_config() {
   local target="$ROOT_DIR/client/config.js"
   local existing_url=""
@@ -357,12 +277,6 @@ install_systemd_service() {
     -e "s#__TIMEWEAVER_SERVER_HOST__#${RESOLVED_SERVER_HOST}#g" \
     -e "s#__TIMEWEAVER_SERVER_PORT__#${RESOLVED_SERVER_PORT}#g" \
     "$template")"
-  # G5: an agent-only deployment has no server unit on this host, so drop the
-  # ordering dependency on it - otherwise the agent unit references a unit that
-  # will never exist on this machine (harmless to systemd, but a real smell).
-  if [[ "$DO_SERVER" != "1" ]]; then
-    rendered="${rendered/ timeweaver-server.service/}"
-  fi
   printf '%s\n' "$rendered" > "$target"
   systemctl daemon-reload
   systemctl enable "$target_name"
@@ -373,8 +287,8 @@ install_systemd_service() {
 # it behind a flag nobody discovers. A flag (--install-services) or CI keep the
 # unattended behaviour untouched; we only ask when nothing decided it already.
 maybe_prompt_services() {
-  # Only server/agent have units; nothing to register for a client-only install.
-  if [[ "$DO_SERVER" != "1" && "$DO_AGENT" != "1" ]]; then return; fi
+  # Only the server has a unit; nothing to register for a client-only install.
+  if [[ "$DO_SERVER" != "1" ]]; then return; fi
   if [[ "$INSTALL_SERVICES" == "1" ]]; then return; fi
   if [[ "$NONINTERACTIVE" == "1" ]]; then return; fi
   local ans
@@ -399,12 +313,6 @@ if [[ "$DO_SERVER" == "1" ]]; then
   write_server_env
 fi
 
-if [[ "$DO_AGENT" == "1" ]]; then
-  mkdir -p "$ROOT_DIR/agent/log"
-  setup_python_project "$ROOT_DIR/agent"
-  write_agent_config
-fi
-
 if [[ "$DO_CLIENT" == "1" ]]; then
   pushd "$ROOT_DIR/client" >/dev/null
   npm ci
@@ -422,15 +330,6 @@ EOF
   finalize_run_script "$ROOT_DIR/run-server.sh"
 fi
 
-if [[ "$DO_AGENT" == "1" ]]; then
-  cat > "$ROOT_DIR/run-agent.sh" <<EOF
-#!/usr/bin/env bash
-cd "\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)/agent"
-exec .venv/bin/python timeweaver.py
-EOF
-  finalize_run_script "$ROOT_DIR/run-agent.sh"
-fi
-
 SERVICES_INSTALLED=0
 if [[ "$INSTALL_SERVICES" == "1" ]]; then
   if [[ "$(id -u)" -ne 0 ]]; then
@@ -445,17 +344,12 @@ if [[ "$INSTALL_SERVICES" == "1" ]]; then
     SERVICE_GROUP="$(id -gn "$SERVICE_USER")"
     CHOWN_TARGETS=()
     [[ "$DO_SERVER" == "1" ]] && CHOWN_TARGETS+=("$ROOT_DIR/server")
-    [[ "$DO_AGENT" == "1" ]] && CHOWN_TARGETS+=("$ROOT_DIR/agent")
     [[ "$DO_CLIENT" == "1" ]] && CHOWN_TARGETS+=("$ROOT_DIR/client")
     if [[ ${#CHOWN_TARGETS[@]} -gt 0 ]]; then
       chown -R "$SERVICE_USER:$SERVICE_GROUP" "${CHOWN_TARGETS[@]}"
     fi
     if [[ "$DO_SERVER" == "1" ]]; then
       install_systemd_service "$ROOT_DIR/scripts/systemd/timeweaver-server.service" "timeweaver-server.service"
-      SERVICES_INSTALLED=1
-    fi
-    if [[ "$DO_AGENT" == "1" ]]; then
-      install_systemd_service "$ROOT_DIR/scripts/systemd/timeweaver-agent.service" "timeweaver-agent.service"
       SERVICES_INSTALLED=1
     fi
   fi
@@ -473,7 +367,6 @@ EOF
 if [[ "$SERVICES_INSTALLED" == "1" ]]; then
   SVC_NAMES=()
   [[ "$DO_SERVER" == "1" ]] && SVC_NAMES+=("timeweaver-server")
-  [[ "$DO_AGENT" == "1" ]]  && SVC_NAMES+=("timeweaver-agent")
   echo "Services were registered and enabled (they start automatically on boot)."
   echo "Start them now without rebooting:"
   echo "  sudo systemctl start ${SVC_NAMES[*]}"
@@ -484,6 +377,7 @@ if [[ "$SERVICES_INSTALLED" == "1" ]]; then
 else
   echo "Start:"
   [[ "$DO_SERVER" == "1" ]] && echo "  - ./run-server.sh   (listens on $RESOLVED_SERVER_HOST:$RESOLVED_SERVER_PORT)"
-  [[ "$DO_AGENT" == "1" ]]  && echo "  - ./run-agent.sh    (needs the TimeWeaver server reachable)"
   [[ "$DO_CLIENT" == "1" ]] && echo "  - serve client/dist, or 'npm run serve' for development"
 fi
+
+exit 0

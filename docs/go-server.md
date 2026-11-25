@@ -5,9 +5,11 @@ dashboard APIs and Agent API v1 on one listener. The `serve` command performs
 readiness checks, opens the listener, starts the execution claim sweeper, and
 drains requests on shutdown. It works with SQLite, MySQL and MariaDB.
 
-The work branch is `feature/go-server-unified`. Existing Python sources and SQL
-remain frozen as migration references. The independent Go agent remains in
-[TimeWeaver-Agent](https://github.com/horrible-gh/TimeWeaver-Agent).
+The unified server is available on `main`. The legacy Python server and SQL
+remain migration references. Install the independent Go agent from
+[TimeWeaver-Agent](https://github.com/horrible-gh/TimeWeaver-Agent); its README
+contains the agent's configuration and service instructions. The old Python
+`agent/` directory and its installer/launcher integration have been retired.
 
 ## Build
 
@@ -114,7 +116,7 @@ Existing agent credentials depend on the same signing keys and preserved DB.
 2. Review `check --env server/.env` and `migrate status --env server/.env` against
    the intended database. Rehearse the setup on a restored copy when upgrading
    a historical installation.
-3. Build this branch and run `setup --env server/.env --allow-write`. This runs
+3. Build `main` and run `setup --env server/.env --allow-write`. This runs
    the known legacy migrations, repairs supported critical schema omissions,
    initializes/upgrades the human access schema, and claims the seed
    administrator if needed. Existing non-seed passwords remain unchanged.
@@ -278,7 +280,7 @@ precondition for `serve`.
 ## Troubleshooting and rollback
 
 `serve is disabled` or a `dev-migration (unknown)` version identifies an old
-executable. Update this branch and rebuild; pulling source alone does not
+executable. Update `main` and rebuild; pulling source alone does not
 replace a previously built binary. The current runners rebuild by default.
 
 A readiness failure provides the missing setup stage before any listener is
@@ -300,7 +302,7 @@ agent endpoint and restart flow on Windows and Linux with the embedded UI.
 It also runs SQLite and disposable MySQL/MariaDB migration/service tests,
 browser workflows, native OS-account authentication, and the pinned independent
 Go agent end-to-end fixture. The pinned agent commit is
-`aa509b196c1caf35cc28b38f8015994da8906819`.
+`ae4778a3b674beb6e8075de5c71ec6facf37008d`.
 
 Use the exact commit's GitHub Actions results for executed evidence. These
 fixtures verify the shipped paths; the actual deployment's database inventory,

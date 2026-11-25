@@ -56,10 +56,11 @@ endpoints in legacy binaries are advisory, not an execution security boundary;
 stop legacy agents before upgrading and never share one device's credentials
 between two agents. Already-running work is not retroactively cancelled.
 
-The legacy Python agent does not implement the new feature. Keep the checkbox
-off for that agent, or migrate it to the updated Go agent. Existing non-recursive
-work remains compatible. No schema-version bump or database credentials on the
-agent are required.
+The retired Python agent does not implement this feature and is no longer
+shipped here. Install the current
+[Go agent](https://github.com/horrible-gh/TimeWeaver-Agent) before enabling it.
+Existing non-recursive work remains compatible. No schema-version bump or
+database credentials on the agent are required.
 
 ## Delete empty directories (unified Go server)
 

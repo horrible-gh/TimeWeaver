@@ -7,11 +7,6 @@ server/.env
 server/.env.*
 !server/.env.sample
 
-# Agent local configuration
-agent/conf/*
-!agent/conf/*.sample.json
-!agent/conf/version.json
-
 # Server local configuration
 server/conf/*
 !server/conf/*.sample.json
@@ -24,7 +19,6 @@ client/config.js
 *.log.*
 log/
 logs/
-agent/log/
 server/log/
 server/logs/
 

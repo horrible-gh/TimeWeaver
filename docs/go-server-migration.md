@@ -1,9 +1,9 @@
 # Go server migration
 
-Work branch: `feature/go-server-unified`.
+Implementation branch: `feature/go-server-unified`, now merged into `main`.
 Baseline: `d6bdb751e08e68ff98781b5b41e5f90b09383ce2`.
 
-This branch implements the architecture reviewed on 2026-11-16. The unified
+The Go server implements the architecture reviewed on 2026-11-16. The unified
 executable now starts the real UI and API server with `serve`. Follow
 [Go server setup and operation](go-server.md) to build, prepare the database,
 configure Caddy and run it under SpawnPoint. First-time setup remains explicit;
@@ -73,9 +73,10 @@ real-file SQLite and disposable MySQL/MariaDB integration, Python
 interoperability, embedded-browser workflows, native Linux/Windows account
 authentication and an actual pinned Go agent. Consult the exact commit's
 workflow run for executed results; a static route inventory alone is
-not runtime compatibility. The read-only baseline guard continues to compare
-tracked legacy server/agent files and embedded SQL against the pinned baseline.
-It never imports the Python app or opens a database.
+not runtime compatibility. The read-only baseline guard compares the retained
+legacy `server/` files against the pinned baseline, with the one test adaptation
+described below. It never imports the Python app or opens a database. Go tests
+also verify that the embedded legacy SQL matches the original server resources.
 
 Deployment still requires checking the actual DB inventory (including exact
 historical SQLite shapes), host configuration and backup restoration. Those
@@ -90,10 +91,25 @@ python -m unittest discover -s scripts/tests -p 'test_go_baseline.py' -v
 python scripts/check-go-baseline.py
 ```
 
-Legacy SQL and Python sources are frozen while their behavior is being ported.
-New implementation belongs outside `server/` and `agent/`. Do not weaken the
-baseline guard merely to make a failing migration test pass. No Python code is
-removed before replacement and rollback verification have both been completed.
+### Python agent retirement
+
+After the Go server was merged, the obsolete Python `agent/` implementation,
+root launcher, service unit and installer/Compose hooks were removed. Device
+execution uses the independent
+[TimeWeaver-Agent](https://github.com/horrible-gh/TimeWeaver-Agent). The retired
+source remains available in
+[the last pre-removal tree, `8420a34`](https://github.com/horrible-gh/TimeWeaver/tree/8420a3410db18a3ce53ba4b185a334336695b3c9/agent).
+The server-side `internal/agentapi/` package and the real Go-agent end-to-end
+checks remain in place.
+
+The baseline guard now covers `server/` instead of `server/` plus the retired
+`agent/`. Its sole file exception is
+`server/tests/test_task_snapshot_contract.py`, which previously imported the
+deleted Python agent decoder and now validates snapshots with the independent
+Go agent decoder. The retained server application, SQL and all other server
+tests remain frozen against `d6bdb751e08e68ff98781b5b41e5f90b09383ce2`.
+New server implementation belongs outside `server/`; do not broaden this
+exception merely to make a failing migration test pass.
 
 ## Initial Go implementation (historical)
 
@@ -153,8 +169,8 @@ full-browser workflows and agent execution were added in subsequent slices.
 
 Implemented after the initial UI/config slice:
 
-- `internal/store` embeds all 54 legacy SQL files byte-for-byte. The original
-  `server/` and `agent/` remain untouched. Tests verify both copies, all 31 MySQL
+- `internal/store` embeds all 54 legacy SQL files byte-for-byte. At this stage,
+  the original `server/` and `agent/` were untouched. Tests verify both SQL copies, all 31 MySQL
   and 7 SQLite migration files, and 39 MySQL query keys.
 - SQL splitting respects quotes, escaped quotes and comments; placeholder
   conversion does not alter string literals or date formats. Unsupported

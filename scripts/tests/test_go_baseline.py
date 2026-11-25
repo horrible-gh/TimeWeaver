@@ -25,7 +25,8 @@ class BaselineTests(unittest.TestCase):
 async def login():
     pass
 ''')
-        self.write("agent/main.py", "# retained Python agent\n")
+        self.write("agent/main.py", "# historical Python agent\n")
+        self.write("server/tests/test_task_snapshot_contract.py", "# historical agent contract test\n")
         self.run_git("add", ".")
         self.run_git("commit", "-m", "fixture")
         self.ref = self.run_git("rev-parse", "HEAD").strip()
@@ -40,7 +41,8 @@ async def login():
 
     def test_inventory_does_not_import_server(self):
         result = baseline.verify(self.root, self.ref)
-        self.assertEqual(result["checked_files"], 3)
+        self.assertEqual(result["checked_files"], 2)
+        self.assertEqual(result["adapted_test_files"], ["server/tests/test_task_snapshot_contract.py"])
         self.assertEqual([r["path"] for r in result["routes"]], ["{CONTEXT}/login", "{CONTEXT}/login/"])
         self.assertTrue(all(len(f["sha256"]) == 64 for f in result["frozen_files"]))
 
@@ -50,8 +52,21 @@ async def login():
             baseline.verify(self.root, self.ref)
 
     def test_deleted_source_is_rejected(self):
+        self.run_git("rm", "server/routers/login/login.py")
+        with self.assertRaisesRegex(ValueError, "deleted: server/routers/login/login.py"):
+            baseline.verify(self.root, self.ref)
+
+    def test_retired_python_agent_can_be_removed(self):
         self.run_git("rm", "agent/main.py")
-        with self.assertRaisesRegex(ValueError, "deleted: agent/main.py"):
+        self.assertEqual(baseline.verify(self.root, self.ref)["checked_files"], 2)
+
+    def test_snapshot_test_can_use_the_go_agent(self):
+        self.write("server/tests/test_task_snapshot_contract.py", "# standalone Go agent contract test\n")
+        self.assertEqual(baseline.verify(self.root, self.ref)["checked_files"], 2)
+
+    def test_adapted_snapshot_test_must_still_exist(self):
+        self.run_git("rm", "server/tests/test_task_snapshot_contract.py")
+        with self.assertRaisesRegex(ValueError, "deleted: server/tests/test_task_snapshot_contract.py"):
             baseline.verify(self.root, self.ref)
 
     def test_new_legacy_migration_is_rejected(self):
@@ -63,20 +78,20 @@ async def login():
     def test_new_go_files_are_allowed(self):
         self.write("internal/store/store.go", "package store\n")
         self.run_git("add", ".")
-        self.assertEqual(baseline.verify(self.root, self.ref)["checked_files"], 3)
+        self.assertEqual(baseline.verify(self.root, self.ref)["checked_files"], 2)
 
     def test_missing_history_fails_closed(self):
         with self.assertRaisesRegex(ValueError, "baseline unavailable"):
             baseline.verify(self.root, "0" * 40)
 
     def test_symlink_does_not_read_external_content(self):
-        target = self.root / "agent/main.py"
+        target = self.root / "server/routers/login/login.py"
         target.unlink()
         try:
             target.symlink_to(self.root / "does-not-exist")
         except OSError:
             self.skipTest("symlinks unavailable")
-        with self.assertRaisesRegex(ValueError, "symlink: agent/main.py"):
+        with self.assertRaisesRegex(ValueError, "symlink: server/routers/login/login.py"):
             baseline.verify(self.root, self.ref)
 
 

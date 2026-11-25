@@ -63,24 +63,5 @@ services:
     depends_on:
       - server
 
-  agent:
-    profiles: ["agent"]
-    build:
-      context: ./agent
-    environment:
-      TIMEWEAVER_SERVER_URL: "${TIMEWEAVER_SERVER_URL:-http://server:8000${CONTEXT:-/time_weaver}}"
-      TIMEWEAVER_ENROLLMENT_TOKEN: "${TIMEWEAVER_ENROLLMENT_TOKEN:-}"
-      DEVICE_NAME: ${DEVICE_NAME:-test}
-      RESCHEDULE_YEAR: ${RESCHEDULE_YEAR:-*}
-      RESCHEDULE_MONTH: ${RESCHEDULE_MONTH:-*}
-      RESCHEDULE_DAY: ${RESCHEDULE_DAY:-*}
-      RESCHEDULE_HOUR: ${RESCHEDULE_HOUR:-*}
-      RESCHEDULE_MINUTE: ${RESCHEDULE_MINUTE:-*/5}
-      RESCHEDULE_SECOND: ${RESCHEDULE_SECOND:-0}
-    depends_on:
-      server:
-        condition: service_started
-    restart: unless-stopped
-
 volumes:
   mysql-data:

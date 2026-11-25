@@ -1,11 +1,13 @@
 <#
 .SYNOPSIS
-    TimeWeaver root installer (Windows).
+    TimeWeaver legacy Python server / standalone client installer (Windows).
 
 .DESCRIPTION
     Thin pass-through wrapper around scripts\setup-windows.ps1 so the project can
     be installed directly from the repository root. Every argument is forwarded
     to the setup script unchanged.
+
+    For the Go agent, see https://github.com/horrible-gh/TimeWeaver-Agent.
 
     Run with no arguments for an interactive install (it asks which component to
     install and writes ready-to-run config for you - nothing to copy or edit).
@@ -15,8 +17,8 @@
     Interactive install: pick a component, answer a few prompts (Enter = default).
 
 .EXAMPLE
-    .\install.ps1 -Component agent
-    Install only the scheduler agent (no Node/UI build required).
+    .\install.ps1 -Component server
+    Install only the legacy Python server (no Node/UI build required).
 
 .EXAMPLE
     .\install.ps1 -Component server -NonInteractive

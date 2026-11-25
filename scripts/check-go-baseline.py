@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only legacy source/route inventory; never imports or starts the server."""
+"""Read-only legacy server/route inventory; never imports or starts the server."""
 import argparse
 import ast
 import hashlib
@@ -9,7 +9,13 @@ import subprocess
 import sys
 
 BASELINE = "d6bdb751e08e68ff98781b5b41e5f90b09383ce2"
-FROZEN_ROOTS = ("server", "agent")
+# The retired Python agent is available in Git history. Keep the Python server
+# and its SQL as the compatibility reference for the unified Go server.
+FROZEN_ROOTS = ("server",)
+# This regression now validates snapshots with the standalone Go agent. Allow
+# its contents to evolve, but still reject deletion, replacement by a symlink,
+# and changes to every other tracked legacy server file.
+FROZEN_EXCLUSIONS = frozenset({"server/tests/test_task_snapshot_contract.py"})
 PREFIXES = {
     "login/login.py": "/login",
     "login/logout.py": "/logout",
@@ -98,6 +104,8 @@ def verify(root, baseline=BASELINE):
         if not source.is_file():
             problems.append("missing: " + name)
             continue
+        if name in FROZEN_EXCLUSIONS:
+            continue
         original = git(root, "cat-file", "blob", sha)
         checksum = hashlib.sha256(original).hexdigest()
         if hashlib.sha256(source.read_bytes()).hexdigest() != checksum:
@@ -109,6 +117,7 @@ def verify(root, baseline=BASELINE):
         "baseline_commit": baseline,
         "checked_files": len(checksums),
         "frozen_files": checksums,
+        "adapted_test_files": sorted(FROZEN_EXCLUSIONS & expected.keys()),
         "routes": inventory(root),
         "scope": "static inventory only; not a runtime API or database compatibility test",
     }
